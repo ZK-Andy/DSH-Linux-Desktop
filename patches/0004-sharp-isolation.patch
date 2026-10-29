@@ -1,0 +1,237 @@
+diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
+new file mode 100644
+index 00000000..91986211
+--- /dev/null
++++ b/apps/desktop/resources/sharp-worker.cjs
+@@ -0,0 +1,57 @@
++'use strict'
++
++/**
++ * Isolated Sharp runner. Electron's Linux process links its own glib, which
++ * aborts libvips (electron/electron#46323); this child runs plain Node instead.
++ */
++
++const { createRequire } = require('node:module')
++const { join } = require('node:path')
++const { createInterface } = require('node:readline')
++
++const moduleDirectory = process.env.DSH_SHARP_MODULE_DIR
++if (moduleDirectory === undefined || moduleDirectory === '') {
++  process.stderr.write('sharp worker: DSH_SHARP_MODULE_DIR is required\n')
++  process.exit(2)
++}
++const sharp = createRequire(join(moduleDirectory, 'sharp-worker.cjs'))('sharp')
++
++/**
++ * Run one recorded Sharp pipeline and reply with the terminal result.
++ * @param {object} request - Recorded input, pipeline operations, and terminal call.
++ * @returns {Promise<object>} Serialized result for the desktop process.
++ */
++async function execute(request) {
++  let pipeline = sharp(Buffer.from(request.input, 'base64'), request.options ?? {})
++  for (const op of request.ops) pipeline = pipeline[op.name](...(op.args ?? []))
++  const value = await pipeline[request.terminal](...(request.args ?? []))
++  if (Buffer.isBuffer(value)) return { kind: 'buffer', base64: value.toString('base64') }
++  if (value !== null && typeof value === 'object' && Buffer.isBuffer(value.data)) {
++    return { kind: 'object', value: { ...value, data: value.data.toString('base64') } }
++  }
++  return { kind: 'value', value }
++}
++
++const lines = createInterface({ input: process.stdin })
++lines.on('line', (line) => {
++  let request
++  try {
++    request = JSON.parse(line)
++  } catch (error) {
++    process.stderr.write(`sharp worker: malformed request: ${String(error)}\n`)
++    return
++  }
++  execute(request).then(
++    (result) => { process.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result })}\n`) },
++    (error) => {
++      process.stdout.write(`${JSON.stringify({
++        id: request.id,
++        ok: false,
++        error: {
++          message: error instanceof Error ? error.message : String(error),
++          code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
++        },
++      })}\n`)
++    },
++  )
++})
+diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
+new file mode 100644
+index 00000000..2ac76c7e
+--- /dev/null
++++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
+@@ -0,0 +1,152 @@
++/** Remote Sharp runner: keeps libvips out of Electron's process (electron/electron#46323). */
++
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
++import { join } from 'node:path'
++import { createInterface } from 'node:readline'
++import type sharp from 'sharp'
++
++type SharpFactory = typeof sharp
++type SharpInstance = ReturnType<SharpFactory>
++
++/** One recorded builder call replayed by the worker. */
++interface RecordedCall {
++  readonly name: string
++  readonly args: readonly unknown[]
++}
++
++/** Calls that end a pipeline and cross the process boundary. */
++const TERMINAL_CALLS = new Set(['toBuffer', 'toFile', 'metadata', 'stats'])
++
++/** Resources directory reported by Electron; absent under plain Node. */
++const resourcesDirectory: string | undefined = Reflect.get(process, 'resourcesPath') as string | undefined
++
++function configured(name: string, fallback: string): string {
++  const explicit = process.env[name]
++  if (explicit !== undefined && explicit !== '') return explicit
++  if (resourcesDirectory === undefined) {
++    throw new Error(`sharp runner: ${name} is required outside a packaged application`)
++  }
++  return join(resourcesDirectory, fallback)
++}
++
++interface WorkerReply {
++  readonly id: number
++  readonly ok: boolean
++  readonly result?: { readonly kind: 'buffer'; readonly base64: string }
++    | { readonly kind: 'object'; readonly value: Record<string, unknown> }
++    | { readonly kind: 'value'; readonly value: unknown }
++  readonly error?: { readonly message: string; readonly code?: string }
++}
++
++/** Serializes pipelines over one long-lived worker process. */
++class SharpWorkerClient {
++  private child: ChildProcessWithoutNullStreams | undefined
++  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
++  private sequence = 0
++
++  constructor(
++    private readonly nodeBinary: string,
++    private readonly workerScript: string,
++    private readonly moduleDirectory: string,
++  ) {}
++
++  private start(): ChildProcessWithoutNullStreams {
++    const child = spawn(this.nodeBinary, [this.workerScript], {
++      stdio: ['pipe', 'pipe', 'pipe'],
++      env: { ...process.env, DSH_SHARP_MODULE_DIR: this.moduleDirectory },
++    })
++    createInterface({ input: child.stdout }).on('line', (line) => { this.settle(line) })
++    child.stderr.on('data', (chunk: Buffer) => { process.stderr.write(chunk) })
++    // The worker must not keep its parent alive once the Host shuts down.
++    child.unref()
++    for (const stream of [child.stdin, child.stdout, child.stderr]) {
++      const unref = Reflect.get(stream, 'unref')
++      if (typeof unref === 'function') unref.call(stream)
++    }
++    child.once('exit', (code) => { this.rejectAll(new Error(`sharp worker exited with ${String(code ?? 'signal')}`)) })
++    child.once('error', (error) => { this.rejectAll(error) })
++    return child
++  }
++
++  private settle(line: string): void {
++    const reply = JSON.parse(line) as WorkerReply
++    const waiter = this.pending.get(reply.id)
++    if (waiter === undefined) return
++    this.pending.delete(reply.id)
++    if (!reply.ok) {
++      const error = new Error(reply.error?.message ?? 'sharp worker failed')
++      if (reply.error?.code !== undefined) Reflect.set(error, 'code', reply.error.code)
++      waiter.reject(error)
++      return
++    }
++    const result = reply.result
++    if (result === undefined) { waiter.resolve(undefined); return }
++    if (result.kind === 'buffer') { waiter.resolve(Buffer.from(result.base64, 'base64')); return }
++    if (result.kind === 'object') {
++      const { data, ...rest } = result.value
++      waiter.resolve(typeof data === 'string' ? { ...rest, data: Buffer.from(data, 'base64') } : result.value)
++      return
++    }
++    waiter.resolve(result.value)
++  }
++
++  private rejectAll(error: Error): void {
++    this.child = undefined
++    for (const waiter of this.pending.values()) waiter.reject(error)
++    this.pending.clear()
++  }
++
++  call(input: Buffer, options: unknown, calls: readonly RecordedCall[], terminal: string,
++    args: readonly unknown[]): Promise<unknown> {
++    this.child ??= this.start()
++    const id = ++this.sequence
++    return new Promise((resolve, reject) => {
++      this.pending.set(id, { resolve, reject })
++      this.child?.stdin.write(`${JSON.stringify({
++        id,
++        input: input.toString('base64'),
++        options,
++        ops: calls,
++        terminal,
++        args,
++      })}\n`)
++    })
++  }
++}
++
++/**
++ * Build a fluent Sharp stand-in whose pipeline executes in the worker process.
++ * @param client - Worker connection shared by every pipeline.
++ * @param input - Encoded source bytes.
++ * @param options - Constructor options forwarded to the worker.
++ * @param calls - Recorded builder calls, replayed in order.
++ * @returns A Sharp instance that records calls until a terminal operation runs.
++ */
++function builder(client: SharpWorkerClient, input: Buffer, options: unknown, calls: readonly RecordedCall[]): SharpInstance {
++  const target = function recordedPipeline(): void {}
++  const handler: ProxyHandler<typeof target> = {
++    get(_target, property) {
++      if (typeof property !== 'string' || property === 'then') return undefined
++      if (property === 'clone') return () => builder(client, input, options, calls)
++      return (...args: unknown[]): unknown => {
++        if (TERMINAL_CALLS.has(property)) return client.call(input, options, calls, property, args)
++        return builder(client, input, options, [...calls, { name: property, args }])
++      }
++    },
++  }
++  return new Proxy(target, handler) as unknown as SharpInstance
++}
++
++/**
++ * Create the Sharp factory used by attachment decoding.
++ * @returns A factory that forwards every pipeline to the isolated worker.
++ */
++export function createSharpRunner(): SharpFactory {
++  const client = new SharpWorkerClient(
++    configured('DSH_SHARP_NODE_BIN', join('runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node')),
++    configured('DSH_SHARP_WORKER', 'sharp-worker.cjs'),
++    configured('DSH_SHARP_MODULE_DIR', join('app.asar.unpacked', 'node_modules')),
++  )
++  return ((input: Buffer | Uint8Array, options?: unknown) =>
++    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
++}
+diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
+index 798b21ae..7649ffff 100644
+--- a/packages/attachment/attachment-local/src/sharp.ts
++++ b/packages/attachment/attachment-local/src/sharp.ts
+@@ -1,7 +1,7 @@
+-/** Process-realm lazy access to Sharp's CommonJS-compatible entry. */
++/** Process-realm access to Sharp through an isolated Node child. */
+ 
+ import type sharp from 'sharp'
+-import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
++import { createSharpRunner } from './sharp-worker-client.ts'
+ 
+-/** Load Sharp on the first raster operation and retain its callable export. */
+-export const requireSharp = createLazyRequire<typeof sharp>('sharp', import.meta.url)
++/** Create the Sharp factory backed by the worker; see sharp-worker-client.ts. */
++export const requireSharp = (): typeof sharp => createSharpRunner()

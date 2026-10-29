@@ -21,3 +21,6 @@ dist/
 *.swp
 .idea/
 .vscode/
+
+# 本地运行环境（XDG 重定向、日志、测试输出）
+.xdg/
