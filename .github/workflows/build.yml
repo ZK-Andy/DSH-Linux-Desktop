@@ -85,6 +85,15 @@ jobs:
           DSH_DESKTOP_BUILD_DIRTY: '0'
         run: pnpm --dir apps/desktop run package:linux:x64
 
+      - name: Debug packaged office engine
+        if: always()
+        run: |
+          set -x
+          T=upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts
+          find "$T" -maxdepth 8 -name 'libreoffice-kit*' 2>/dev/null | head -40
+          ls -la "$T/linux-unpacked/resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai" 2>/dev/null || true
+          ls -la "$T/linux-unpacked/resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai/libreoffice-kit-linux-x64-glibc" 2>/dev/null || true
+
       - name: Inspect rpm
         run: |
           set -euo pipefail
