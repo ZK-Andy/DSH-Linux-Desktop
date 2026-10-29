@@ -30,3 +30,4 @@ dist/
 .bridge/
 .verify/
 .verify*/
+.regen*/

@@ -20,7 +20,6 @@ permissions:
 
 env:
   UPSTREAM_TAG: ${{ inputs.upstream_tag || '' }}
-  DSH_DESKTOP_BUILD_VERSION: 0.2.2-alpha.2
 
 jobs:
   rpm:
@@ -39,7 +38,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm xz-utils
+          sudo apt-get install -y --no-install-recommends rpm xz-utils cpio
           rpmbuild --version
 
       - uses: actions/setup-node@v4
@@ -50,6 +49,16 @@ jobs:
         with:
           version: 11.28.5
           run_install: false
+
+      # 缓存放在 fetch 之后：key 要用上游的 pnpm-lock.yaml，而它只有克隆完才存在。
+      # 之前在 fetch 之前算 hashFiles 得到空串，key 退化成常量，缓存永远不更新。
+      - name: Fetch upstream
+        run: |
+          if [ -n "${UPSTREAM_TAG}" ]; then
+            echo "${UPSTREAM_TAG}" > upstream-tag
+          fi
+          scripts/fetch-upstream.sh
+          echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
         uses: actions/cache@v4
@@ -72,14 +81,6 @@ jobs:
           restore-keys: |
             electron-
 
-      - name: Fetch upstream
-        run: |
-          if [ -n "${UPSTREAM_TAG}" ]; then
-            echo "${UPSTREAM_TAG}" > upstream-tag
-          fi
-          scripts/fetch-upstream.sh
-          echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-
       - name: Apply patches
         run: scripts/apply-patches.sh
 
@@ -96,16 +97,15 @@ jobs:
           DSH_DESKTOP_BUILD_DIRTY: '0'
         run: scripts/build.sh --rpm
 
-      - name: Inspect rpm
+      - name: Verify rpm (static)
         run: |
           set -euo pipefail
           rpm=$(find upstream/apps/desktop/.desktop-build/targets/linux-x64 -name '*.rpm' | head -1)
           test -n "$rpm"
-          rpm -qip "$rpm"
-          rpm -qp --requires "$rpm"
-          rpm -qlp "$rpm" | grep -E '/usr/share/applications/|chrome-sandbox' | head
           mkdir -p dist
           cp "$rpm" dist/
+          bash scripts/verify.sh "dist/$(basename "$rpm")"
+          rpm -qip "$rpm"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,6 @@
 diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
 new file mode 100644
-index 00000000..91986211
+index 0000000..9198621
 --- /dev/null
 +++ b/apps/desktop/resources/sharp-worker.cjs
 @@ -0,0 +1,57 @@
@@ -61,15 +61,56 @@ index 00000000..91986211
 +    },
 +  )
 +})
+diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
+index 0a832a3..f68fd9f 100644
+--- a/apps/desktop/scripts/electron-builder-config.mjs
++++ b/apps/desktop/scripts/electron-builder-config.mjs
+@@ -83,7 +83,10 @@ export function createElectronBuilderConfig(
+   let dshDestination
+   let windowsCode = []
+   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
+-    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
++    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
++    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
++    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
++    '**/node_modules/sharp/**', '**/node_modules/@img/**']
+   const windowsSigner = packagesWindows && !unsigned
+     ? createWindowsTokenSigner({
+         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
+@@ -131,10 +134,10 @@ export function createElectronBuilderConfig(
+     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
+     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
+     directories: { output: output.directory },
+-    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
+-    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
+-    // subprocesses load readable outside Electron.
+-    asar: resolvedPlatform !== 'linux',
++    // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
++    // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
++    // cannot read inside the archive (see the asarUnpack patterns below).
++    asar: true,
+     electronDist: buildPaths.electron,
+     electronFuses: { runAsNode: true },
+     beforeBuild: async () => {
+@@ -176,6 +179,8 @@ export function createElectronBuilderConfig(
+       // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
+       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
+       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
++      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
+     ],
+     mac: {
+       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
 diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 new file mode 100644
-index 00000000..2ac76c7e
+index 0000000..96c249d
 --- /dev/null
 +++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,176 @@
 +/** Remote Sharp runner: keeps libvips out of Electron's process (electron/electron#46323). */
 +
 +import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
++import { existsSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { createInterface } from 'node:readline'
 +import type sharp from 'sharp'
@@ -89,13 +130,28 @@ index 00000000..2ac76c7e
 +/** Resources directory reported by Electron; absent under plain Node. */
 +const resourcesDirectory: string | undefined = Reflect.get(process, 'resourcesPath') as string | undefined
 +
-+function configured(name: string, fallback: string): string {
++/** Places a packaged build can keep the hoisted sharp module, relative to the resources directory. */
++const PACKAGED_MODULE_DIRECTORIES = [
++  join('app.asar.unpacked', 'dsh', 'node_modules'),
++  join('app.asar.unpacked', 'node_modules'),
++  join('app.asar.unpacked', 'dsh', 'packages', 'attachment', 'attachment-local', 'node_modules'),
++]
++
++/**
++ * Locate the unpacked sharp module inside a packaged application.
++ * @returns The first candidate directory that actually contains sharp, or undefined outside a package.
++ */
++function packagedModuleDirectory(): string | undefined {
++  if (resourcesDirectory === undefined) return undefined
++  return PACKAGED_MODULE_DIRECTORIES
++    .map((relative) => join(resourcesDirectory, relative))
++    .find((candidate) => existsSync(join(candidate, 'sharp', 'package.json')))
++}
++
++function configured(name: string, fallback: string): string | undefined {
 +  const explicit = process.env[name]
 +  if (explicit !== undefined && explicit !== '') return explicit
-+  if (resourcesDirectory === undefined) {
-+    throw new Error(`sharp runner: ${name} is required outside a packaged application`)
-+  }
-+  return join(resourcesDirectory, fallback)
++  return resourcesDirectory === undefined ? undefined : join(resourcesDirectory, fallback)
 +}
 +
 +interface WorkerReply {
@@ -211,16 +267,24 @@ index 00000000..2ac76c7e
 + * @returns A factory that forwards every pipeline to the isolated worker.
 + */
 +export function createSharpRunner(): SharpFactory {
-+  const client = new SharpWorkerClient(
-+    configured('DSH_SHARP_NODE_BIN', join('runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node')),
-+    configured('DSH_SHARP_WORKER', 'sharp-worker.cjs'),
-+    configured('DSH_SHARP_MODULE_DIR', join('app.asar.unpacked', 'node_modules')),
-+  )
++  // Packaged: everything is resolved under the packaged resources directory, so no environment setup.
++  // Development and tests: the worker and module directory cannot be inferred from a packager layout,
++  // and the plugin entry point has nowhere else to read them from, so they must be set explicitly.
++  const nodeBinary = configured('DSH_SHARP_NODE_BIN', join('runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node')) ?? 'node'
++  const workerScript = configured('DSH_SHARP_WORKER', 'sharp-worker.cjs')
++  const explicitModuleDirectory = process.env.DSH_SHARP_MODULE_DIR
++  const moduleDirectory = explicitModuleDirectory !== undefined && explicitModuleDirectory !== ''
++    ? explicitModuleDirectory
++    : packagedModuleDirectory()
++  if (workerScript === undefined || moduleDirectory === undefined) {
++    throw new Error('sharp runner: cannot locate sharp; set DSH_SHARP_WORKER and DSH_SHARP_MODULE_DIR outside a packaged application')
++  }
++  const client = new SharpWorkerClient(nodeBinary, workerScript, moduleDirectory)
 +  return ((input: Buffer | Uint8Array, options?: unknown) =>
 +    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
 +}
 diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
-index 798b21ae..7649ffff 100644
+index 798b21a..7649fff 100644
 --- a/packages/attachment/attachment-local/src/sharp.ts
 +++ b/packages/attachment/attachment-local/src/sharp.ts
 @@ -1,7 +1,7 @@

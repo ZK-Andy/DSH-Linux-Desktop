@@ -2,13 +2,9 @@
 # 在 ./upstream 里构建 Linux 桌面端。
 #
 #   ./scripts/build.sh --dir        # 只出未打包目录（快，先验证能不能起来）
-#   ./scripts/build.sh              # 默认 AppImage
-#   ./scripts/build.sh --deb        # 只出 .deb
-#   ./scripts/build.sh --rpm        # 只出 .rpm（需要系统装 rpmbuild，Arch 上是 rpm-tools）
-#   ./scripts/build.sh --all        # AppImage + deb + rpm
+#   ./scripts/build.sh              # 默认、也是唯一发布的格式：.rpm
 #
-# 每次只出被点名的格式：整条流水线（build:official / release:pack / prepare:*）才是耗时大头，
-# 多打一种格式只多一次 fpm/AppImage 打包，所以分开跑更快，也更容易定位失败。
+# 本项目只发布 rpm；AppImage/deb 一律不出，避免出现第二条产物线。
 #
 # 环境变量：
 #   DSH_DESKTOP_LINUX_HOME  隔离的 dsh 数据目录，默认 /tmp/dsh-desktop-test
@@ -36,14 +32,11 @@ source "$ROOT/scripts/select-pnpm.sh"
 
 # DSH_DESKTOP_TARGET_FORMATS 是一次构建的选择器（和 DSH_DESKTOP_TARGET_PLATFORM/ARCH 同类），
 # 不是发布设置，所以它只能从环境传，不能写进 .env.linux。
-MODE="${1:---appimage}"
+MODE="${1:---rpm}"
 case "$MODE" in
-  --dir)      SCRIPT="package:linux:x64:dir"; FORMATS="" ;;
-  --appimage) SCRIPT="package:linux:x64";     FORMATS="AppImage" ;;
-  --deb)      SCRIPT="package:linux:x64";     FORMATS="deb" ;;
-  --rpm)      SCRIPT="package:linux:x64";     FORMATS="rpm" ;;
-  --all)      SCRIPT="package:linux:x64";     FORMATS="AppImage,deb,rpm" ;;
-  *) echo "未知参数：$MODE" >&2; exit 2 ;;
+  --dir) SCRIPT="package:linux:x64:dir"; FORMATS="" ;;
+  --rpm) SCRIPT="package:linux:x64";     FORMATS="rpm" ;;
+  *) echo "未知参数：$MODE（只支持 --rpm 或 --dir）" >&2; exit 2 ;;
 esac
 
 # --- Linux 发布设置文件（上游按平台读 dotenv，Linux 用 .env.linux）---

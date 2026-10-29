@@ -10,7 +10,7 @@ command -v deepseek-harness || { log "没装出 /usr/bin/deepseek-harness"; exit
 
 # Xvfb 提供虚拟显示；xdotool 用来确认窗口真的建出来；ImageMagick 提供 import。
 dnf5 install -y --setopt=install_weak_deps=False \
-  dbus-tools xorg-x11-server-Xvfb xorg-x11-utils ImageMagick xdotool >/dev/null || { log "装 X11 工具失败"; exit 1; }
+  dbus-tools xorg-x11-server-Xvfb ImageMagick xdotool >/dev/null || { log "装 X11 工具失败"; exit 1; }
 
 export DSH_HOME=/tmp/dsh-home
 mkdir -p /tmp/shots

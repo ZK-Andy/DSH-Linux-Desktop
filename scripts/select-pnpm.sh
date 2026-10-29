@@ -6,7 +6,7 @@
 #   2. 它交给脚本的 npm_execpath 能被 node 执行。
 #
 # 第 2 条来自上游 desktop 脚本的硬性写法：package-target.ts / flock-entry.ts / dev.ts 三处是
-# 无条件 `node $npm_execpath`（见 patches/README.md 的「注意」）。官方 standalone 安装器与
+# 无条件 `node $npm_execpath`。官方 standalone 安装器与
 # Homebrew 给的是编译好的二进制，那种 pnpm 交给脚本的入口就是二进制本身，`node` 解析它会报
 # `SyntaxError: Invalid or unexpected token` —— 用同一个表达式提前探一次，命中就退到隔离版，
 # 免得构建跑到打包阶段才以一种看不懂的方式失败。

@@ -27,6 +27,11 @@ if [[ "$DSH_HOME" == "$HOME/.dsh" ]]; then
   exit 1
 fi
 
+# sharp 隔离（0021）：dev 下没有 process.resourcesPath，显式给出 worker 与模块目录，
+# node 回退到 PATH 里的 node。不设的话图片解码会直接报错（这是设计好的失败方式）。
+export DSH_SHARP_WORKER="${DSH_SHARP_WORKER:-$UPSTREAM/apps/desktop/resources/sharp-worker.cjs}"
+export DSH_SHARP_MODULE_DIR="${DSH_SHARP_MODULE_DIR:-$UPSTREAM/packages/attachment/attachment-local/node_modules}"
+
 DO_BUILD=1
 export DSH_DESKTOP_OPEN_DEVTOOLS="${DSH_DESKTOP_OPEN_DEVTOOLS:-1}"
 for arg in "$@"; do

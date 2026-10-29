@@ -27,21 +27,25 @@
 
 - fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
 - 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
-- 初始四条补丁：`0001-linux-build`（electron-builder 配置）、`0002-tray`、`0003-update`、`0004-sharp-isolation`。
+- 补丁序列 `0001–0021`，按变化分组（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
+  - `0001` 目标模型称认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）；`0002` `package-target` 接受 `linux-x64`；`0003` electron-builder 的 Linux 配置（图标、`desktopName`、target、asar 开关）；
+  - `0004` prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，并跳过 macOS 专属的 `prepare:cli`）；`0005` 发布设置（`.env.linux`）；`0006` `package:linux:x64` 脚本；`0007` 测试；`0010` Linux 不嵌强制更新策略；`0011` 包元数据（maintainer/homepage 校验、默认格式）；
+  - `0012` 非 git 构建的 commit 标记；`0013` 托盘；`0016` 标题栏；`0018` glass mode；
+  - `0019` 打包冒烟脚本的 Linux 路径；`0020` 本项目的包身份与 rpm 硬化；`0021` sharp 隔离（§3.6）。
 - **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
 - 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
 ### 3.2 构建
 
 - electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
-- 构建配置由 `0001-linux-build.patch` 落地：`target: ['rpm']`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）、`afterInstall` 脚本（见 §3.7）。
+- 构建配置分布在 `0003`/`0020`/`0021`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
 - `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
 - 预发布版本映射：`dsh-v0.2.2-alpha.2` → rpm `0.2.2~alpha.2`。M2 用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 实测钉死，`version.json` 与 rpm 用同一套映射。
-- GitHub Actions：`container: fedora:44`（rpmbuild、xz、xvfb、Electron 运行库都在里面装齐），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag 或 commit，留空则探测最新 `dsh-v*`）。
+- GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
-- 缓存：pnpm store（`~/.local/share/pnpm/store`）、Electron 下载目录（`~/.cache/electron`）、上游源码 tarball；缓存 key 含上游 tag；不缓存 `node_modules`。
-- 冒烟：出包后在 `xvfb` 下安装并启动应用，抓主进程日志并截图（`import` → `scrot` 级联，失败不拦），截图与日志上传 artifact；崩溃或没建出托盘判失败。另用 D-Bus 查 `StatusNotifierItem` 注册，证明托盘对象真的挂上去了。
+- 缓存：pnpm store（`~/.local/share/pnpm/store`，key 用 fetch 之后的 `upstream/pnpm-lock.yaml`）、Electron 与 electron-builder 工具链（`~/.cache/electron`、`~/.cache/electron-builder`）；不缓存 `node_modules`。
+- 冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install` 真装、`xvfb` 启动、`xdotool` 确认窗口出现，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。
 - CI 证明不了 GNOME 里的可见性：R2 以真实 GNOME Wayland 人工验收为准，CI 只保证对象与注册存在。
 
 ### 3.3 分发
@@ -64,7 +68,7 @@
 
 ### 3.5 桌面集成
 
-- 托盘：上游 `DesktopTray`（`apps/desktop/src/tray.ts`）本身跨平台，补丁只做三件事——把 `main.ts:1088-1094` 的 `win32` 门放宽到 Linux、把 `main.ts:1087` 的 `.ico` 路径换成 PNG、为打包补 `resources/tray.png`（由 `scripts/render-tray-icon.ts` 的同一 SVG 源生成，构建期纯 Node 跑 sharp）。
+- 托盘：上游 `DesktopTray`（`apps/desktop/src/tray.ts`）本身跨平台。`0013` 做三件事——把 `main.ts` 里的 `win32` 门放宽到 Linux、托盘图标按平台选 `tray-linux.png`、`extraResources` 把 PNG 打进 `resources/`。PNG 由 `scripts/render-tray-icon.ts` 在构建期从 `icon-windows.svg` 渲染（纯 Node 跑 sharp，不进 Electron），产物作为二进制资产放在 `assets/tray-linux.png`，由 `scripts/apply-patches.sh` 放到位（二进制进不了文本补丁）。
 - GNOME 需要「AppIndicator and KStatusNotifierItem Support」扩展，写入 README 前置条件。依赖显式声明 `libdbusmenu`（Fedora 有同名包；dlopen，`ldd` 看不见，缺了菜单为空）。
 - 关闭到托盘、单实例：沿用上游，不重复实现（§3.1）。
 - 运行时保持官方形态：Host 由 Electron 以 node 模式托管（`ELECTRON_RUN_AS_NODE=1`），**不替换成独立 Node**。参考项目 issue #8 里插件市场卡在「安装中」、后续 409，正是把 Host 换成独立 Node 后热挂载/重启握手失败所致；ASAR 也随官方保留开启。
@@ -74,10 +78,11 @@
 - **问题**：Electron 在 Linux 上把 sharp/libvips 加载进自己的进程，会因 glib 断言失败直接 `abort()`（[electron#46323](https://github.com/electron/electron/issues/46323)）。官方运行时下，`read_image` 或把图片作为附件发送，会把整个 Host 弄崩，重启后回到同一会话仍复现（[Zhou #24](https://github.com/Zhou-Yujing114514/deepseek-harness-linux/issues/24)）。
 - **已知的两条半解**：整体换独立 Node → 图片正常、插件市场坏（[ffyfox #8](https://github.com/ffyfox/dsh-desktop-linux/issues/8)）；保持官方运行时 → 市场正常、图片崩（Zhou #24）。两者不能只选其一。
 - **做法**：Host 留在 Electron node 模式；sharp 移出 Electron 进程，放进由打包内 `resources/runtime/primary-runtime/dependencies/node` 启动的子进程，Host 通过 IPC 调用。子进程用打包自带 Node，不依赖系统 node。
-- **打包前提**（补丁里一并做，否则真 Node 加载不了）：
-  - worker 脚本走 `extraResources`（asar 外），例如 `resources/sharp-worker.cjs`；
-  - `sharp` 与 `@img/**` 加进 `asarUnpack`；worker 用 `app.asar.unpacked` 下的绝对路径 `require`，不靠模块解析；
-  - dev 模式没有 primary-runtime node，回退到 `PATH` 里的 `node`（仅 dev），否则本地 `pnpm dev` 直接坏。
+- **打包前提**（`0021` 一并做）：
+  - asar 保持**开启**（与官方一致；参考项目在 Linux 关 asar，是因为它把 Host 换成了独立 Node——本项目不换）；
+  - worker 脚本走 `extraResources`（asar 外）：`resources/sharp-worker.cjs`；
+  - `sharp` 与 `@img/**` 加进 `asarUnpack`，worker 用 `app.asar.unpacked/node_modules` 的绝对路径 `require`，不靠模块解析；
+  - dev 模式没有 primary-runtime node，node 回退到 `PATH`；worker 与模块目录必须由 `DSH_SHARP_WORKER`/`DSH_SHARP_MODULE_DIR` 给出，缺了直接报错（不静默退化）。
 - **补丁点**：`packages/attachment/attachment-local/src/sharp.ts` 里的 `requireSharp`（`createLazyRequire<typeof sharp>('sharp', import.meta.url)`）是全部图片处理的唯一入口，只改这一处；`image.ts` / `normalization.ts` / `encoding.ts` 不动。
 - **失败行为**：子进程崩溃只让当次调用失败，Host 存活并返回明确错误；不再出现「贴一张图，应用退出」。
 - **验收**：以 #24 的复现场景为准（`read_image` 读本地 PNG、粘贴图片附件）；CI 冒烟加一条真实解码断言，上游升级后第一个暴露问题。
@@ -89,29 +94,33 @@
 - `executableName: "deepseek-harness"` → `/usr/bin/deepseek-harness` 符号链接与进程名。
 - `packageName: "dsh-desktop"` → rpm 的 `Name`。
 - `desktopName: "dsh-desktop"` + `linux.syncDesktopName: true` → 安装后的 `dsh-desktop.desktop`；`StartupWMClass` 以 M2 实测的 `xprop WM_CLASS` 为准钉死（Electron 版本间有差异），并同步回本计划。
-- 图标：给 `linux.icon` 指定 1024×1024 PNG（复用 `resources/icon-windows.png` 或新增 `icon-linux.png`），electron-builder 自动铺 hicolor。
-- `afterInstall` 脚本负责：`unshare --user true` 可用则 `chrome-sandbox` 0755、否则 4755；`update-desktop-database`；`gtk-update-icon-cache`。
-- `Requires` 覆盖默认集时保留 gtk3/nss/libnotify 等，并显式加 `libdbusmenu`；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加（M2 用 `rpm -qpR` 复核）。
+- 菜单显示名：`productName` 必须是路径安全的 token（它决定 `/opt` 目录与 `Exec`），所以 `productName: "deepseek-harness-desktop"`；desktop 文件里的 `Name` 由 `0020` 的 `linux.desktop.entry.Name` 单独覆盖成 `DeepSeek Harness`，不把空格塞进路径。
+- 图标：`0003` 把 `linux.icon` 指向 `resources/icon-macos.svg`，electron-builder 按 scalable SVG 装到 `hicolor/scalable/apps/`。
+- `chrome-sandbox` 与缓存刷新用 electron-builder 的默认 after-install 模板（不需要自写脚本）：模板先探 `/proc/self/ns/user` + `unshare --user true`，可用则 0755、否则 4755；顺带 `update-alternatives`/`ln -s` 建 `/usr/bin/deepseek-harness`、跑 `update-desktop-database`，Ubuntu 上还装 AppArmor profile。
+- `Requires` 由 `0020` 显式给出（`AutoReqProv` 类自动扫描对 Electron 自带的 `.so` 不可靠）：gtk3、nss、libnotify、libXScrnSaver、`(libXtst or libXtst6)`、xdg-utils、at-spi2-core、`(libuuid or libuuid1)`、libsecret、libdbusmenu；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加（M2 用 `rpm -qpR` 复核）。rpmbuild 后处理按 macOS-Terminal 的配方关掉：`_build_id_links none`、`__os_install_post %{nil}`、`__strip`/`__brp_strip` 指 `/bin/true`、`_binary_payload w19.zstdio`。
 
 ## 4. 仓库结构
 
 ```
 DSH-Linux-Desktop/
 ├── PLAN.md
-├── patches/                 # 0001-linux-build … 上游 tag 一变即可重放
-├── packaging/
-│   ├── after-install.sh     # chrome-sandbox / desktop-database / icon-cache
-│   ├── polkit/org.dsh.desktop.update.policy
-│   ├── helper/dsh-update-helper
-│   └── gpg/RPM-GPG-KEY-dsh-desktop
+├── upstream-tag             # 钉住的上游 tag（fetch 与 CI 的唯一真源）
+├── patches/                 # 0001–0021，按编号顺序 git apply；上游 tag 一变即重放
+├── assets/tray-linux.png    # 二进制托盘图标（apply-patches.sh 放到位）
 ├── scripts/
-│   ├── sync-upstream.sh     # 取 tag、下载源码、应用补丁
-│   ├── apply-patches.sh     # git apply --check / 重放
-│   ├── build-rpm.sh         # electron-builder 出 rpm + 签名
-│   └── publish-release.sh   # version.json + Release 资产
-├── .github/workflows/build.yml
+│   ├── fetch-upstream.sh    # 按 upstream-tag 浅克隆到 upstream/
+│   ├── apply-patches.sh     # 打补丁 + 放二进制资产；--check/--revert
+│   ├── select-pnpm.sh       # 校验 pnpm 11 且入口可被 node 执行
+│   ├── build.sh             # 默认 --rpm；--dir 只出未打包目录
+│   ├── dev-desktop.sh       # 本地 dev（不打包）
+│   ├── smoke-install-rpm.sh # 起 fedora:44 容器真装真启动
+│   ├── smoke-rpm-inner.sh   # 容器内：dnf5 install → xvfb → xdotool → 截图
+│   └── verify.sh            # rpm 静态验收（包元数据/布局/desktop/%post）
+├── .github/workflows/build.yml   # 每周跟版 + dispatch；出包→verify→冒烟→artifact
 └── docs/                    # 调研、安装、更新、托盘前置条件、故障排查
 ```
+
+M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）；现在还没有。
 
 ## 5. 里程碑
 
@@ -176,3 +185,7 @@ DSH-Linux-Desktop/
 | 2026-10-30 | 命名一次对齐：`productName` 驱动 `/opt`，`desktopName` 驱动 desktop 文件 | 避免 afterPack 改名这类二次加工；`/opt` 与 desktop 名各有唯一来源 |
 | 2026-10-30 | rpm 签名，首装一次性导入公钥，helper 自动 import | 完整性不能降级；helper 里的 import 让更新链对用户仍是「一次授权」 |
 | 2026-10-30 | 关闭到托盘与单实例不写补丁 | 上游 `main.ts:1173-1188` 与 `single-instance.ts` 已有，重复实现只会增加重放成本 |
+| 2026-10-30 | 补丁序列按变化来源拼接：流水线取 ffyfox、office/冒烟取 zhsj、rpm 硬化取 macOS-Terminal、包身份取 coderirse | 每条都有人真跑通过；自己重写等于把别人的试错重做一遍 |
+| 2026-10-30 | asar 保持开启，sharp 走子进程 + `asarUnpack` | 官方形态 + 隔离；关 asar 是独立 Node 路线的前提，本项目不采用 |
+| 2026-10-30 | `productName` 用路径安全 token，菜单名用 `linux.desktop.entry.Name` 覆盖 | 路径（`/opt`、`Exec`）不能有空格；显示名不该反过来决定路径 |
+| 2026-10-30 | verify.sh 重写为 rpm 静态验收，与冒烟分工 | 参考版的 Arch/PKGBUILD 断言与 RPM 无关；静态看包、冒烟看启动，互不重叠 |

@@ -1,6 +1,6 @@
 # DSH-Linux-Desktop
 
-DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方 `apps/desktop`，只叠加托盘、关闭到托盘与更新入口的补丁，产出可用 `dnf5` 安装的 `dsh-desktop` 包。
+DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方 `apps/desktop`，叠加 Linux 构建、托盘与更新入口的最小补丁，产出可用 `dnf5` 安装的 `dsh-desktop` 包。
 
 - 客户端本体（UI、Chromium、Host 运行时）全部来自官方 Electron 应用，本项目不重做壳。
 - 分发格式只有 RPM（Fedora 44 / dnf5）；更新交给包管理器，应用内只做「检查 → 提示 → 下载 → 一次授权」。
@@ -10,7 +10,7 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 状态
 
-早期。当前只有计划与调研（[docs/linux-packaging-survey.md](docs/linux-packaging-survey.md)），补丁、打包脚本与 CI 尚未落地。里程碑见 PLAN.md §5。
+早期。补丁序列 `0001–0021` 已在干净的上游 tag 树上重放验证（应用后与改编树逐字节一致），CI 曾成功产出 `dsh-desktop-0.2.2-alpha.2-x86_64.rpm`。托盘在本地 dev 下验证过（SNI + DBusMenu），sharp 桥接也单独验证过，但两者都还没在**装出来的 rpm** 里验收；CI 目前跑到冒烟阶段失败（office engine 的 Linux 原生包上游未发布，见 PLAN.md §3.6 与 §7）。里程碑见 PLAN.md §5。
 
 ## 需求（验收口径）
 
@@ -47,27 +47,36 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 - Releases 上发布 `version.json`（版本、rpm 地址、sha256）；应用检查到新版本后下载 rpm，校验签名，经 `pkexec` 调用 `/usr/libexec/dsh-update-helper`，由它执行 `dnf5 install`，完成后应用重启。
 - 授权一次（polkit `allow_active`），不要求用户开终端。
 - 暂不维护 dnf 仓库；`dnf5 upgrade` 的自动感知留作后续增量（PLAN.md §3.3 B）。
+- 当前状态：M3 才实现；M2 的产物不带更新入口。
 
 ## 构建
 
-> 目标形态；脚本尚未实现。
-
-构建机需要：Node ≥ 24.9、pnpm 11、`rpmbuild`、`xz`。
+CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出 rpm；本机没有 `rpmbuild`，出包只走 CI。本地只跑 dev（`./scripts/dev-desktop.sh`）。
 
 ```bash
-./scripts/sync-upstream.sh   # 取上游 tag、应用 patches/
-./scripts/build-rpm.sh       # electron-builder --linux rpm
+./scripts/fetch-upstream.sh     # 按 upstream-tag 浅克隆到 upstream/
+./scripts/apply-patches.sh      # 打进 patches/*.patch，并放置托盘 PNG
+(cd upstream && pnpm install --frozen-lockfile)
+./scripts/build.sh --rpm        # 默认就是 --rpm；--dir 只出未打包目录
+./scripts/verify.sh dist/*.rpm  # 静态验收：包名/版本/依赖/布局/desktop 入口/%post
 ```
 
-产物在 `dist/`，随后由 `scripts/publish-release.sh` 生成 `version.json` 并上传 Release。
+产物在 `upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，文件名 `dsh-desktop-<version>-x86_64.rpm`。安装后的验收是 `scripts/smoke-install-rpm.sh`：在 `fedora:44` 容器里 `dnf5 install`、`xvfb` 启动、截图留档。
+
+本地调试窗口（不打包）：
+
+```bash
+./scripts/dev-desktop.sh
+```
 
 ## 仓库结构
 
 ```
-patches/       # 相对固定上游 commit 的补丁序列
-packaging/     # rpm spec、polkit 策略、更新 helper
-scripts/       # 同步上游、出包、发布
+patches/       # 相对 upstream-tag 的补丁序列（0001–0021，按编号顺序打）
+assets/        # 补丁装不下的二进制资产（托盘 PNG，由 apply-patches.sh 放到位）
+scripts/       # 取上游、打补丁、构建、dev、静态 verify、装包冒烟
 docs/          # 调研与说明
+.github/workflows/build.yml   # 每周跟版 + workflow_dispatch 出 rpm 并冒烟
 ```
 
 ## 许可

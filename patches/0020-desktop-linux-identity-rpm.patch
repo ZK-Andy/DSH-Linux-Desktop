@@ -1,5 +1,5 @@
 diff --git a/apps/desktop/.env.linux.example b/apps/desktop/.env.linux.example
-index 7185dc93..3dfb1af6 100644
+index 7185dc9..3dfb1af 100644
 --- a/apps/desktop/.env.linux.example
 +++ b/apps/desktop/.env.linux.example
 @@ -8,8 +8,8 @@ DSH_DESKTOP_APP_ID=com.deepseek.harness
@@ -14,7 +14,7 @@ index 7185dc93..3dfb1af6 100644
  # The mandatory-update policy channel is Windows and macOS only. The policy service identifies its
  # Desktop clients as desktop-win or desktop-mac and has no Linux identity, and a Linux release carries
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 027803e6..84111cbc 100644
+index 027803e..0a832a3 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -119,17 +119,17 @@ export function createElectronBuilderConfig(
@@ -38,7 +38,16 @@ index 027803e6..84111cbc 100644
      directories: { output: output.directory },
      // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
      // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
-@@ -299,8 +299,28 @@ export function createElectronBuilderConfig(
+@@ -283,6 +283,8 @@ export function createElectronBuilderConfig(
+       // fpm writes the synopsis as the Debian Description's first line and as the RPM Summary. Debian
+       // policy requires a nonempty synopsis there, and an unset one leaves that line blank.
+       synopsis: 'DeepSeek Harness desktop application',
++      // productName 是路径安全的 token（/opt 目录跟着它走），菜单里显示的名字在这里单独覆盖。
++      desktop: { entry: { Name: 'DeepSeek Harness' } },
+       // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
+       ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
+       target: linuxFormats ?? ['AppImage'],
+@@ -299,8 +301,28 @@ export function createElectronBuilderConfig(
      // rejects it with "Tag takes single token only", so both formats name the package explicitly.
      // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
      // Group as "default", which names neither a Debian section nor an RPM group.

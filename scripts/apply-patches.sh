@@ -13,9 +13,9 @@ PATCH_DIR="$ROOT/patches"
 
 # 补丁装不下的二进制资产：相对仓库根的源 → 在上游树里的落点。
 #
-# 托盘 PNG（补丁 0013 用）是二进制，而 makepkg 用的是 GNU patch —— 它不支持 git 的二进制
-# 补丁，所以这张图不能放进 patches/。它像上游的 resources/tray-windows.ico 一样直接住在源码
-# 树里，只是这一份存在我们仓库的 assets/ 下（PKGBUILD 那条路径由 prepare() 自己 install）。
+# 托盘 PNG（补丁 0013 用）是二进制：贴进 patch 既不可读，也会被邮件/格式化工具改动，所以它不走
+# patches/。它像上游的 resources/tray-windows.ico 一样直接住在源码树里，这一份存在我们仓库的
+# assets/ 下，由本脚本放置。
 ASSETS=(
   'assets/tray-linux.png:apps/desktop/resources/tray-linux.png'
 )
