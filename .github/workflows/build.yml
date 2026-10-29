@@ -113,58 +113,9 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
 
-  install-smoke:
-    needs: rpm
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    container: fedora:44
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dsh-desktop-rpm
-          path: dist
-
-      # Install the real rpm the way a user would (dnf5 resolves the explicit Requires), then add
-      # just enough X11 tooling for a headless launch. Screenshot tools are best-effort: a missing
-      # capture tool must not fail the job, but a crash or a missing window must.
-      - name: Install rpm and X11 tools
-        run: |
-          dnf5 install -y --setopt=install_weak_deps=False ./dist/*.rpm
-          dnf5 install -y --setopt=install_weak_deps=False \
-            dbus-tools xorg-x11-server-Xvfb xorg-x11-utils ImageMagick xdotool
-
-      - name: Launch, verify a window, screenshot
-        run: |
-          set -euo pipefail
-          mkdir -p shots
-          export DSH_HOME=/tmp/dsh-home
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x1024x24" bash -c '
-            set -uo pipefail
-            /usr/bin/deepseek-harness --no-sandbox --disable-gpu > /tmp/app.log 2>&1 &
-            app=$!
-            window=""
-            for _ in $(seq 1 30); do
-              sleep 2
-              if ! kill -0 "$app" 2>/dev/null; then
-                echo "app exited before showing a window"; cat /tmp/app.log; exit 1
-              fi
-              window=$(xdotool search --onlyvisible --name . 2>/dev/null | head -1 || true)
-              [ -n "$window" ] && break
-            done
-            if [ -z "$window" ]; then
-              echo "no visible window after 60s"; cat /tmp/app.log; exit 1
-            fi
-            xdotool getwindowgeometry "$window" || true
-            sleep 5
-            import -window root /tmp/shot.png 2>/dev/null && [ -s /tmp/shot.png ] \
-              || scrot /tmp/shot.png 2>/dev/null && [ -s /tmp/shot.png ] \
-              || gnome-screenshot -f /tmp/shot.png 2>/dev/null && [ -s /tmp/shot.png ] \
-              || echo "screenshot unavailable (best-effort)"
-            kill "$app" 2>/dev/null || true
-            cp /tmp/shot.png /tmp/shots/shot.png 2>/dev/null || true
-          '
-          cp shots/shot.png shots/ 2>/dev/null || true
-          ls -la shots || true
+      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器。
+      - name: Smoke install rpm
+        run: bash scripts/smoke-install-rpm.sh dist
 
       - uses: actions/upload-artifact@v4
         if: always()
