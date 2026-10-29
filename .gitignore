@@ -1,0 +1,23 @@
+# 上游源码与参考项目（不入库）
+.ref/
+upstream/
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+.desktop-build/
+*.rpm
+*.AppImage
+*.deb
+*.tar.gz
+*.tar.zst
+*.sha256
+
+# 编辑器与系统
+.DS_Store
+*.swp
+.idea/
+.vscode/
