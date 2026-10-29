@@ -35,7 +35,8 @@
 - GitHub Actions：`schedule` 每周一 + `workflow_dispatch`（可填上游 tag 或 commit，留空则探测最新 `dsh-v*`）。
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
-- 缓存 pnpm store 与 Electron 下载目录，否则每次构建十几分钟起步。
+- 缓存 pnpm store、Electron 下载目录与上游源码 tarball；不缓存 `node_modules`（体积大且易脏）。
+- 冒烟：出包后在 `xvfb` 下安装并启动应用，抓主进程日志并截图（`import` → `scrot` 级联，失败不拦），截图与日志上传 artifact；崩溃或没建出托盘判失败。
 
 ### 3.3 分发
 
@@ -58,6 +59,7 @@
 - 托盘：Electron `Tray`，Linux 底层为 AppIndicator；GNOME 需要「AppIndicator and KStatusNotifierItem Support」扩展，写入 README 前置条件。依赖显式声明 `libdbusmenu`（dlopen，`ldd` 看不见，缺了菜单为空）。
 - 关闭到托盘：主窗口 `close` 事件里 `preventDefault()` + `hide()`；仅「退出」菜单放行。
 - 单实例：`app.requestSingleInstanceLock()`，二次启动聚焦已有窗口。
+- 运行时保持官方形态：Host 由 Electron 以 node 模式托管（`ELECTRON_RUN_AS_NODE=1`），**不替换成独立 Node**。参考项目 issue #8 里插件市场卡在「安装中」、后续 409，正是把 Host 换成独立 Node 后热挂载/重启握手失败所致；ASAR 也随官方保留开启。
 
 ## 4. 仓库结构
 
@@ -79,8 +81,8 @@ DSH-Linux-Desktop/
 
 ## 5. 里程碑
 
-- **M1 本地跑通**：克隆上游 tag、应用补丁、`pnpm dev` 出托盘与关闭到托盘。
-- **M2 本地出包**：`electron-builder --linux rpm` 成功，`dnf5 install` 后可启动。
+- **M1 本地跑通**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘与关闭到托盘（只验行为，不出包）。
+- **M2 CI 出包**：CI 构建 rpm（含冒烟截图），`dnf5 install` 产物后可启动。
 - **M3 CI + 自动跟版**：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
 - **M4 更新链**：`version.json` 检查 → helper → 授权 → 安装 → 重启。
 - **M5 收尾**：单实例、GPG 校验、README 前置条件、docs 成文。
@@ -95,6 +97,7 @@ DSH-Linux-Desktop/
 - 暂不建 dnf 仓库（`.repo` + repodata），先以 Releases 为分发面。
 - 不追非 Linux 平台；换发行版只换 `linux.target` 与更新适配器。
 - 不维护 .NET 客户端，不在本项目里保留旧壳代码。
+- 不替换 Host 运行时（不引入独立 Node、不因此关 ASAR）。
 
 ## 7. 已知约束
 
@@ -124,3 +127,5 @@ DSH-Linux-Desktop/
 | 2026-10-30 | 只出 rpm，不出 AppImage/deb | 单一产物好验收；AppImage 的自更新路径与「更新交给 dnf」相悖 |
 | 2026-10-30 | 先走 Releases（A），dnf 仓库（B）后置 | A 不需要静态托管，R1–R5 即可闭环；B 可增量，不改包结构 |
 | 2026-10-30 | 仓库名 `DSH-Linux-Desktop`，包名 `dsh-desktop` | 仓库名要大小写一致；包名与可执行名分离，避免与上游 CLI 同名 |
+| 2026-10-30 | Host 保持官方 Electron node 模式，不换独立 Node | 参考项目 issue #8：换独立 Node 后插件市场热挂载/重启握手失败、UI 卡「安装中」并 409；官方形态在 Win/Mac 已验证 |
+| 2026-10-30 | 本地只跑 dev 调补丁，出包与发版全在 CI | 补丁迭代要快；rpm 构建、签名、发布不落在本机 |
