@@ -612,7 +612,7 @@ index 1461444f..1adda3f1 100644
    readonly platform: NodeJS.Platform
    readonly arch: string
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index cf0c19e8..3a9edc85 100644
+index cf0c19e8..c3bb2b9b 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -23,7 +23,8 @@ import {
@@ -679,7 +679,7 @@ index cf0c19e8..3a9edc85 100644
        // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
        ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
      ],
-@@ -253,9 +269,50 @@ export function createElectronBuilderConfig(
+@@ -253,8 +269,51 @@ export function createElectronBuilderConfig(
        target: ['nsis'],
      },
      linux: {
@@ -700,20 +700,8 @@ index cf0c19e8..3a9edc85 100644
 +      synopsis: 'DeepSeek Harness desktop client (unofficial Linux build)',
 +      // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
 +      ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
-+      // rpmbuild refuses a name with a space, and the scoped package name would leak the npm scope.
-+      packageName: 'dsh-desktop',
-+      // Scriptlets fix the Chromium sandbox mode and refresh the desktop/icon caches after install.
-+      afterInstall: 'resources/linux-after-install.tpl',
-+      afterRemove: 'resources/linux-after-remove.tpl',
-+      // Explicit dependencies: the defaults omit libsecret (safe storage) and libdbusmenu (the tray
-+      // menu is dlopen'd, so nothing links it and no scanner would add it).
-+      depends: ['gtk3', 'libnotify', 'nss', 'libXScrnSaver', '(libXtst or libXtst6)', 'xdg-utils',
-+        'at-spi2-core', '(libuuid or libuuid1)', 'libsecret', 'libdbusmenu'],
-+      // Keep the ELF build-id out of the payload: several Electron apps share identical binaries and
-+      // rpmbuild's build-id links would collide across them.
-+      fpm: ['--rpm-rpmbuild-define', '_build_id_links none'],
 +      target: linuxFormats,
-     },
++    },
 +    // The legacy AppImage toolset otherwise writes "Exec=AppRun --no-sandbox %U", which turns off the
 +    // Chromium sandbox for every launch from the desktop menu. An explicitly empty argument list keeps
 +    // that flag out of the entry and leaves AppRun's own "unshare -Ur true" probe in charge: it adds the
@@ -727,10 +715,23 @@ index cf0c19e8..3a9edc85 100644
 +    // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
 +    // Group as "default", which names neither a Debian section nor an RPM group.
 +    deb: { packageName: 'dsh-desktop', packageCategory: 'devel' },
-+    rpm: { packageName: 'dsh-desktop', packageCategory: 'Development/Tools' },
++    rpm: {
++      // rpmbuild refuses a name with a space, and the scoped package name would leak the npm scope.
++      packageName: 'dsh-desktop',
++      packageCategory: 'Development/Tools',
++      // Scriptlets fix the Chromium sandbox mode and refresh the desktop/icon caches after install.
++      afterInstall: 'resources/linux-after-install.tpl',
++      afterRemove: 'resources/linux-after-remove.tpl',
++      // Explicit dependencies: the defaults omit libsecret (safe storage) and libdbusmenu (the tray
++      // menu is dlopen'd, so nothing links it and no scanner would add it).
++      depends: ['gtk3', 'libnotify', 'nss', 'libXScrnSaver', '(libXtst or libXtst6)', 'xdg-utils',
++        'at-spi2-core', '(libuuid or libuuid1)', 'libsecret', 'libdbusmenu'],
++      // Keep the ELF build-id out of the payload: several Electron apps share identical binaries and
++      // rpmbuild's build-id links would collide across them.
++      fpm: ['--rpm-rpmbuild-define', '_build_id_links none'],
+     },
      nsis: {
        uninstallDisplayName: '${productName}',
-       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
 diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
 index b6bc6efb..20da969a 100644
 --- a/apps/desktop/scripts/package-target.ts
