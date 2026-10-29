@@ -51,16 +51,26 @@ jobs:
           version: 11.28.5
           run_install: false
 
-      - name: Cache pnpm store and Electron downloads
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-store-${{ hashFiles('upstream/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
+
+      # electronDist() downloads the Electron zip on every clean runner; electron-builder also caches
+      # the fpm/appimage toolchains it unpacks. Both are content-addressed by version, so keying on the
+      # lockfile is enough and a stale entry only costs one miss.
+      - name: Cache Electron and builder toolchains
         uses: actions/cache@v4
         with:
           path: |
-            ~/.local/share/pnpm/store
             ~/.cache/electron
             ~/.cache/electron-builder
-          key: ${{ runner.os }}-desktop-${{ env.UPSTREAM_TAG }}
+          key: electron-${{ hashFiles('upstream/pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-desktop-
+            electron-
 
       - name: Fetch upstream
         run: |
@@ -75,7 +85,9 @@ jobs:
 
       - name: Install workspace dependencies
         working-directory: upstream
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm config set store-dir ~/.local/share/pnpm/store
+          pnpm install --frozen-lockfile
 
       - name: Build rpm
         env:
