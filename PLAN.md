@@ -26,8 +26,9 @@
 ### 3.1 代码形态
 
 - fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
-- 补丁只触碰 `apps/desktop` 的主进程入口与窗口生命周期，不扩散到渲染层。
-- 初始三个补丁：托盘、关闭到托盘、更新入口（禁用 electron-updater，改读 `version.json`）。
+- 补丁只触碰 `apps/desktop` 的主进程入口与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
+- 初始补丁：托盘、关闭到托盘、更新入口（禁用 electron-updater，改读 `version.json`）、sharp 隔离子进程。
+- 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
 ### 3.2 构建
 
@@ -61,6 +62,16 @@
 - 单实例：`app.requestSingleInstanceLock()`，二次启动聚焦已有窗口。
 - 运行时保持官方形态：Host 由 Electron 以 node 模式托管（`ELECTRON_RUN_AS_NODE=1`），**不替换成独立 Node**。参考项目 issue #8 里插件市场卡在「安装中」、后续 409，正是把 Host 换成独立 Node 后热挂载/重启握手失败所致；ASAR 也随官方保留开启。
 
+### 3.6 图片解码（sharp 隔离）
+
+- **问题**：Electron 在 Linux 上把 sharp/libvips 加载进自己的进程，会因 glib 断言失败直接 `abort()`（[electron#46323](https://github.com/electron/electron/issues/46323)）。官方运行时下，`read_image` 或把图片作为附件发送，会把整个 Host 弄崩，重启后回到同一会话仍复现（[Zhou #24](https://github.com/Zhou-Yujing114514/deepseek-harness-linux/issues/24)）。
+- **已知的两条半解**：整体换独立 Node → 图片正常、插件市场坏（[ffyfox #8](https://github.com/ffyfox/dsh-desktop-linux/issues/8)）；保持官方运行时 → 市场正常、图片崩（Zhou #24）。两者不能只选其一。
+- **做法**：Host 留在 Electron node 模式；sharp 移出 Electron 进程，放进由打包内 `resources/runtime/primary-runtime/dependencies/node` 启动的子进程，Host 通过 IPC 调用。子进程用打包自带 Node，不依赖系统 node。
+- **补丁点**：`packages/attachment/attachment-local/src/sharp.ts` 里的 `requireSharp`（`createLazyRequire<typeof sharp>('sharp', import.meta.url)`）是全部图片处理的唯一入口，只改这一处；`image.ts` / `normalization.ts` / `encoding.ts` 不动。
+- **失败行为**：子进程崩溃只让当次调用失败，Host 存活并返回明确错误；不再出现「贴一张图，应用退出」。
+- **验收**：以 #24 的复现场景为准（`read_image` 读本地 PNG、粘贴图片附件）；CI 冒烟加一条真实解码断言，上游升级后第一个暴露问题。
+- **不采用**：整体替换 Host 运行时（会把市场问题引进来），或用「不显示图片」降级。
+
 ## 4. 仓库结构
 
 ```
@@ -81,7 +92,7 @@ DSH-Linux-Desktop/
 
 ## 5. 里程碑
 
-- **M1 本地跑通**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘与关闭到托盘（只验行为，不出包）。
+- **M1 本地跑通**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘与关闭到托盘，并验证 sharp 隔离后 `read_image`/图片附件不再崩 Host（只验行为，不出包）。
 - **M2 CI 出包**：CI 构建 rpm（含冒烟截图），`dnf5 install` 产物后可启动。
 - **M3 CI + 自动跟版**：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
 - **M4 更新链**：`version.json` 检查 → helper → 授权 → 安装 → 重启。
@@ -98,6 +109,7 @@ DSH-Linux-Desktop/
 - 不追非 Linux 平台；换发行版只换 `linux.target` 与更新适配器。
 - 不维护 .NET 客户端，不在本项目里保留旧壳代码。
 - 不替换 Host 运行时（不引入独立 Node、不因此关 ASAR）。
+- 不在 Electron 进程内加载 sharp（Linux 一律走 §3.6 的子进程）。
 
 ## 7. 已知约束
 
@@ -105,6 +117,7 @@ DSH-Linux-Desktop/
 - GNOME 无 AppIndicator 扩展时托盘不可见——文档写明，不作为缺陷处理。
 - Wayland 下按上游默认（XWayland 或原生 Wayland），本项目不额外改渲染参数。
 - 上游升版即需重放补丁；CI 失败就是「版本落后」的信号，不静默通过。
+- Electron 与 libvips 的 glib 冲突是上游未修的问题（electron#46323 仍 open），只能靠 §3.6 的隔离规避；上游哪天修了，隔离补丁可以单独摘掉。
 
 ## 8. 命名
 
@@ -128,4 +141,5 @@ DSH-Linux-Desktop/
 | 2026-10-30 | 先走 Releases（A），dnf 仓库（B）后置 | A 不需要静态托管，R1–R5 即可闭环；B 可增量，不改包结构 |
 | 2026-10-30 | 仓库名 `DSH-Linux-Desktop`，包名 `dsh-desktop` | 仓库名要大小写一致；包名与可执行名分离，避免与上游 CLI 同名 |
 | 2026-10-30 | Host 保持官方 Electron node 模式，不换独立 Node | 参考项目 issue #8：换独立 Node 后插件市场热挂载/重启握手失败、UI 卡「安装中」并 409；官方形态在 Win/Mac 已验证 |
+| 2026-10-30 | sharp 隔离到子进程，写进 M1 | Electron 进程内加载 libvips 在 Linux 会 abort（electron#46323、Zhou #24）；独立 Node 跑 sharp 正常（ffyfox #8 实测），把这两段拼起来即可，不依赖逐步试错 |
 | 2026-10-30 | 本地只跑 dev 调补丁，出包与发版全在 CI | 补丁迭代要快；rpm 构建、签名、发布不落在本机 |
