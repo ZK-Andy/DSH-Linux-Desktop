@@ -24,3 +24,8 @@ dist/
 
 # 本地运行环境（XDG 重定向、日志、测试输出）
 .xdg/
+
+# 本地临时工具（podman 沙箱根、补丁改编 worktree、重放验证 worktree）
+.podman/
+.bridge/
+.verify/

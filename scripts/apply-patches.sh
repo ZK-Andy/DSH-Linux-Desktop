@@ -36,3 +36,10 @@ for patch in "${patches[@]}"; do
     git -C upstream apply "$PWD/$patch"
   fi
 done
+
+# The Linux packaging settings are read from .env.linux, which upstream ships only as an
+# example and git ignores. Seed it once; local edits to .env.linux survive replays.
+if [[ ! -f upstream/apps/desktop/.env.linux ]]; then
+  cp upstream/apps/desktop/.env.linux.example upstream/apps/desktop/.env.linux
+  echo "seeded apps/desktop/.env.linux"
+fi

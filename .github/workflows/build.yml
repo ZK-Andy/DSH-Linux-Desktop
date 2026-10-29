@@ -1,0 +1,103 @@
+name: build-rpm
+
+on:
+  schedule:
+    # Weekly canary: follow a new upstream tag even when nobody asks.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: Upstream tag to build (defaults to the pinned tag in scripts/sync-upstream.sh)
+        required: false
+        type: string
+
+concurrency:
+  group: build-rpm
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_TAG: ${{ inputs.upstream_tag || '' }}
+  DSH_DESKTOP_BUILD_VERSION: 0.2.2-alpha.2
+
+jobs:
+  rpm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Electron payload plus the unpacked build tree needs more room than the runner image leaves.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm xz-utils
+          rpmbuild --version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+          run_install: false
+
+      - name: Cache pnpm store and Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-desktop-${{ env.UPSTREAM_TAG }}
+          restore-keys: |
+            ${{ runner.os }}-desktop-
+
+      - name: Fetch and patch upstream
+        run: |
+          if [ -n "${UPSTREAM_TAG}" ]; then
+            scripts/sync-upstream.sh "${UPSTREAM_TAG}"
+          else
+            scripts/sync-upstream.sh
+          fi
+          scripts/apply-patches.sh
+          cat upstream/.pinned
+          echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install workspace dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+
+      - name: Build rpm
+        working-directory: upstream
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          DSH_DESKTOP_BUILD_COMMIT: ${{ env.UPSTREAM_COMMIT }}
+          DSH_DESKTOP_BUILD_DIRTY: '0'
+        run: pnpm --dir apps/desktop run package:linux:x64
+
+      - name: Inspect rpm
+        run: |
+          set -euo pipefail
+          rpm=$(find upstream/apps/desktop/.desktop-build/targets/linux-x64 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          rpm -qip "$rpm"
+          rpm -qp --requires "$rpm"
+          rpm -qlp "$rpm" | grep -E '/usr/share/applications/|/opt/.*/deepseek-harness$|chrome-sandbox' | head
+          mkdir -p dist
+          cp "$rpm" dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-desktop-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
