@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_tag:
-        description: Upstream tag to build (defaults to the pinned tag in scripts/sync-upstream.sh)
+        description: Upstream tag to build (defaults to the pinned tag in upstream-tag)
         required: false
         type: string
 
@@ -62,37 +62,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-desktop-
 
-      - name: Fetch and patch upstream
+      - name: Fetch upstream
         run: |
           if [ -n "${UPSTREAM_TAG}" ]; then
-            scripts/sync-upstream.sh "${UPSTREAM_TAG}"
-          else
-            scripts/sync-upstream.sh
+            echo "${UPSTREAM_TAG}" > upstream-tag
           fi
-          scripts/apply-patches.sh
-          cat upstream/.pinned
+          scripts/fetch-upstream.sh
           echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Apply patches
+        run: scripts/apply-patches.sh
 
       - name: Install workspace dependencies
         working-directory: upstream
         run: pnpm install --frozen-lockfile
 
       - name: Build rpm
-        working-directory: upstream
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           DSH_DESKTOP_BUILD_COMMIT: ${{ env.UPSTREAM_COMMIT }}
           DSH_DESKTOP_BUILD_DIRTY: '0'
-        run: pnpm --dir apps/desktop run package:linux:x64
-
-      - name: Debug packaged office engine
-        if: always()
-        run: |
-          set -x
-          T=upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts
-          find "$T" -maxdepth 8 -name 'libreoffice-kit*' 2>/dev/null | head -40
-          ls -la "$T/linux-unpacked/resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai" 2>/dev/null || true
-          ls -la "$T/linux-unpacked/resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai/libreoffice-kit-linux-x64-glibc" 2>/dev/null || true
+        run: scripts/build.sh --rpm
 
       - name: Inspect rpm
         run: |
@@ -101,7 +91,7 @@ jobs:
           test -n "$rpm"
           rpm -qip "$rpm"
           rpm -qp --requires "$rpm"
-          rpm -qlp "$rpm" | grep -E '/usr/share/applications/|/opt/.*/deepseek-harness$|chrome-sandbox' | head
+          rpm -qlp "$rpm" | grep -E '/usr/share/applications/|chrome-sandbox' | head
           mkdir -p dist
           cp "$rpm" dist/
 

@@ -1,0 +1,160 @@
+diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
+index a069888..b3f5c79 100644
+--- a/apps/desktop/scripts/prepare-dsh.ts
++++ b/apps/desktop/scripts/prepare-dsh.ts
+@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
+ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+ import { tmpdir } from 'node:os'
+ import { delimiter, join, relative, resolve } from 'node:path'
+-import { desktopNodeEnvironment } from '../src/node-environment.ts'
++import { desktopNodeEnvironment, desktopNodeRuntime } from '../src/node-environment.ts'
+ import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
+ import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
+ import { parseDesktopRelease, type DesktopRelease } from '../src/release.ts'
+@@ -32,19 +32,23 @@ import {
+ import {
+   signMacOSRuntime,
+ } from './macos-runtime.ts'
+-import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
++import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
+ import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
+ import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
+ 
+ const APP_ROOT = resolve(import.meta.dirname, '..')
+ const BUILD_PATHS = resolveDesktopTargetBuildPaths()
++const TARGET = resolveDesktopBuildTarget()
+ const DSH_OUTPUT_ROOT = BUILD_PATHS.dsh
+ const BUILD_ROOT = mkdtempSync(join(tmpdir(), 'dsh-desktop-runtime-'))
+ const STORE_ROOT = BUILD_PATHS.pnpmStore
+ const RUNTIME_ROOT = BUILD_PATHS.runtime
+ const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
+ const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
+-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
++const ELECTRON = join(BUILD_PATHS.electron, desktopElectronExecutablePath(TARGET))
++// The payload is installed and smoked under the runtime that will host it, so the native binaries it
++// resolves are the ones the shipped Host loads.
++const HOST_RUNTIME = desktopNodeRuntime(desktopTargetPlatform(TARGET).platform, ELECTRON, join(RUNTIME_ROOT, 'primary-runtime'))
+ const PNPM = join(RUNTIME_ROOT, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs')
+ 
+ function manifestVersion(path: string, subject: string): string {
+@@ -78,7 +82,7 @@ function runPnpm(args: readonly string[]): Promise<void> {
+     const userConfig = join(config, 'npmrc')
+     mkdirSync(config, { recursive: true })
+     writeFileSync(userConfig, '')
+-    const child = spawn(NODE, [
++    const child = spawn(HOST_RUNTIME.executable, [
+       '--expose-internals',
+       PNPM,
+       `--config.registry=${registry}`,
+@@ -98,7 +102,7 @@ function runPnpm(args: readonly string[]): Promise<void> {
+         NPM_CONFIG_REGISTRY: registry,
+         NPM_CONFIG_STORE_DIR: STORE_ROOT,
+         NPM_CONFIG_USERCONFIG: userConfig,
+-        ...desktopNodeEnvironment(NODE, join(RUNTIME_ROOT, 'bin'), {}),
++        ...desktopNodeEnvironment(HOST_RUNTIME, join(RUNTIME_ROOT, 'bin'), {}),
+         PATH: `${join(RUNTIME_ROOT, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+         XDG_CACHE_HOME: join(PNPM_BUILD_STATE, 'cache'),
+         XDG_CONFIG_HOME: config,
+@@ -176,7 +180,7 @@ async function main(): Promise<void> {
+     })
+     const descriptor = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-before-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
+     if (!process.argv.includes('--defer-runtime-smoke')) {
+-      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:smoke', () => smokePreparedRuntime(DSH_OUTPUT_ROOT, NODE, RUNTIME_ROOT, descriptor))
++      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:smoke', () => smokePreparedRuntime(DSH_OUTPUT_ROOT, HOST_RUNTIME, RUNTIME_ROOT, descriptor))
+       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-after-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
+     }
+   } catch (error) {
+diff --git a/apps/desktop/scripts/prepare-runtime.ts b/apps/desktop/scripts/prepare-runtime.ts
+index 4e33853..f5e464d 100644
+--- a/apps/desktop/scripts/prepare-runtime.ts
++++ b/apps/desktop/scripts/prepare-runtime.ts
+@@ -8,7 +8,8 @@ import { parseArgs } from 'node:util'
+ import { downloadArtifact } from '@electron/get'
+ import extractZip from 'extract-zip'
+ import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
+-import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
++import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
++import { desktopNodeRuntime } from '../src/node-environment.ts'
+ import { packagingStep } from './packaging-step.mjs'
+ import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
+ import { prepareDesktopCli } from './prepare-cli.ts'
+@@ -20,22 +21,19 @@ const RUNTIME_ROOT = BUILD_PATHS.runtime
+ type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
+ 
+ /** Extract the target Electron distribution and return its embedded Node version. */
+-async function prepareElectron({ platform, arch }: DesktopTarget): Promise<string> {
++async function prepareElectron({ platform, arch }: DesktopTarget, executable: string): Promise<string> {
+   const require = createRequire(import.meta.url)
+   const { version } = require('electron/package.json') as { version: string }
+   const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',
+     () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
+   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
+   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
+-  const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+   return execFileSync(executable, ['-p', 'process.versions.node'], {
+     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   }).trim()
+ }
+ 
+-function prepareCli({ platform, arch }: DesktopTarget): void {
+-  cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
+-  chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
++function prepareCli(platform: 'darwin' | 'win32', arch: 'arm64' | 'x64'): void {
+   const cli = join(RUNTIME_ROOT, 'cli')
+   prepareDesktopCli(cli, platform)
+   if (platform === 'darwin') {
+@@ -50,24 +48,46 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
+ 
+ async function main(): Promise<void> {
+   const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
+-  const target = desktopTargetPlatform(resolveDesktopBuildTarget())
++  const target = resolveDesktopBuildTarget()
++  const resolved = desktopTargetPlatform(target)
++  // The Electron executable name follows the target: macOS keeps it inside the app bundle, Windows and
++  // Linux ship it as a bare binary.
++  const electron = join(BUILD_PATHS.electron, desktopElectronExecutablePath(target))
+   rmSync(RUNTIME_ROOT, { recursive: true, force: true })
+   mkdirSync(RUNTIME_ROOT, { recursive: true })
+   const preparePrimary = () => packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
+     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
+-  let nodeVersion: string
+-  if (target.platform === 'win32') {
+-    const [electron, primary] = await Promise.allSettled([prepareElectron(target), preparePrimary()])
+-    if (electron.status === 'rejected') throw electron.reason
++  let electronNodeVersion: string
++  if (resolved.platform === 'win32') {
++    const [electronResult, primary] = await Promise.allSettled([prepareElectron(resolved, electron), preparePrimary()])
++    if (electronResult.status === 'rejected') throw electronResult.reason
+     if (primary.status === 'rejected') throw primary.reason
+-    nodeVersion = electron.value
++    electronNodeVersion = electronResult.value
+   } else {
+-    nodeVersion = await prepareElectron(target)
++    electronNodeVersion = await prepareElectron(resolved, electron)
+     await preparePrimary()
+   }
+   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
+   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
+-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })
++  // The shell launcher is prepared for every target: package scripts reach the runtime that hosts the
++  // payload through it, and on Linux that is the primary runtime's standalone Node.
++  cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
++  chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
++  // The terminal launcher and its helpers are macOS and Windows only: upstream offers the command
++  // manager there (main.ts gates its menu entry the same way), the shipped `cli/dsh` is a macOS shell
++  // script that execs the bundle through `../MacOS/`, and `link-entry` is compiled by clang. Linux
++  // prepares no `runtime/cli`, so a Linux build must not copy the macOS launcher into the payload.
++  if (resolved.platform !== 'linux') {
++    // Capture the narrowed target: property narrowing does not survive into the packaging callback.
++    const platform = resolved.platform
++    const { arch } = resolved
++    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(platform, arch) })
++  }
++  // The recorded version is the one the payload runs under, which is the primary runtime's standalone
++  // Node where it hosts the payload and Electron's Node mode everywhere else.
++  const hostRuntime = desktopNodeRuntime(resolved.platform, electron, join(RUNTIME_ROOT, 'primary-runtime'))
++  const nodeVersion = hostRuntime.electron ? electronNodeVersion
++    : execFileSync(hostRuntime.executable, ['-p', 'process.versions.node'], { encoding: 'utf8' }).trim()
+   writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
+     schemaVersion: 1,
+     node: nodeVersion,
