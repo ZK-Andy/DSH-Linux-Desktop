@@ -1,5 +1,5 @@
 diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
-index a0698880..1ea25ced 100644
+index a069888..1ea25ce 100644
 --- a/apps/desktop/scripts/prepare-dsh.ts
 +++ b/apps/desktop/scripts/prepare-dsh.ts
 @@ -32,7 +32,7 @@ import {
@@ -22,7 +22,7 @@ index a0698880..1ea25ced 100644
  
  function manifestVersion(path: string, subject: string): string {
 diff --git a/apps/desktop/scripts/prepare-runtime.ts b/apps/desktop/scripts/prepare-runtime.ts
-index 4e338532..26d45977 100644
+index 4e33853..abccdf5 100644
 --- a/apps/desktop/scripts/prepare-runtime.ts
 +++ b/apps/desktop/scripts/prepare-runtime.ts
 @@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
@@ -34,10 +34,11 @@ index 4e338532..26d45977 100644
  import { packagingStep } from './packaging-step.mjs'
  import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
  import { prepareDesktopCli } from './prepare-cli.ts'
-@@ -18,22 +18,24 @@ const BUILD_PATHS = resolveDesktopTargetBuildPaths()
+@@ -17,23 +17,24 @@ import { prepareCommandLink } from './prepare-command-link.ts'
+ const BUILD_PATHS = resolveDesktopTargetBuildPaths()
  const RUNTIME_ROOT = BUILD_PATHS.runtime
  
- type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
+-type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
 +type DesktopBuildTarget = ReturnType<typeof resolveDesktopBuildTarget>
  
  /** Extract the target Electron distribution and return its embedded Node version. */
@@ -62,7 +63,7 @@ index 4e338532..26d45977 100644
    cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
    chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
    const cli = join(RUNTIME_ROOT, 'cli')
-@@ -50,24 +52,32 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
+@@ -50,24 +51,32 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
  
  async function main(): Promise<void> {
    const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })

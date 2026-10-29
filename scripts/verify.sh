@@ -50,8 +50,10 @@ version="$(rpm -qp --qf '%{VERSION}' "$rpm" 2>/dev/null)"
 arch="$(rpm -qp --qf '%{ARCH}' "$rpm" 2>/dev/null)"
 check "包名是 dsh-desktop（不是上游的 deepseek-harness）" test "$name" = "dsh-desktop"
 check "架构是 x86_64（本项目只发 x86_64）" test "$arch" = "x86_64"
-check "文件名与包名一致（dsh-desktop-<version>-x86_64.rpm）" \
-  test "$(basename "$rpm")" = "dsh-desktop-${version//\~/-}-x86_64.rpm"
+# unsigned 构建带 -unsigned 后缀（desktopArtifactOutput 决定），发布签名后才去掉。
+base="$(basename "$rpm")"
+check "文件名是 dsh-desktop-<version>[-unsigned]-x86_64.rpm" \
+  bash -c "[[ \"$base\" == \"dsh-desktop-${version//\~/-}\"-x86_64.rpm || \"$base\" == \"dsh-desktop-${version//\~/-}-unsigned-x86_64.rpm\" ]]"
 
 if [[ -f "$TAG_FILE" ]]; then
   tag="$(head -n1 "$TAG_FILE" | tr -d '[:space:]')"
@@ -84,10 +86,11 @@ check "sharp worker 在 resources 下（0021 的 extraResources）" \
   grep -qx '/opt/deepseek-harness-desktop/resources/sharp-worker.cjs' <<<"$files"
 check "asar 保持开启（PLAN §3.6）" \
   grep -qx '/opt/deepseek-harness-desktop/resources/app.asar' <<<"$files"
-check "sharp 被 unpack 到 app.asar.unpacked" \
-  grep -q '^/opt/deepseek-harness-desktop/resources/app.asar.unpacked/node_modules/sharp/' <<<"$files"
+# dsh 工作区在包里落成 resources/app.asar 的 dsh/ 子树，unpack 出来的文件同样带 dsh/。
+check "sharp 被 unpack 到 app.asar.unpacked 的 dsh 子树" \
+  grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/sharp/' <<<"$files"
 check "libvips（@img）也被 unpack" \
-  grep -q '^/opt/deepseek-harness-desktop/resources/app.asar.unpacked/node_modules/@img/' <<<"$files"
+  grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/@img/' <<<"$files"
 check "chrome-sandbox 存在" \
   grep -qx '/opt/deepseek-harness-desktop/chrome-sandbox' <<<"$files"
 
