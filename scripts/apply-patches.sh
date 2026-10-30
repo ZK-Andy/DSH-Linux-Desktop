@@ -20,9 +20,11 @@ PATCH_DIR="$ROOT/patches"
 #
 # 托盘 PNG（补丁 0013 用）与 hicolor 尺寸集（补丁 0023 用）都是二进制：贴进 patch 既不可读，
 # 也会被邮件/格式化工具改动，所以它们不走 patches/，存在我们仓库的 assets/ 下，由本脚本放置。
+# 启动遮罩的 logo（apps/web/index.html 的启动壳）也是二进制，落进 Web 的 public 目录。
 ASSETS=(
   'assets/tray-linux.png:apps/desktop/resources/tray-linux.png'
   'assets/icons-linux:apps/desktop/resources/icons-linux'
+  'assets/icons-linux/512x512.png:apps/web/public/startup-logo.png'
 )
 
 # 放置或撤掉上表里的资产。

@@ -1,32 +1,81 @@
+diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
+index 19e5f15..35af19a 100644
+--- a/apps/desktop/scripts/electron-builder-config.mjs
++++ b/apps/desktop/scripts/electron-builder-config.mjs
+@@ -184,6 +184,8 @@ export function createElectronBuilderConfig(
+       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
+       // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
+       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
++      // The frameless Linux window hands this bitmap to BrowserWindow for X11 task switching.
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/icons-linux/256x256.png', import.meta.url)), to: 'app-icon.png' }] : []),
+     ],
+     mac: {
+       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
-index e62a84f..3629b64 100644
+index e62a84f..5109c39 100644
 --- a/apps/desktop/src/ipc.ts
 +++ b/apps/desktop/src/ipc.ts
-@@ -36,6 +36,8 @@ export const DESKTOP_IPC = {
+@@ -36,6 +36,9 @@ export const DESKTOP_IPC = {
    windowFullscreen: 'dsh-desktop:window-fullscreen',
    windowsAppearance: 'dsh-desktop:windows-appearance',
    windowsMenu: 'dsh-desktop:windows-menu',
 +  windowAction: 'dsh-desktop:window-action',
 +  windowState: 'dsh-desktop:window-state',
++  windowStateGet: 'dsh-desktop:window-state-get',
  } as const
  
  /** Desktop release update state rendered by desktop-owned UI. */
+@@ -74,6 +77,24 @@ export interface DesktopUpdatePresentation {
+   readonly failure?: DesktopUpdateFailureKind
+ }
+ 
++/** Window commands the frameless Linux chrome sends to the main process. */
++export type DesktopWindowCommand = 'minimize' | 'toggle-maximize' | 'close'
++
++/** Snapshot of the frameless window's chrome state. */
++export interface DesktopWindowState {
++  readonly maximized: boolean
++  readonly fullscreen: boolean
++}
++
++/** Frameless window controls exposed to the application document. */
++export interface DesktopWindowControlsApi {
++  minimize(): Promise<void>
++  toggleMaximize(): Promise<void>
++  close(): Promise<void>
++  state(): Promise<DesktopWindowState>
++  subscribe(listener: (state: DesktopWindowState) => void): () => void
++}
++
+ /** Product documents cannot supply update versions, package URLs, or installation authorization. */
+ export interface DshDesktopProductApi {
+   readonly protocolVersion: 1
+@@ -81,6 +102,8 @@ export interface DshDesktopProductApi {
+   readonly fileDrag: DesktopFileDrag
+   readonly keyboard: DesktopKeyboardApi
+   readonly shortcuts: DesktopShortcutsApi
++  /** Present only for the frameless Linux window. */
++  readonly windowControls?: DesktopWindowControlsApi
+   /**
+    * Local machine description for the feedback questionnaire.
+    * @returns `name=value` fields separated by `; `, with no hostname, user name, or serial number.
 diff --git a/apps/desktop/src/linux-frame.ts b/apps/desktop/src/linux-frame.ts
 new file mode 100644
-index 0000000..26ce707
+index 0000000..d74c314
 --- /dev/null
 +++ b/apps/desktop/src/linux-frame.ts
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,35 @@
 +/**
-+ * Linux frameless primary window: the document carries an inset panel and the
-+ * preload draws the window controls, so the native titlebar adds nothing.
++ * Linux frameless primary window: the document marks itself as caption-less and
++ * the application renders the window controls (ui-layout's WindowControls), so
++ * the native titlebar adds nothing.
 + *
-+ * The layout reuses the Web layout DSH already ships for a caption-less window
-+ * (zero-width sidebar collapse, shell.leading seat, 48px top clearance); this
-+ * document only supplies the panel frame the compositor cannot draw on its
-+ * own: a transparent window that paints a rounded, 1px-bordered surface inset
-+ * by four pixels. Window controls are ordinary DOM buttons in the top-right
-+ * chrome band, wired to the main process over the windowAction channel.
++ * The window is opaque. A transparent window would let the compositor round the
++ * corners against the desktop, but transparency on Wayland costs a per-frame
++ * alpha composite of the whole window and has been the least reliable part of
++ * Electron's Linux window support; the panel is therefore painted by the client
++ * bundles at full window size. This module supplies the document marker; the
++ * preload supplies the product API the page drives the window with.
 + */
 +
 +/** Preload argument marking the application document as a frameless Linux window. */
@@ -39,102 +88,138 @@ index 0000000..26ce707
 +
 +/**
 + * Markup injected into the application Web document before its own bundles run.
-+ * The transparent host document and the inset panel are the only paint the
-+ * window keeps outside the client bundles; the control buttons themselves are
-+ * created by the preload so their clicks never reach page code.
++ * The document keeps no panel paint of its own: the client bundles fill the whole
++ * window. The shell marks which control seat the active panel uses; panels with a
++ * header row seat the controls inline, chrome-less panels keep the floating seat,
++ * and only the floating seat needs header rows kept clear of it.
 + * @returns Markup for the document head.
 + */
 +export function frameDocument(): string {
-+  return `<script>document.documentElement.setAttribute('data-desktop-frame','')</script>
++  return `<script>document.documentElement.setAttribute('data-desktop-frame','');document.documentElement.dataset.desktopControls='header'</script>
 +<style>
-+/* Transparent host document; the inset panel below is the only opaque surface. */
-+html[data-desktop-frame],
-+html[data-desktop-frame] body {
-+  background: transparent !important;
-+}
-+html[data-desktop-frame] body { isolation: isolate; }
-+
-+/* The window's own surface: four pixels of transparent gutter expose the
-+   compositor's rounded corners, and the inset ring reads as a window border
-+   without adding a layout box. */
-+html[data-desktop-frame] #root {
-+  box-sizing: border-box;
-+  height: calc(100% - 8px);
-+  margin: 4px;
-+  border-radius: 12px;
-+  overflow: hidden;
-+  background: var(--dsw-alias-bg-base);
-+  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l3, rgb(0 0 0 / 0.12));
-+}
-+
-+/* Window controls occupy the top-right band; chrome rows that end there keep
-+   their actions clear of it. */
-+html[data-desktop-frame] header[data-window-drag] { padding-right: 112px; }
-+
-+#dsh-window-controls {
-+  position: fixed;
-+  top: 11px;
-+  right: 16px;
-+  z-index: 2147483000;
-+  display: flex;
-+  gap: 4px;
-+  -webkit-app-region: no-drag;
-+}
-+#dsh-window-controls button {
-+  box-sizing: border-box;
-+  display: grid;
-+  place-items: center;
-+  width: 28px;
-+  height: 28px;
-+  padding: 0;
-+  border: 0;
-+  border-radius: 6px;
-+  background: transparent;
-+  color: var(--dsw-alias-label-primary);
-+}
-+#dsh-window-controls button:hover {
-+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
-+}
-+#dsh-window-controls button[data-action='close']:hover {
-+  background: #e5484d;
-+  color: #fff;
-+}
-+html[data-fullscreen] #dsh-window-controls { display: none; }
-+html[data-fullscreen] header[data-window-drag] { padding-right: 28px; }
++html[data-desktop-controls='overlay'] header[data-window-drag] { padding-right: 112px; }
 +</style>`
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 3b502e2..4115292 100644
+index 4854d44..b58c3ef 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
-@@ -34,6 +34,7 @@ import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } fro
+@@ -17,6 +17,7 @@ import {
+   nativeTheme,
+   net,
+   protocol,
++  screen,
+   session,
+   shell,
+   type IpcMainInvokeEvent,
+@@ -32,6 +33,7 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
+ import { DesktopBackendController } from './backend-controller.ts'
+ import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
  import { readDeviceInfo } from './device-info.ts'
- import { GLASS_ARGUMENT, desktopGlass, glassTint } from './glass-mode.ts'
- import { glassDocument } from './glass-document.ts'
 +import { FRAME_ARGUMENT, desktopFrameless, frameDocument } from './linux-frame.ts'
  import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
  import { claimDesktopSingleInstance } from './single-instance.ts'
  import { desktopUpdateChannel } from './update-channel.ts'
-@@ -259,6 +260,7 @@ function platformLoginUrl(authorizeUrl: string): string {
+@@ -56,7 +58,7 @@ import { DesktopMandatoryUpdatePolicy, resolveDesktopPolicyConfig, type DesktopP
+ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.ts'
+ import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
+ import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
+-import { readDesktopSettings } from './settings.ts'
++import { readDesktopSettings, saveDesktopWindowSize } from './settings.ts'
+ import { readDesktopLocaleCache, writeDesktopLocaleCache } from './locale-cache.ts'
+ import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
+ import { readDesktopRuntime } from './runtime-tree.ts'
+@@ -255,13 +257,93 @@ function platformLoginUrl(authorizeUrl: string): string {
+   return url.href
+ }
  
++/** Default frameless window size, matching the reference desktop shell. */
++const DEFAULT_WINDOW_WIDTH = 1200
++const DEFAULT_WINDOW_HEIGHT = 800
++/** Floor shared by the BrowserWindow minimum and the restored value. */
++const MIN_WINDOW_WIDTH = 480
++const MIN_WINDOW_HEIGHT = 640
++const WINDOW_SIZE_PERSIST_DEBOUNCE_MS = 250
++
++/**
++ * Restored frameless window size, clamped to the primary display's work area.
++ * Maximized stays a separate flag: the normal bounds are what gets persisted.
++ * @returns Initial width and height in DIP and whether to start maximized.
++ */
++function restoredWindowSize(): { width: number; height: number; maximized: boolean } {
++  const persisted = readDesktopSettings(app.getPath('userData')).desktopWindowSize
++  const { width: areaWidth, height: areaHeight } = screen.getPrimaryDisplay().workAreaSize
++  const clamp = (value: number, minimum: number, available: number): number =>
++    Math.min(Math.max(Math.floor(value), minimum), Math.max(minimum, Math.floor(available)))
++  return {
++    width: clamp(persisted?.width ?? DEFAULT_WINDOW_WIDTH, MIN_WINDOW_WIDTH, areaWidth),
++    height: clamp(persisted?.height ?? DEFAULT_WINDOW_HEIGHT, MIN_WINDOW_HEIGHT, areaHeight),
++    maximized: persisted?.maximized ?? false,
++  }
++}
++
++/** Linux task icon: Wayland ignores BrowserWindow icons, X11 sessions draw it. */
++function framelessWindowIcon(): string | undefined {
++  if (process.platform !== 'linux') return undefined
++  return app.isPackaged
++    ? join(process.resourcesPath, 'app-icon.png')
++    : join(app.getAppPath(), 'resources/icons-linux/256x256.png')
++}
++
++/**
++ * Persist the normal bounds and the maximized flag once the user settles the
++ * window; the maximized bounds equal the work area and would erase the last
++ * hand-picked size.
++ * @param window - primary window whose geometry is recorded.
++ */
++function attachWindowSizePersistence(window: BrowserWindow): void {
++  let timer: NodeJS.Timeout | undefined
++  const save = (): void => {
++    if (window.isDestroyed()) return
++    try {
++      const bounds = window.getNormalBounds()
++      saveDesktopWindowSize(app.getPath('userData'), {
++        width: Math.max(MIN_WINDOW_WIDTH, Math.floor(bounds.width)),
++        height: Math.max(MIN_WINDOW_HEIGHT, Math.floor(bounds.height)),
++        maximized: window.isMaximized(),
++      })
++    } catch (error) {
++      console.warn('desktop window size: not persisted', error)
++    }
++  }
++  const schedule = (): void => {
++    if (timer !== undefined) clearTimeout(timer)
++    timer = setTimeout(() => { timer = undefined; save() }, WINDOW_SIZE_PERSIST_DEBOUNCE_MS)
++  }
++  window.on('resize', schedule)
++  window.on('maximize', schedule)
++  window.on('unmaximize', schedule)
++  window.on('close', () => {
++    if (timer !== undefined) { clearTimeout(timer); timer = undefined }
++    save()
++  })
++}
++
  function createWindow(preload: string, show = false, primary = false): BrowserWindow {
-   const glass = desktopGlass()
 +  const frameless = desktopFrameless()
++  const size = primary ? restoredWindowSize() : { width: 1280, height: 820, maximized: false }
++  const icon = framelessWindowIcon()
    const window = new BrowserWindow({
-     width: 1280,
-     height: 820,
-@@ -266,11 +268,16 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-     minHeight: 600,
+-    width: 1280,
+-    height: 820,
+-    minWidth: 520,
+-    minHeight: 600,
++    width: size.width,
++    height: size.height,
++    ...(icon === undefined ? {} : { icon }),
++    minWidth: MIN_WINDOW_WIDTH,
++    minHeight: MIN_WINDOW_HEIGHT,
      show,
-     // Glass mode paints no window background: the translucent sidebar shows the desktop through it,
--    // and the content columns carry their own opaque fill.
--    ...(glass ? {
-+    // and the content columns carry their own opaque fill. The frameless Linux window paints its own
-+    // inset panel, so the compositor only contributes the transparent gutter and rounded corners.
-+    ...(glass || frameless ? {
-       transparent: true,
-       backgroundColor: '#00000000',
-     } : {}),
++    // Linux frameless keeps Electron's native menu bar out of the window: some
++    // desktops still show it, which leaves two menu bars on screen.
++    autoHideMenuBar: process.platform === 'linux',
++    // The frameless Linux window is opaque: it fills its whole rectangle and never asks the
++    // compositor for an alpha surface.
 +    ...(frameless ? {
 +      frame: false,
 +      hasShadow: false,
@@ -142,21 +227,21 @@ index 3b502e2..4115292 100644
      ...(process.platform === 'win32' && primary ? {
        titleBarStyle: 'hidden' as const,
        titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
-@@ -295,7 +302,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+@@ -286,17 +368,29 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
        webSecurity: true,
        webviewTag: primary,
        devTools: true,
--      ...(glass ? { additionalArguments: [GLASS_ARGUMENT] } : {}),
-+      ...(frameless || glass
-+        ? { additionalArguments: [...(glass ? [GLASS_ARGUMENT] : []), ...(frameless ? [FRAME_ARGUMENT] : [])] }
-+        : {}),
++      ...(frameless ? { additionalArguments: [FRAME_ARGUMENT] } : {}),
      },
    })
-   // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
-@@ -305,12 +314,21 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-     if (glass) window.setAutoHideMenuBar(true)
-     window.setMenuBarVisibility(false)
-   }
+-  // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
+-  // The application menu stays set so its accelerators keep working.
+-  if (process.platform === 'linux') window.setMenuBarVisibility(false)
++  // The application menu stays set so its accelerators keep working, but the frameless Linux
++  // window draws no native menu bar: the Web layout owns that strip.
++  if (process.platform === 'linux') {
++    window.setMenuBarVisibility(false)
++  }
 +  if (frameless) {
 +    // The preload button band mirrors the main process state; a maximized restore toggles the glyph.
 +    const sendWindowState = (): void => {
@@ -177,20 +262,29 @@ index 3b502e2..4115292 100644
      const sendFullscreen = (): void => {
        if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
      }
-@@ -785,9 +803,9 @@ async function main(): Promise<void> {
+@@ -365,6 +459,10 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+       if (['http:', 'https:'].includes(destination.protocol)) void shell.openExternal(url)
+     }
+   })
++  if (primary) {
++    if (size.maximized) window.maximize()
++    attachWindowSizePersistence(window)
++  }
+   return window
+ }
+ 
+@@ -770,7 +868,9 @@ async function main(): Promise<void> {
+     if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
          || ['/favicon.svg', '/manifest.webmanifest'].includes(url.pathname)) {
-         const root = join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
--        return desktopGlass()
--          ? serveWebDocument(request, root, glassDocument(glassTint()))
--          : serveWebDocument(request, root)
-+        if (desktopGlass()) return serveWebDocument(request, root, glassDocument(glassTint()))
+-        return serveWebDocument(request, join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist'))
++        const root = join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
 +        if (desktopFrameless()) return serveWebDocument(request, root, frameDocument())
 +        return serveWebDocument(request, root)
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1184,6 +1202,19 @@ async function main(): Promise<void> {
+@@ -1167,6 +1267,24 @@ async function main(): Promise<void> {
      })
    }
  
@@ -205,13 +299,18 @@ index 3b502e2..4115292 100644
 +      if (action === 'close') return mainWindow.close()
 +      throw new Error('desktop window: unknown action')
 +    })
++    ipcMain.handle(DESKTOP_IPC.windowStateGet, (event) => {
++      assertDesktopSender(event, ['app'])
++      if (mainWindow === undefined || event.sender !== mainWindow.webContents) throw new Error('desktop window: rejected sender')
++      return { maximized: mainWindow.isMaximized(), fullscreen: mainWindow.isFullScreen() }
++    })
 +  }
 +
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
 diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
-index c9937a3..9c4346b 100644
+index c9937a3..9c26d65 100644
 --- a/apps/desktop/src/preload-app.ts
 +++ b/apps/desktop/src/preload-app.ts
 @@ -7,6 +7,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
@@ -219,91 +318,79 @@ index c9937a3..9c4346b 100644
  import { syncNativeTheme } from './preload-theme.ts'
  import { syncWindowsAppearance } from './preload-windows.ts'
 +import { FRAME_ARGUMENT } from './linux-frame.ts'
-+import { installLinuxFrame } from './preload-linux-frame.ts'
++import { createLinuxWindowControls, FRAME_ARGUMENT } from './preload-linux-frame.ts'
  import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
  import { createDesktopBrowserBridge } from './preload-browser.ts'
  import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
-@@ -84,6 +86,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
-     else body.setAttribute('tabindex', previous)
-   })
-   syncWindowsAppearance()
-+  if (process.argv.includes(FRAME_ARGUMENT)) installLinuxFrame()
-   if (process.platform === 'win32') installMandatoryUpdateOverlay()
-   contextBridge.exposeInMainWorld('__DSH_DIRECTORY_PICKER__', {
-     pick: () => ipcRenderer.invoke(DESKTOP_IPC.directoryPick) as Promise<string | null>,
+@@ -14,6 +16,9 @@ import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
+ function createProductApi(): DshDesktopProductApi {
+   return {
+     protocolVersion: 1,
++    // Frameless Linux windows render their controls in the page; the API is the
++    // command channel to the main process (main.ts validates every sender).
++    ...(process.argv.includes(FRAME_ARGUMENT) ? { windowControls: createLinuxWindowControls() } : {}),
+     browser: createDesktopBrowserBridge(),
+     fileDrag: {
+       prepare: (source, requestId) => ipcRenderer.invoke(DESKTOP_IPC.fileDragPrepare, source, requestId) as
 diff --git a/apps/desktop/src/preload-linux-frame.ts b/apps/desktop/src/preload-linux-frame.ts
 new file mode 100644
-index 0000000..1ce77a5
+index 0000000..9b827f6
 --- /dev/null
 +++ b/apps/desktop/src/preload-linux-frame.ts
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,45 @@
++/**
++ * Linux frameless primary window: the document marks itself as caption-less and
++ * the application renders the window controls (ui-layout's WindowControls), so
++ * the native titlebar adds nothing.
++ *
++ * The window is opaque. A transparent window would let the compositor round the
++ * corners against the desktop, but transparency on Wayland costs a per-frame
++ * alpha composite of the whole window and has been the least reliable part of
++ * Electron's Linux window support; the panel is therefore painted by the client
++ * bundles at full window size. The page keeps the caption-less geometry DSH
++ * already ships, and this preload contributes only the product API the page
++ * uses to drive minimize/maximize/close through the main process.
++ */
++
 +import { ipcRenderer } from 'electron'
-+import { DESKTOP_IPC } from './ipc.ts'
++import { DESKTOP_IPC, type DesktopWindowControlsApi, type DesktopWindowState } from './ipc.ts'
 +
-+/** Window actions the frameless Linux title band delegates to the main process. */
-+type WindowAction = 'minimize' | 'toggle-maximize' | 'close'
++/** Preload argument marking the application document as a frameless Linux window. */
++export const FRAME_ARGUMENT = '--dsh-desktop-frame'
 +
-+/** Glyph per button; the maximize button swaps its glyph with the window state. */
-+const GLYPHS = {
-+  minimize: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M3.5 8h9"/></svg>',
-+  maximize: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
-+  restore: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5"/><path d="M6.5 4.5h5a1 1 0 0 1 1 1v5"/></svg>',
-+  close: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
-+} as const
-+
-+/** One control button; the close button borrows the destructive hover paint. */
-+function button(action: WindowAction, label: string, glyph: string): HTMLButtonElement {
-+  const element = document.createElement('button')
-+  element.type = 'button'
-+  element.dataset.action = action
-+  element.setAttribute('aria-label', label)
-+  element.title = label
-+  element.innerHTML = glyph
-+  element.addEventListener('click', () => { void ipcRenderer.invoke(DESKTOP_IPC.windowAction, action) })
-+  return element
++/** Whether the primary window draws its own frame: every Linux desktop build does. */
++export function desktopFrameless(): boolean {
++  return process.platform === 'linux'
 +}
 +
 +/**
-+ * Draws the window controls for a frameless Linux window and keeps the
-+ * maximize glyph in step with the main process.
-+ *
-+ * The band is shell-owned DOM appended after the application root: it never
-+ * participates in the client layout, and its buttons subtract themselves from
-+ * the window drag surface through the injected stylesheet.
++ * Product API for the frameless window's controls. The page renders the buttons;
++ * the main process owns the window and validates the sender of every command.
++ * @returns The window-controls surface exposed on `window.dshDesktop`.
 + */
-+export function installLinuxFrame(): void {
-+  const install = (): void => {
-+    const root = document.documentElement
-+    if (root === null) return
-+    root.setAttribute('data-desktop-frame', '')
-+    if (document.getElementById('dsh-window-controls') !== null) return
-+    const band = document.createElement('div')
-+    band.id = 'dsh-window-controls'
-+    const maximize = button('toggle-maximize', 'Maximize', GLYPHS.maximize)
-+    band.append(
-+      button('minimize', 'Minimize', GLYPHS.minimize),
-+      maximize,
-+      button('close', 'Close', GLYPHS.close),
-+    )
-+    document.body.append(band)
-+    ipcRenderer.on(DESKTOP_IPC.windowState, (_event, maximized: boolean) => {
-+      maximize.innerHTML = maximized ? GLYPHS.restore : GLYPHS.maximize
-+      const label = maximized ? 'Restore' : 'Maximize'
-+      maximize.setAttribute('aria-label', label)
-+      maximize.title = label
-+    })
++export function createLinuxWindowControls(): DesktopWindowControlsApi {
++  return {
++    minimize: () => ipcRenderer.invoke(DESKTOP_IPC.windowAction, 'minimize') as Promise<void>,
++    toggleMaximize: () => ipcRenderer.invoke(DESKTOP_IPC.windowAction, 'toggle-maximize') as Promise<void>,
++    close: () => ipcRenderer.invoke(DESKTOP_IPC.windowAction, 'close') as Promise<void>,
++    state: () => ipcRenderer.invoke(DESKTOP_IPC.windowStateGet) as Promise<DesktopWindowState>,
++    subscribe(listener) {
++      const handle = (_event: Electron.IpcRendererEvent, maximized: boolean): void => {
++        listener({ maximized, fullscreen: document.documentElement.hasAttribute('data-fullscreen') })
++      }
++      ipcRenderer.on(DESKTOP_IPC.windowState, handle)
++      return () => { ipcRenderer.off(DESKTOP_IPC.windowState, handle) }
++    },
 +  }
-+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true })
-+  else install()
 +}
 diff --git a/apps/desktop/src/preload-windows.ts b/apps/desktop/src/preload-windows.ts
-index aa938fc..4f52d13 100644
+index f17cbdb..5d590a8 100644
 --- a/apps/desktop/src/preload-windows.ts
 +++ b/apps/desktop/src/preload-windows.ts
-@@ -9,9 +9,9 @@ import { installWindowsMenu } from './preload-menu.ts'
+@@ -6,9 +6,9 @@ import { installWindowsMenu } from './preload-menu.ts'
+ 
+ /** Install the caption titlebar marker and observe application language and palette changes. */
  export function syncWindowsAppearance(): void {
-   // Glass mode keeps the Web layout: no in-page caption, and the native menu bar auto-hides.
-   if (process.argv.includes(GLASS_ARGUMENT)) return
 -  // Linux hides the native menu bar and draws the caption menubar inside the page, so it needs
 -  // the same marker and appearance reporting as Windows.
 -  if (process.platform !== 'win32' && process.platform !== 'linux') return
@@ -313,59 +400,140 @@ index aa938fc..4f52d13 100644
    const mark = (): void => {
      const root = document.documentElement
      root.dataset.windowsTitlebar = ''
+diff --git a/apps/desktop/src/settings.ts b/apps/desktop/src/settings.ts
+index a4bb67b..1c75a22 100644
+--- a/apps/desktop/src/settings.ts
++++ b/apps/desktop/src/settings.ts
+@@ -5,17 +5,33 @@
+ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+ import { join } from 'node:path'
+ 
++/** Persisted frameless window geometry; absent until the window has been resized. */
++export interface DesktopWindowSize {
++  /** Normal (unmaximized) width in DIP. */
++  readonly width: number
++  /** Normal (unmaximized) height in DIP. */
++  readonly height: number
++  /** Whether the window was maximized when its size was last recorded. */
++  readonly maximized: boolean
++}
++
+ /** Resolved shell preferences; absent fields use the defaults without rewriting existing files. */
+ export interface DesktopSettings {
+   readonly updates: {
+     readonly allowTestAuthPopupWindow: boolean
+   }
++  readonly desktopWindowSize?: DesktopWindowSize
+ }
+ 
+ function record(value: unknown): value is Record<string, unknown> {
+   return typeof value === 'object' && value !== null && !Array.isArray(value)
+ }
+ 
++/** Persisted dimensions are whole positive numbers in device-independent pixels. */
++function dimension(value: unknown): number | undefined {
++  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
++}
++
+ /**
+  * Read shell settings, creating the default document exclusively when missing.
+  * @param userData - Electron's userData directory, independent of DSH_HOME.
+@@ -44,7 +60,19 @@ export function readDesktopSettings(userData: string): DesktopSettings {
+     if (allow !== undefined && typeof allow !== 'boolean') {
+       throw new Error('updates.allowTestAuthPopupWindow must be true or false')
+     }
+-    return { updates: { allowTestAuthPopupWindow: allow ?? false } }
++    const size = value.desktopWindowSize
++    if (size !== undefined && (!record(size) || dimension(size.width) === undefined
++      || dimension(size.height) === undefined || typeof size.maximized !== 'boolean')) {
++      throw new Error('desktopWindowSize must carry positive width and height and a boolean maximized')
++    }
++    const updates = { updates: { allowTestAuthPopupWindow: allow ?? false } }
++    if (size === undefined) return updates
++    return {
++      ...updates,
++      desktopWindowSize: {
++        width: dimension(size.width)!, height: dimension(size.height)!, maximized: size.maximized,
++      },
++    }
+   } catch (error) {
+     try {
+       console.warn(`desktop settings: ${path}: using defaults because settings could not be loaded`, error)
+@@ -55,3 +83,27 @@ export function readDesktopSettings(userData: string): DesktopSettings {
+     return defaults
+   }
+ }
++
++/**
++ * Persist the frameless window's normal geometry and maximized state, leaving
++ * every other shell preference in the document untouched.
++ * @param userData - Electron's userData directory, independent of DSH_HOME.
++ * @param size - Normal (unmaximized) window dimensions in DIP and the maximized state.
++ */
++export function saveDesktopWindowSize(userData: string, size: DesktopWindowSize): void {
++  const directory = join(userData, 'desktop')
++  const path = join(directory, 'settings.json')
++  mkdirSync(directory, { recursive: true, mode: 0o700 })
++  let document: Record<string, unknown> = {}
++  try {
++    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
++    if (record(parsed)) document = parsed
++  } catch (error) {
++    const code = (error as NodeJS.ErrnoException).code
++    if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
++  }
++  document.desktopWindowSize = {
++    width: Math.floor(size.width), height: Math.floor(size.height), maximized: size.maximized,
++  }
++  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
++}
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index f92695a..0fae3aa 100644
+index a25876d..90ebf51 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
-@@ -4,6 +4,7 @@ import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
+@@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
+ import type { DesktopHostProcess } from '../src/host-process.ts'
+ import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
  import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
- import { GLASS_ARGUMENT } from '../src/glass-mode.ts'
- import { glassDocument } from '../src/glass-document.ts'
 +import { FRAME_ARGUMENT, frameDocument } from '../src/linux-frame.ts'
  import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
  import type { IpcMainInvokeEvent } from 'electron'
  import { join } from 'node:path'
-@@ -872,19 +873,24 @@ describe('desktop main startup', () => {
+@@ -324,6 +325,7 @@ vi.mock('electron', () => ({
+   powerMonitor: harness.powerMonitor,
+   Tray: harness.FakeTray,
+   nativeImage: { createFromPath: (path: string) => ({ path }) },
++  screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
+ }))
+ vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
+   constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
+@@ -869,12 +871,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
-+      expect(window.options).toMatchObject({ frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false })
++      expect(window.options).toMatchObject({ frame: false, hasShadow: false })
++      expect(window.options).not.toHaveProperty('transparent')
        expect(window.options).not.toHaveProperty('titleBarStyle')
        expect(window.options).not.toHaveProperty('vibrancy')
      }
      expect(harness.hosts).toHaveLength(0)
    })
  
--  it('keeps the in-page caption configuration on linux without glass mode', async () => {
-+  it('draws its own frame on linux without glass mode', async () => {
-     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
-     await import('../src/main.ts')
-     await harness.preparing.promise
-     const window = harness.windows[0]!
--    expect(window.options).not.toHaveProperty('transparent')
--    expect(window.options).not.toHaveProperty('webPreferences.additionalArguments')
++  it('draws its own frame on linux', async () => {
++    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
++    await import('../src/main.ts')
++    await harness.preparing.promise
++    const window = harness.windows[0]!
 +    expect(window.options).toMatchObject({
 +      frame: false,
-+      transparent: true,
-+      backgroundColor: '#00000000',
++      hasShadow: false,
 +      webPreferences: { additionalArguments: [FRAME_ARGUMENT] },
 +    })
-     expect(window.setAutoHideMenuBar).not.toHaveBeenCalled()
-     expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
-   })
-@@ -895,7 +901,7 @@ describe('desktop main startup', () => {
-     await import('../src/main.ts')
-     await harness.preparing.promise
-     const window = harness.windows[0]!
--    expect(window.options).toMatchObject({ webPreferences: { additionalArguments: [GLASS_ARGUMENT] } })
-+    expect(window.options).toMatchObject({ webPreferences: { additionalArguments: [GLASS_ARGUMENT, FRAME_ARGUMENT] } })
-     expect(window.setAutoHideMenuBar).toHaveBeenCalledWith(true)
-     expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
-     // The window paints no background so the translucent sidebar shows the desktop through it.
-@@ -917,6 +923,17 @@ describe('desktop main startup', () => {
-     else expect(call).toHaveLength(2)
-   })
- 
++    expect(window.options).not.toHaveProperty('transparent')
++    expect(window.setAutoHideMenuBar).not.toHaveBeenCalled()
++    expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
++  })
++
 +  it('injects the frameless panel document on linux', async () => {
 +    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
 +    const { serveWebDocument } = await import('../src/web-document.ts')
@@ -377,40 +545,43 @@ index f92695a..0fae3aa 100644
 +    expect(call?.[2]).toBe(frameDocument())
 +  })
 +
-   it('serves the requested sidebar tint and keeps the macOS material by default', async () => {
-     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
-     vi.stubEnv('DSH_DESKTOP_GLASS', '1')
-@@ -983,14 +1000,13 @@ describe('desktop main startup', () => {
+   it('serves packaged shell documents instead of rejecting the shell origin', async () => {
+     const { serveWebDocument } = await import('../src/web-document.ts')
+     vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))
+@@ -910,14 +940,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
 -  it.each(['linux'] as const)('registers no fullscreen relay on %s', async (platform) => {
--    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
-+  it('relays fullscreen state for the frameless linux window', async () => {
-+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
++  it.each(['linux'] as const)('relays fullscreen state for the frameless linux window on %s', async (platform) => {
+     vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
      await import('../src/main.ts')
      await harness.preparing.promise
      const window = harness.windows[0]!
--    window.emit('enter-full-screen')
++    const sent = () => window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)
++    window.fullscreen = true
+     window.emit('enter-full-screen')
++    expect(sent()).toHaveLength(1)
      window.webContents.emit('did-finish-load')
 -    expect(window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toHaveLength(0)
-+    expect(window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toHaveLength(1)
++    expect(sent()).toHaveLength(2)
++    expect(sent().at(-1)).toEqual([DESKTOP_IPC.windowFullscreen, true])
    })
  
    it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
 diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
-index 3b5069e..b716979 100644
+index 735b77f..cc055f0 100644
 --- a/apps/desktop/tests/preload-windows.client.spec.ts
 +++ b/apps/desktop/tests/preload-windows.client.spec.ts
-@@ -39,14 +39,14 @@ it('does not install Windows controls on darwin', () => {
+@@ -38,14 +38,12 @@ it('does not install Windows controls on darwin', () => {
    expect(send).not.toHaveBeenCalled()
  })
  
 -it('installs the caption menubar and reports its appearance on linux', () => {
 +it('leaves the Web layout to the frameless chrome on linux', () => {
    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
-   stubCaptionRendering()
-   document.documentElement.lang = 'en'
+-  stubCaptionRendering()
+-  document.documentElement.lang = 'en'
    syncWindowsAppearance()
 -  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(true)
 -  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('40px')
@@ -420,7 +591,855 @@ index 3b5069e..b716979 100644
 +  expect(send).not.toHaveBeenCalled()
  })
  
- it('leaves the Web layout untouched in linux glass mode', () => {
+ it('synchronizes live language and palette changes and stops observing a closed document', async () => {
+diff --git a/apps/desktop/tests/settings.spec.ts b/apps/desktop/tests/settings.spec.ts
+index b285bb9..2d91b42 100644
+--- a/apps/desktop/tests/settings.spec.ts
++++ b/apps/desktop/tests/settings.spec.ts
+@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
+ import { tmpdir } from 'node:os'
+ import { join } from 'node:path'
+ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
+-import { readDesktopSettings } from '../src/settings.ts'
++import { readDesktopSettings, saveDesktopWindowSize } from '../src/settings.ts'
+ 
+ vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }))
+ 
+@@ -81,3 +81,20 @@ it('continues with defaults even when warning output fails', () => {
+   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
+   expect(readFileSync(path, 'utf8')).toBe('{')
+ })
++
++it('round-trips the frameless window size without touching other preferences', () => {
++  const { userData, path } = fixture()
++  writeFileSync(path, '{"updates":{"allowTestAuthPopupWindow":true},"custom":"preserve"}')
++  saveDesktopWindowSize(userData, { width: 1100.7, height: 700, maximized: true })
++  expect(readDesktopSettings(userData).desktopWindowSize).toEqual({ width: 1100, height: 700, maximized: true })
++  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
++  expect(raw.custom).toBe('preserve')
++  expect(raw.updates).toEqual({ allowTestAuthPopupWindow: true })
++})
++
++it('ignores a malformed stored window size and reports it', () => {
++  const { userData, path } = fixture()
++  writeFileSync(path, '{"desktopWindowSize":{"width":"1100","height":700,"maximized":false}}')
++  expect(readDesktopSettings(userData).desktopWindowSize).toBeUndefined()
++  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(path), expect.any(Error))
++})
+diff --git a/apps/web/index.html b/apps/web/index.html
+index ff3ca62..5e94d83 100644
+--- a/apps/web/index.html
++++ b/apps/web/index.html
+@@ -10,9 +10,149 @@
+     <link rel="icon" type="image/svg+xml" href="/favicon-dark.svg" media="(prefers-color-scheme: dark)" />
+     <link rel="icon" type="image/svg+xml" href="/favicon.svg" media="(prefers-color-scheme: light)" />
+     <title>DSH Local Build</title>
++    <style>
++      html,
++      body,
++      #root {
++        margin: 0;
++        width: 100%;
++        height: 100%;
++      }
++
++      /* The shell fades in once the app has committed its first paint; until
++         then the startup shell covers it (ZCode renderer/index.html keeps the
++         same two-condition hand-off between the logo animation and React). */
++      #root {
++        opacity: 0;
++        transition: opacity 0.16s ease;
++      }
++
++      body.dsh-startup-ready #root {
++        opacity: 1;
++      }
++
++      #loading {
++        position: fixed;
++        inset: 0;
++        z-index: 2147483647;
++        display: flex;
++        align-items: center;
++        justify-content: center;
++        transition: opacity 0.16s ease;
++      }
++
++      body.dsh-startup-ready #loading {
++        pointer-events: none;
++        opacity: 0;
++      }
++
++      .startup-logo-shell {
++        position: relative;
++        display: flex;
++        width: 96px;
++        height: 96px;
++        align-items: center;
++        justify-content: center;
++        border-radius: 24px;
++        background: #ffffff;
++        border: 1px solid rgb(0 0 0 / 0.08);
++        box-shadow:
++          0 20px 25px -5px rgb(0 0 0 / 0.2),
++          0 8px 10px -6px rgb(0 0 0 / 0.2);
++        transform: scale(0.72);
++        opacity: 0;
++        animation: startup-logo-pop 0.72s cubic-bezier(0.22, 1, 0.36, 1) forwards;
++        transform-origin: center;
++      }
++
++      .startup-logo {
++        width: 64px;
++        height: 64px;
++        object-fit: contain;
++      }
++
++      @keyframes startup-logo-pop {
++        0% {
++          opacity: 0;
++          transform: scale(0.72);
++        }
++
++        38% {
++          opacity: 1;
++          transform: scale(1.045);
++        }
++
++        58% {
++          transform: scale(0.985);
++        }
++
++        76% {
++          transform: scale(1.008);
++        }
++
++        100% {
++          opacity: 1;
++          transform: scale(1);
++        }
++      }
++
++      @media (prefers-reduced-motion: reduce) {
++        .startup-logo-shell {
++          opacity: 1;
++          transform: scale(1);
++          animation: none;
++        }
++      }
++    </style>
+   </head>
+   <body>
+     <div id="root"></div>
++    <div id="loading" class="[app-region:drag]" role="status" aria-busy="true" aria-label="Loading...">
++      <div class="startup-logo-shell">
++        <img class="startup-logo" src="/startup-logo.png" alt="" />
++      </div>
++    </div>
++    <script type="module">
++      const startupLogoShell = document.querySelector('.startup-logo-shell')
++      const startupLoading = document.getElementById('loading')
++      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
++      let finished = false
++      let animationDone = false
++      let appReady = false
++
++      const tryFinishStartupAnimation = () => {
++        if (finished || !animationDone || !appReady) return
++        finished = true
++        document.body.classList.add('dsh-startup-ready')
++        window.setTimeout(() => startupLoading?.remove(), 500)
++      }
++
++      window.addEventListener('dsh-react-startup-ready', () => {
++        appReady = true
++        tryFinishStartupAnimation()
++      }, { once: true })
++
++      if (reduceMotion || !startupLogoShell) {
++        animationDone = true
++      } else {
++        startupLogoShell.addEventListener('animationend', () => {
++          animationDone = true
++          tryFinishStartupAnimation()
++        }, { once: true })
++        window.setTimeout(() => {
++          animationDone = true
++          tryFinishStartupAnimation()
++        }, 1000)
++      }
++
++      // The logo animation must not outlive a slow first commit: after the
++      // shell's own budget the app is considered ready for the purpose of
++      // fading the cover (ZCode renderer/index.html does the same).
++      window.setTimeout(() => {
++        appReady = true
++        tryFinishStartupAnimation()
++      }, 3000)
++    </script>
+     <script type="module" src="/src/main.ts"></script>
+   </body>
+ </html>
+diff --git a/apps/web/src/main.ts b/apps/web/src/main.ts
+index 5f4786a..9ea0a73 100644
+--- a/apps/web/src/main.ts
++++ b/apps/web/src/main.ts
+@@ -34,7 +34,10 @@ try {
+       gate.resolve()
+     }).catch((error: unknown) => { gate.reject(error) })
+   }
++  // Hand the startup shell off to the committed app (the HTML only lifts the
++  // cover once this fires and the logo animation has finished).
+   void entry.run(desktop === undefined ? undefined : reportFailure)
++    .finally(() => { window.dispatchEvent(new Event('dsh-react-startup-ready')) })
+ } catch (reason) {
+   reportFailure(reason)
+ }
+diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
+index b3b07c2..8598f63 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
+@@ -1,5 +1,6 @@
+ /** Resident conversation navigation and Session-specific header content. */
+ import clsx from 'clsx'
++import { WindowControls } from './WindowControls.tsx'
+ import type { ConversationHeaderProps } from '../contract/slots.ts'
+ import { conversationPhase } from '../contract/snapshot.ts'
+ import css from './ConversationRoot.module.css'
+@@ -20,7 +21,7 @@ export function ConversationHeader({ sessionId, useSession, useConversation, ren
+         {renderSlot('conversation.header.leading', {})}
+       </div>
+       {sessionId === undefined
+-        ? <div className={css.titleRow} />
++        ? <div className={css.titleRow}><span className={css.blankWindowControls}><WindowControls /></span></div>
+         : renderSlot('conversation.session.header', { hideChrome: blank })}
+     </header>
+   )
+diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
+index ac6cb69..a643433 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
+@@ -628,3 +628,43 @@
+ .embeddedBody[data-content-phase='settling'] .composerSeat {
+   visibility: hidden;
+ }
++
++/* Frameless Linux shell: with no Session header there is no inline seat, so the
++   bare title row keeps the window controls at its trailing edge. */
++.blankWindowControls {
++  display: flex;
++  justify-content: flex-end;
++  width: 100%;
++}
++
++/* Frameless Linux: the header action row seats the window controls (ZCode
++   WorkspaceHeaderActionSection keeps them in the trailing action cluster). */
++.windowControls {
++  display: flex;
++  flex: none;
++  align-items: center;
++  gap: 2px;
++  -webkit-app-region: no-drag;
++}
++
++.windowControl {
++  box-sizing: border-box;
++  display: grid;
++  place-items: center;
++  width: 28px;
++  height: 28px;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--dsw-alias-label-primary);
++}
++
++.windowControl:hover {
++  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
++}
++
++.windowControlClose:hover {
++  background: #e5484d;
++  color: #fff;
++}
+diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
+index deaddcf..16a4ef7 100644
+--- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
++++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
+@@ -3,6 +3,7 @@
+ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+ import clsx from 'clsx'
+ import { Button, IconEllipsisOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
++import { WindowControls } from './WindowControls.tsx'
+ import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ import type {
+@@ -203,6 +204,7 @@ export function ConversationSessionHeader({
+               </nav>
+               <div className={css.headerActions}>
+                 {renderSlot('conversation.session.header.actions', {})}
++                <WindowControls />
+               </div>
+             </div>
+             <div className={css.headerUtilities}>
+diff --git a/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
+new file mode 100644
+index 0000000..fb2bbed
+--- /dev/null
++++ b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
+@@ -0,0 +1,96 @@
++/**
++ * Linux frameless window controls: the page renders the three buttons and the
++ * product API drives the main process (ZCode renders DesktopWindowControls and
++ * dispatches DesktopCommandIds; this is the same split — renderer owns the
++ * control, main owns the window). The band only exists when the preload marked
++ * the document as a frameless desktop frame.
++ */
++import { useEffect, useState } from 'react'
++import type { ReactElement } from 'react'
++import css from './ConversationRoot.module.css'
++
++/** Snapshot of the frameless window's chrome state. */
++interface WindowState {
++  maximized: boolean
++  fullscreen: boolean
++}
++
++/** Window-controls surface exposed on `window.dshDesktop` by the preload. */
++interface WindowControlsApi {
++  minimize(): Promise<void>
++  toggleMaximize(): Promise<void>
++  close(): Promise<void>
++  state(): Promise<WindowState>
++  subscribe(listener: (state: WindowState) => void): () => void
++}
++
++function windowControls(): WindowControlsApi | undefined {
++  return (globalThis as typeof globalThis & { dshDesktop?: { windowControls?: WindowControlsApi } })
++    .dshDesktop?.windowControls
++}
++
++/** Window state changes arrive from the main process; the icon swaps with them.
++ * Inline seat: the Conversation header action row owns the controls, so the
++ * shell needs no floating band over the header (ZCode seats its
++ * DesktopWindowControls in WorkspaceHeaderActionSection the same way). */
++export function WindowControls(): ReactElement | null {
++  const [api] = useState(windowControls)
++  const [maximized, setMaximized] = useState(false)
++  useEffect(() => {
++    if (api === undefined) return
++    let live = true
++    void api.state().then((state) => { if (live) setMaximized(state.maximized) })
++    const unsubscribe = api.subscribe((state) => setMaximized(state.maximized))
++    return () => {
++      live = false
++      unsubscribe()
++    }
++  }, [api])
++  if (api === undefined) return null
++  return (
++    <div className={css.windowControls} data-desktop-window-controls="">
++      <button
++        type="button"
++        className={css.windowControl}
++        aria-label="Minimize window"
++        title="Minimize window"
++        onClick={() => { void api.minimize() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M3.5 8h9" />
++        </svg>
++      </button>
++      <button
++        type="button"
++        className={css.windowControl}
++        aria-label={maximized ? 'Restore window' : 'Maximize window'}
++        title={maximized ? 'Restore window' : 'Maximize window'}
++        onClick={() => { void api.toggleMaximize() }}
++      >
++        {maximized
++          ? (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5" />
++              <path d="M6.5 4.5h5a1 1 0 0 1 1 1v5" />
++            </svg>
++          )
++          : (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="4" y="4" width="8" height="8" rx="1.5" />
++            </svg>
++          )}
++      </button>
++      <button
++        type="button"
++        className={`${css.windowControl} ${css.windowControlClose}`}
++        aria-label="Close window"
++        title="Close window"
++        onClick={() => { void api.close() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
++        </svg>
++      </button>
++    </div>
++  )
++}
+diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
+index 5b71ebe..9773f2a 100644
+--- a/packages/client/ui-layout/src/client/AppFrame.module.css
++++ b/packages/client/ui-layout/src/client/AppFrame.module.css
+@@ -7,6 +7,19 @@
+   background: var(--dsw-alias-bg-base);
+ }
+ 
++/* Linux frameless: the frame is the window panel itself — 12px radius, 1px
++   border, and the shell content tucked 4px off its right and bottom edges,
++   mirroring ZCode's WorkspaceShellWindowChrome.ts:40 (rounded-xl border
++   border-border) and WorkspaceShellLayout.tsx:2553-2556 (content pr-1 pb-1).
++   The page keeps the base fill behind the rounded corners; the window stays
++   opaque, so nothing from the desktop can show through. */
++:global(html[data-desktop-frame]) .frame {
++  box-sizing: border-box;
++  border: 1px solid var(--dsw-alias-border-l3);
++  border-radius: 12px;
++  padding: 0 4px 4px 0;
++}
++
+ /* Only a discrete collapse/expand toggle eases the tracks (the TSX holds
+    data-animating across the toggle on the deepsuite sider curve). Steady-state
+    tracks move only with the viewport, and those updates must land instantly:
+@@ -69,6 +82,12 @@
+   overflow: hidden;
+ }
+ 
++/* Linux frameless drag strip above the content column (ZCode
++   WorkspaceShellLayout.tsx:2559, h-1). */
++.desktopDragStrip {
++  flex: 0 0 4px;
++}
++
+ /* macOS desktop: the frame goes transparent so window vibrancy reaches the
+    sidebar column, which keeps only a translucent tint; the centre paints the
+    base background itself to stay opaque. The sidebar/centre separator moves
+@@ -204,6 +223,26 @@
+    lights (centre y ≈ 24). Sits above column content, below frame overlays
+    (20) and the fullscreen right panel (40). The box subtracts itself from any
+    window drag row beneath (Electron app-regions are geometry, not stacking). */
++
++/* Linux frameless: the collapsed column is the shell's 4px inset, not a rail
++   (ZCode WorkspaceShellLayout.tsx:452); the reopen controls sit at the frame's
++   left edge where macOS puts them beside the traffic lights. */
++:global(html[data-desktop-frame]) .frame[data-sidebar-collapsed] .sidebarCol {
++  background: var(--dsw-alias-bg-base);
++  border-right: none;
++}
++
++:global(html[data-desktop-frame]) .leadingSeat {
++  left: 12px;
++}
++
++/* Collapsed caveat: the seat's two 28px controls run 12-76, then 8px of air;
++   conversation content clears that band like it does for the macOS traffic
++   lights. */
++:global(html[data-desktop-frame]) .frame[data-sidebar-collapsed] {
++  --dsh-frame-leading-clearance: 84px;
++}
++
+ .leadingSeat {
+   position: absolute;
+   top: 11px;
+@@ -288,3 +327,31 @@
+ .overlayLayer > * {
+   pointer-events: auto;
+ }
++
++/* Frameless Linux shell: the rounded panel would clip a full-height separator,
++   so the hover pill keeps the corner-radius clearance ZCode applies to its
++   resize handle indicator (radius 12 + 4 = 16). */
++.handle::after {
++  position: absolute;
++  top: 0;
++  bottom: 0;
++  left: 50%;
++  width: 2px;
++  content: '';
++  transform: translateX(-50%);
++  border-radius: 999px;
++  background: var(--dsw-alias-border-l3);
++  opacity: 0;
++  pointer-events: none;
++  transition: opacity 120ms ease;
++}
++
++.handle:hover::after,
++.handle[data-dragging]::after {
++  opacity: 1;
++}
++
++:global(html[data-desktop-frame]) .handle::after {
++  top: 16px;
++  bottom: 16px;
++}
+diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
+index 5614947..f259537 100644
+--- a/packages/client/ui-layout/src/client/AppFrame.tsx
++++ b/packages/client/ui-layout/src/client/AppFrame.tsx
+@@ -21,6 +21,7 @@ import type {
+ } from '@deepseek-ai/dsh-client-ui-slots'
+ import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
+ import { DocumentTitle } from './DocumentTitle.tsx'
++import { WindowControls } from './WindowControls.tsx'
+ import type { createLayoutStore } from './stores.ts'
+ import css from './AppFrame.module.css'
+ 
+@@ -33,12 +34,28 @@ export type AppFrameProps =
+ 
+ /** Center column grid item (session-body building block). */
+ function CenterColumn(props: { children?: ReactNode }) {
+-  return <div className={css.centerCol}>{props.children}</div>
++  // Linux frameless: ZCode keeps a 4px drag strip above the content column
++  // (WorkspaceShellLayout.tsx:2559). It is part of the column, not the window
++  // chrome, so the header below it keeps its own layout.
++  const frameless = document.documentElement.hasAttribute('data-desktop-frame')
++  return (
++    <div className={css.centerCol}>
++      {frameless ? <div className={css.desktopDragStrip} data-window-drag /> : null}
++      {props.children}
++    </div>
++  )
+ }
+ 
+ /** Subscribe to the main key without subscribing the column frame to each panel id. */
+ function MainPanel({ usePanelInfo, renderSlot }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'>) {
+   const panelId = usePanelInfo(info => info.activePanelId)
++  // The frameless shell has two control seats: panels that draw a header row own
++  // the inline seat, chrome-less panels keep the floating one
++  // (ZCode: WorkspaceHeaderActionSection vs DesktopOverlayWindowControls).
++  useEffect(() => {
++    if (!document.documentElement.hasAttribute('data-desktop-frame')) return
++    document.documentElement.dataset.desktopControls = (panelId ?? 'conversation') === 'conversation' ? 'header' : 'overlay'
++  }, [panelId])
+   return renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })
+ }
+ 
+@@ -166,8 +183,13 @@ export function AppFrame({
+   // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
+   // the Windows caption row; neither platform keeps an icon rail.
+   const darwin = document.documentElement.dataset.platform === 'darwin'
+-  const collapsedWidth = darwin
+-    || document.documentElement.hasAttribute('data-windows-titlebar') ? 0 : SIDEBAR_COLLAPSED
++  // Linux frameless: the sidebar collapses into the shell's 4px inset instead
++  // of keeping the icon rail (ZCode WorkspaceShellLayout.tsx:452 keeps 4px of
++  // panel inset when the shell owns the inset).
++  const desktopFrame = document.documentElement.hasAttribute('data-desktop-frame')
++  const collapsedWidth = darwin || document.documentElement.hasAttribute('data-windows-titlebar')
++    ? 0
++    : desktopFrame ? 4 : SIDEBAR_COLLAPSED
+   // Opening on a narrow frame collapses the left sidebar. Eligibility must
+   // include that space before the occupant's first shown report arrives.
+   const normal = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference, collapsedWidth)
+@@ -253,7 +275,9 @@ export function AppFrame({
+   // row (ui-sidebar). AppFrame.module.css publishes the matching
+   // --dsh-frame-leading-clearance under the same collapsed condition.
+   const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
+-  const leadingMounted = darwin && sidebarCollapsed
++  // A collapsed Linux frame has no rail: the reopen controls take the same
++  // leading seat macOS uses beside its traffic lights.
++  const leadingMounted = (darwin || desktopFrame) && sidebarCollapsed
+ 
+   return (
+     <div
+@@ -277,6 +301,7 @@ export function AppFrame({
+         useSessions={useSessions}
+         usePanelInfo={usePanelInfo}
+       />
++      {desktopFrame ? <WindowControls overlay /> : null}
+       <div className={css.sidebarCol}>
+         {sidebar}
+       </div>
+diff --git a/packages/client/ui-layout/src/client/WindowControls.module.css b/packages/client/ui-layout/src/client/WindowControls.module.css
+new file mode 100644
+index 0000000..286765a
+--- /dev/null
++++ b/packages/client/ui-layout/src/client/WindowControls.module.css
+@@ -0,0 +1,44 @@
++/* Frameless window controls: the same 28px band the preload used to draw, now
++   rendered by the page over the product API. */
++.controls {
++  display: flex;
++  gap: 2px;
++  -webkit-app-region: no-drag;
++}
++
++/* Chrome-less seat: panels without a header row keep the controls floating over
++   their top-right corner (ZCode DesktopOverlayWindowControls right-1 top-1). */
++.overlay {
++  position: fixed;
++  top: 11px;
++  right: 16px;
++  z-index: 30;
++}
++
++/* Only one of the two seats is live: the shell marks which one the active panel
++   uses (main panel id === 'conversation' has a header row). */
++:global(html[data-desktop-controls='header']) .overlay {
++  display: none;
++}
++
++.control {
++  box-sizing: border-box;
++  display: grid;
++  place-items: center;
++  width: 28px;
++  height: 28px;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--dsw-alias-label-primary);
++}
++
++.control:hover {
++  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
++}
++
++.close:hover {
++  background: #e5484d;
++  color: #fff;
++}
+diff --git a/packages/client/ui-layout/src/client/WindowControls.tsx b/packages/client/ui-layout/src/client/WindowControls.tsx
+new file mode 100644
+index 0000000..8e090bc
+--- /dev/null
++++ b/packages/client/ui-layout/src/client/WindowControls.tsx
+@@ -0,0 +1,96 @@
++/**
++ * Linux frameless window controls: the page renders the three buttons and the
++ * product API drives the main process (ZCode renders DesktopWindowControls and
++ * dispatches DesktopCommandIds; this is the same split — renderer owns the
++ * control, main owns the window). The band only exists when the preload marked
++ * the document as a frameless desktop frame.
++ */
++import { useEffect, useState } from 'react'
++import type { ReactElement } from 'react'
++import css from './WindowControls.module.css'
++
++/** Snapshot of the frameless window's chrome state. */
++interface WindowState {
++  maximized: boolean
++  fullscreen: boolean
++}
++
++/** Window-controls surface exposed on `window.dshDesktop` by the preload. */
++interface WindowControlsApi {
++  minimize(): Promise<void>
++  toggleMaximize(): Promise<void>
++  close(): Promise<void>
++  state(): Promise<WindowState>
++  subscribe(listener: (state: WindowState) => void): () => void
++}
++
++function windowControls(): WindowControlsApi | undefined {
++  return (globalThis as typeof globalThis & { dshDesktop?: { windowControls?: WindowControlsApi } })
++    .dshDesktop?.windowControls
++}
++
++/** Window state changes arrive from the main process; the icon swaps with them.
++ * `overlay` is the chrome-less seat for panels that own no header row (the
++ * counterpart of ZCode's DesktopOverlayWindowControls); header panels mount the
++ * inline seat instead and CSS picks whichever the active panel needs. */
++export function WindowControls({ overlay = false }: { readonly overlay?: boolean } = {}): ReactElement | null {
++  const [api] = useState(windowControls)
++  const [maximized, setMaximized] = useState(false)
++  useEffect(() => {
++    if (api === undefined) return
++    let live = true
++    void api.state().then((state) => { if (live) setMaximized(state.maximized) })
++    const unsubscribe = api.subscribe((state) => setMaximized(state.maximized))
++    return () => {
++      live = false
++      unsubscribe()
++    }
++  }, [api])
++  if (api === undefined) return null
++  return (
++    <div className={overlay ? `${css.controls} ${css.overlay}` : css.controls}>
++      <button
++        type="button"
++        className={css.control}
++        aria-label="Minimize window"
++        title="Minimize window"
++        onClick={() => { void api.minimize() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M3.5 8h9" />
++        </svg>
++      </button>
++      <button
++        type="button"
++        className={css.control}
++        aria-label={maximized ? 'Restore window' : 'Maximize window'}
++        title={maximized ? 'Restore window' : 'Maximize window'}
++        onClick={() => { void api.toggleMaximize() }}
++      >
++        {maximized
++          ? (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5" />
++              <path d="M6.5 4.5h5a1 1 0 0 1 1 1v5" />
++            </svg>
++          )
++          : (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="4" y="4" width="8" height="8" rx="1.5" />
++            </svg>
++          )}
++      </button>
++      <button
++        type="button"
++        className={`${css.control} ${css.close}`}
++        aria-label="Close window"
++        title="Close window"
++        onClick={() => { void api.close() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
++        </svg>
++      </button>
++    </div>
++  )
++}
+diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
+index 2560e37..1b9b76d 100644
+--- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
++++ b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
+@@ -53,7 +53,13 @@
+   -webkit-app-region: no-drag;
+ }
+ 
+-:global([data-windows-titlebar]) .root.collapsed .logoRow {
++:global([data-windows-titlebar]) .root/* Linux frameless: the sidebar header is a 48px drag row (ZCode
++   project-sidebar/index.tsx:226); the logo row is its upstream equivalent. */
++:global(html[data-desktop-frame]) .logoRow {
++  height: 48px;
++}
++
++.collapsed .logoRow {
+   height: 0;
+ }
+ 
+@@ -204,6 +210,11 @@
+   justify-content: flex-start;
+ }
+ 
++/* Linux glass mode (no Windows caption marker) keeps the anchor above: with no
++   traffic lights the strip has nothing to clear, so the toggle stays at the
++   column's right edge as on macOS. A collapsed column hands it to the frame's
++   shell.leading seat at left 12 (ui-layout) instead. */
++
+ /* The strip's full 52px foot leaves the wordmark too low; the content column
+    tucks 12px back under it, still clear of the toggle (28px control centered
+    in the strip ends at y 40). */
+diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
+index c4083d2..419585c 100644
+--- a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
++++ b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
+@@ -239,6 +239,10 @@ export function SidebarRoot({
+   }
+ 
+   const darwinDesktop = isDarwinDesktop()
++  // Linux frameless renders the upstream logo row (brand + toggle on one line):
++  // only macOS keeps the traffic-light strip. ZCode's sidebar header is a single
++  // 48px drag row; the logo row is its equivalent here.
++  const stripDesktop = darwinDesktop
+   // Rail resting state is the whale mark; hovering swaps in the panel icon
+   // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
+   // panel icon.
+@@ -263,31 +267,7 @@ export function SidebarRoot({
+     </Tooltip>
+   )
+ 
+-  return (
+-    <div
+-      ref={column}
+-      className={clsx(
+-        css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
+-        collapsed && wide && css.fading, !pointerInside && css.quietBars,
+-      )}
+-      style={wide ? { width: collapsed ? lastWideWidth.current : width } : undefined}
+-      onPointerEnter={() => {
+-        cancelLinger()
+-        setPointerInside(true)
+-      }}
+-      onPointerLeave={() => { armLinger() }}
+-    >
+-      {/* macOS hiddenInset titlebar: the strip shares the row with the
+-          traffic lights and keeps the toggle at the sidebar's top-right. */}
+-      {darwinDesktop && <div className={css.topStrip} data-window-drag>{toggle}</div>}
+-      <div className={css.logoRow} data-window-drag>
+-        {/* Expanded, the brand doubles as a New Session shortcut while the
+-            access snapshot allows `session/create` — except on
+-            macOS, where it stays part of the logo row's window-drag surface
+-            (a button would subtract itself through the global no-drag rule);
+-            the collapsed rail's logo is the expand toggle below instead.
+-            Mouse clicks on the local-build fallbacks copy the version instead. */}
+-        {wide && (() => {
++  const wideBrand = wide ? (() => {
+           const identity = (
+             <span className={css.brandIdentity} aria-hidden="true">
+               <span className={css.brandMark}>
+@@ -327,9 +307,47 @@ export function SidebarRoot({
+                 {identity}
+               </button>
+             )
+-        })()}
+-        {!darwinDesktop && toggle}
+-      </div>
++  })() : null
++
++  return (
++    <div
++      ref={column}
++      className={clsx(
++        css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
++        collapsed && wide && css.fading, !pointerInside && css.quietBars,
++      )}
++      style={wide ? { width: collapsed ? lastWideWidth.current : width } : undefined}
++      onPointerEnter={() => {
++        cancelLinger()
++        setPointerInside(true)
++      }}
++      onPointerLeave={() => { armLinger() }}
++    >
++      {/* macOS hiddenInset titlebar: the strip shares the row with the
++          traffic lights and keeps the toggle at the sidebar's top-right.
++          Linux glass mode has no traffic lights to reserve and keeps that
++          anchor; only the collapsed column's seat takes the window's left
++          edge. */}
++      {stripDesktop && (
++        <div
++          className={css.topStrip}
++          data-window-drag
++        >
++          {toggle}
++        </div>
++      )}
++      {!stripDesktop && (
++        <div className={css.logoRow} data-window-drag>
++          {/* Expanded, the brand doubles as a New Session shortcut while the
++              access snapshot allows `session/create` — except on
++              macOS, where it stays part of the logo row's window-drag surface
++              (a button would subtract itself through the global no-drag rule);
++              the collapsed rail's logo is the expand toggle below instead.
++              Mouse clicks on the local-build fallbacks copy the version instead. */}
++          {wideBrand}
++          {toggle}
++        </div>
++      )}
+ 
+       {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
+       {canStartSession && (
 diff --git a/packages/client/web/src/base.css b/packages/client/web/src/base.css
 index af74988..3c3150f 100644
 --- a/packages/client/web/src/base.css
