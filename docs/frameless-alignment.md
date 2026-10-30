@@ -50,9 +50,9 @@
 | # | 项 | ZCode 出处 | 我们现状 | 状态 |
 | --- | --- | --- | --- | --- |
 | D1 | 按钮在渲染层组件、按命令通道 | `DesktopWindowControls.tsx:56-66`、`desktopCommandHandlers.ts:524-527` | preload 注入 + 自建 IPC | `[x]` |
-| D2 | 按钮尺寸/位置随面板 | `h-12`、面板右上角 | 28×28、fixed 11/16 | `[x]` |
+| D2 | 按钮尺寸/位置随面板 | `h-12`、面板右上角 | 28×28；会话头 corner 座位，右面板打开时由面板标签条末端 `data-dockkit-strip-chrome` 接管 | `[x]` |
 | D3 | 拖拽按行显式声明 | 各 48px 顶行 `[app-region:drag]` | 全局选择器 | `[x]` |
-| D4 | 控件让位 `padding-right: 112px` | 无（ZCode 控件在布局里） | 自创 hack | `[x]` |
+| D4 | 控件让位 `padding-right: 112px` | 无（ZCode 控件在布局里） | 仅在浮动（overlay）座位保留让位 | `[x]` |
 
 ### E. 启动与页面
 

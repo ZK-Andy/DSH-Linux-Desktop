@@ -101,7 +101,7 @@ index 0000000..d74c314
 +</style>`
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4854d44..b58c3ef 100644
+index 4854d44..5999170 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -17,6 +17,7 @@ import {
@@ -273,11 +273,13 @@ index 4854d44..b58c3ef 100644
    return window
  }
  
-@@ -770,7 +868,9 @@ async function main(): Promise<void> {
+@@ -769,8 +867,10 @@ async function main(): Promise<void> {
+       url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
-         || ['/favicon.svg', '/manifest.webmanifest'].includes(url.pathname)) {
+-        || ['/favicon.svg', '/manifest.webmanifest'].includes(url.pathname)) {
 -        return serveWebDocument(request, join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist'))
++        || ['/favicon.svg', '/manifest.webmanifest', '/startup-logo.png'].includes(url.pathname)) {
 +        const root = join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
 +        if (desktopFrameless()) return serveWebDocument(request, root, frameDocument())
 +        return serveWebDocument(request, root)
@@ -928,7 +930,7 @@ index deaddcf..29c25c1 100644
        {showTabs && (
 diff --git a/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
 new file mode 100644
-index 0000000..44ba82e
+index 0000000..7d316c3
 --- /dev/null
 +++ b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
 @@ -0,0 +1,97 @@
@@ -983,7 +985,7 @@ index 0000000..44ba82e
 +  }, [api])
 +  if (api === undefined) return null
 +  return (
-+    <div className={css.windowControls} data-desktop-window-controls="">
++    <div className={css.windowControls} data-desktop-window-controls="header">
 +      <button
 +        type="button"
 +        className={css.windowControl}
@@ -1030,7 +1032,7 @@ index 0000000..44ba82e
 +  )
 +}
 diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
-index 5b71ebe..9773f2a 100644
+index 5b71ebe..e41d176 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.module.css
 +++ b/packages/client/ui-layout/src/client/AppFrame.module.css
 @@ -7,6 +7,19 @@
@@ -1093,7 +1095,7 @@ index 5b71ebe..9773f2a 100644
  .leadingSeat {
    position: absolute;
    top: 11px;
-@@ -288,3 +327,31 @@
+@@ -288,3 +327,39 @@
  .overlayLayer > * {
    pointer-events: auto;
  }
@@ -1125,8 +1127,16 @@ index 5b71ebe..9773f2a 100644
 +  top: 16px;
 +  bottom: 16px;
 +}
++
++/* Frameless shell, open right panel: the panel's own strip chrome owns the
++   window's top-right corner (ZCode moves DesktopWindowControls into the side
++   pane's header), so the conversation header's copy steps out and the two
++   never draw a duplicated band beside the ⋯ menu. */
++:global(html[data-desktop-controls='pane']) [data-desktop-window-controls='header'] {
++  display: none;
++}
 diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
-index 5614947..f259537 100644
+index 5614947..54f2189 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.tsx
 +++ b/packages/client/ui-layout/src/client/AppFrame.tsx
 @@ -21,6 +21,7 @@ import type {
@@ -1137,7 +1147,7 @@ index 5614947..f259537 100644
  import type { createLayoutStore } from './stores.ts'
  import css from './AppFrame.module.css'
  
-@@ -33,12 +34,28 @@ export type AppFrameProps =
+@@ -33,7 +34,16 @@ export type AppFrameProps =
  
  /** Center column grid item (session-body building block). */
  function CenterColumn(props: { children?: ReactNode }) {
@@ -1155,19 +1165,7 @@ index 5614947..f259537 100644
  }
  
  /** Subscribe to the main key without subscribing the column frame to each panel id. */
- function MainPanel({ usePanelInfo, renderSlot }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'>) {
-   const panelId = usePanelInfo(info => info.activePanelId)
-+  // The frameless shell has two control seats: panels that draw a header row own
-+  // the inline seat, chrome-less panels keep the floating one
-+  // (ZCode: WorkspaceHeaderActionSection vs DesktopOverlayWindowControls).
-+  useEffect(() => {
-+    if (!document.documentElement.hasAttribute('data-desktop-frame')) return
-+    document.documentElement.dataset.desktopControls = (panelId ?? 'conversation') === 'conversation' ? 'header' : 'overlay'
-+  }, [panelId])
-   return renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })
- }
- 
-@@ -166,8 +183,13 @@ export function AppFrame({
+@@ -166,8 +176,13 @@ export function AppFrame({
    // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
    // the Windows caption row; neither platform keeps an icon rail.
    const darwin = document.documentElement.dataset.platform === 'darwin'
@@ -1183,7 +1181,7 @@ index 5614947..f259537 100644
    // Opening on a narrow frame collapses the left sidebar. Eligibility must
    // include that space before the occupant's first shown report arrives.
    const normal = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference, collapsedWidth)
-@@ -253,7 +275,9 @@ export function AppFrame({
+@@ -253,7 +268,23 @@ export function AppFrame({
    // row (ui-sidebar). AppFrame.module.css publishes the matching
    // --dsh-frame-leading-clearance under the same collapsed condition.
    const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
@@ -1191,10 +1189,24 @@ index 5614947..f259537 100644
 +  // A collapsed Linux frame has no rail: the reopen controls take the same
 +  // leading seat macOS uses beside its traffic lights.
 +  const leadingMounted = (darwin || desktopFrame) && sidebarCollapsed
++
++  // The frameless shell has three control seats, mirroring ZCode: an open right
++  // panel owns the window's top-right corner through its own strip chrome
++  // (`pane`); a panel that draws a header row owns the inline conversation seat
++  // (`header`); chrome-less panels keep the floating one (`overlay`).
++  const activePanelId = usePanelInfo(info => info.activePanelId)
++  const rightbarShown = layoutInfo.rightbarShown
++  useEffect(() => {
++    if (!desktopFrame) return
++    const panel = activePanelId ?? 'conversation'
++    document.documentElement.dataset.desktopControls = panel !== 'conversation'
++      ? 'overlay'
++      : rightbarShown ? 'pane' : 'header'
++  }, [activePanelId, rightbarShown, desktopFrame])
  
    return (
      <div
-@@ -277,6 +301,7 @@ export function AppFrame({
+@@ -277,6 +308,7 @@ export function AppFrame({
          useSessions={useSessions}
          usePanelInfo={usePanelInfo}
        />
@@ -1204,10 +1216,10 @@ index 5614947..f259537 100644
        </div>
 diff --git a/packages/client/ui-layout/src/client/WindowControls.module.css b/packages/client/ui-layout/src/client/WindowControls.module.css
 new file mode 100644
-index 0000000..286765a
+index 0000000..177adf1
 --- /dev/null
 +++ b/packages/client/ui-layout/src/client/WindowControls.module.css
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,50 @@
 +/* Frameless window controls: the same 28px band the preload used to draw, now
 +   rendered by the page over the product API. */
 +.controls {
@@ -1251,6 +1263,12 @@ index 0000000..286765a
 +.close:hover {
 +  background: #e5484d;
 +  color: #fff;
++}
++
++/* The right panel owns the corner while it is open: the floating seat would
++   draw a second band over the same pixels. */
++:global(html[data-desktop-controls='pane']) .overlay {
++  display: none;
 +}
 diff --git a/packages/client/ui-layout/src/client/WindowControls.tsx b/packages/client/ui-layout/src/client/WindowControls.tsx
 new file mode 100644
@@ -1343,6 +1361,168 @@ index 0000000..8e090bc
 +      <button
 +        type="button"
 +        className={`${css.control} ${css.close}`}
++        aria-label="Close window"
++        title="Close window"
++        onClick={() => { void api.close() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
++        </svg>
++      </button>
++    </div>
++  )
++}
+diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+index 0f39af5..fba6d40 100644
+--- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
++++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
+@@ -50,6 +50,7 @@ import { canCloseTab } from '../stores.ts'
+ import type { TabOccurrence } from '../tab-domain.ts'
+ import type { SidebarRightTabNavigation } from '../contract/slots.ts'
+ import type { TabHookContext } from '../tab-info.ts'
++import { WindowControls } from './WindowControls.tsx'
+ import css from './SidebarRight.module.css'
+ 
+ /** The store share the seat receives. */
+@@ -293,6 +294,7 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
+           <IconPanelLeftOutlineRegular className={css.collapseGlyph} />
+         </button>
+       </Tooltip>
++      <WindowControls />
+     </>
+   )
+ }
+diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
+new file mode 100644
+index 0000000..b3e1084
+--- /dev/null
++++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
+@@ -0,0 +1,30 @@
++.windowControls {
++  display: flex;
++  flex: none;
++  align-items: center;
++  gap: 2px;
++  -webkit-app-region: no-drag;
++}
++
++.windowControl {
++  box-sizing: border-box;
++  display: grid;
++  place-items: center;
++  width: 28px;
++  height: 28px;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--dsw-alias-label-primary);
++  cursor: default;
++}
++
++.windowControl:hover {
++  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
++}
++
++.windowControlClose:hover {
++  background: #e5484d;
++  color: #fff;
++}
+diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
+new file mode 100644
+index 0000000..9b75b8d
+--- /dev/null
++++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
+@@ -0,0 +1,100 @@
++/**
++ * Linux frameless window controls for the right panel's chrome seat.
++ *
++ * The right panel owns the window's top-right corner while it is open: its tab
++ * strip's trailing chrome slot is where ZCode seats DesktopWindowControls when a
++ * side pane is up (AnimatedSidePanePanel's closeSidePaneButton). The controls
++ * are a per-package copy because a client feature plugin cannot runtime-import
++ * another feature plugin's component; the product API on `window.dshDesktop`
++ * is the only shared contract.
++ */
++import { useEffect, useState } from 'react'
++import type { ReactElement } from 'react'
++import css from './WindowControls.module.css'
++
++/** Snapshot of the frameless window's chrome state. */
++interface WindowState {
++  maximized: boolean
++  fullscreen: boolean
++}
++
++/** Window-controls surface exposed on `window.dshDesktop` by the preload. */
++interface WindowControlsApi {
++  minimize(): Promise<void>
++  toggleMaximize(): Promise<void>
++  close(): Promise<void>
++  state(): Promise<WindowState>
++  subscribe(listener: (state: WindowState) => void): () => void
++}
++
++function windowControls(): WindowControlsApi | undefined {
++  return (globalThis as typeof globalThis & { dshDesktop?: { windowControls?: WindowControlsApi } })
++    .dshDesktop?.windowControls
++}
++
++/**
++ * Renders the three controls, or nothing when the preload did not expose them
++ * (plain web session, macOS, or a platform that draws its own chrome).
++ * @returns the controls in the panel strip's trailing chrome slot.
++ */
++export function WindowControls(): ReactElement | null {
++  const [api] = useState(windowControls)
++  const [maximized, setMaximized] = useState(false)
++  useEffect(() => {
++    if (api === undefined) return
++    let live = true
++    void api.state().then((state) => { if (live) setMaximized(state.maximized) })
++    const unsubscribe = api.subscribe((state) => setMaximized(state.maximized))
++    return () => {
++      live = false
++      unsubscribe()
++    }
++  }, [api])
++  if (api === undefined) return null
++  return (
++    <div className={css.windowControls} data-desktop-window-controls="pane">
++      <button
++        type="button"
++        className={css.windowControl}
++        aria-label="Minimize window"
++        title="Minimize window"
++        onClick={() => { void api.minimize() }}
++      >
++        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
++          <path d="M3.5 8h9" />
++        </svg>
++      </button>
++      <button
++        type="button"
++        className={css.windowControl}
++        aria-label={maximized ? 'Restore window' : 'Maximize window'}
++        title={maximized ? 'Restore window' : 'Maximize window'}
++        onClick={() => { void api.toggleMaximize() }}
++      >
++        {maximized
++          ? (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5" />
++              <path d="M6.5 4.5h5a1 1 0 0 1 1 1v5" />
++            </svg>
++          )
++          : (
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
++              <rect x="4" y="4" width="8" height="8" rx="1.5" />
++            </svg>
++          )}
++      </button>
++      <button
++        type="button"
++        className={`${css.windowControl} ${css.windowControlClose}`}
 +        aria-label="Close window"
 +        title="Close window"
 +        onClick={() => { void api.close() }}
