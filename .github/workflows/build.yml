@@ -105,13 +105,45 @@ jobs:
           mkdir -p dist
           cp "$rpm" dist/
 
+      # 签名是发布的前提：没有私钥就失败，不发未签名包。公钥进 rpmdb 后才能验自家签名。
+      - name: Sign rpm
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo '::error::secrets.GPG_PRIVATE_KEY 未配置，拒绝产出未签名 rpm'
+            exit 1
+          fi
+          command -v rpmsign >/dev/null || { echo '::error::rpmsign 不存在（apt rpm 未提供签名工具）'; exit 1; }
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          keydb="$(mktemp -d)"
+          trap 'rm -rf "$GNUPGHOME" "$keydb" "${pass:-}"' EXIT
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          pass=$(mktemp)
+          printf '%s' "$GPG_PASSPHRASE" > "$pass"
+          rpm=$(find dist -maxdepth 1 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          rpmsign --define "_gpg_name ${GPG_KEY_ID}" \
+            --define "__gpg_sign_cmd %{__gpg} gpg --batch --no-armor --pinentry-mode loopback --passphrase-file ${pass} --no-secmem-warning -u %{_gpg_name} -sbo %{__signature_filename} %{__plaintext_filename}" \
+            --addsign "$rpm"
+          rpm --dbpath "$keydb" --import packaging/RPM-GPG-KEY-dsh-desktop
+          rpm --dbpath "$keydb" -Kv "$rpm"
+          cp packaging/RPM-GPG-KEY-dsh-desktop dist/
+          rm -f "$pass"
+
       # 先传产物再验收：验收脚本自己出问题时，失败的那次 run 里也拿得到 rpm 复现。
       - name: Upload rpm
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-x64-rpm
-          path: dist/*.rpm
+          path: |
+            dist/*.rpm
+            dist/RPM-GPG-KEY-dsh-desktop
           if-no-files-found: warn
 
       - name: Verify rpm (static)

@@ -78,8 +78,13 @@ if [[ "${1:-}" == "--launch" ]]; then
 fi
 
 # ---------- 阶段一：装包与工具 ----------
+# 公钥先导入 rpmdb，再以 gpgcheck 强制安装：这一步同时验证签名和首个安装路径。
+log "导入签名公钥并校验"
+rpm --import /pkg-key.asc || { log "导入公钥失败"; exit 1; }
+rpmkeys -K /pkg/*.rpm | grep -q 'digests signatures OK' || { log "rpm 签名校验失败"; exit 1; }
+
 log "安装 rpm"
-dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=0 /pkg/*.rpm \
+dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm \
   || { log "dnf5 安装失败"; exit 1; }
 command -v "$APP" >/dev/null || { log "没装出 $APP"; exit 1; }
 

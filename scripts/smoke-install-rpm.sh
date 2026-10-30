@@ -23,6 +23,7 @@ echo "== [rpm] fedora 容器安装冒烟：$(find "$PKG_DIR" -maxdepth 1 -name '
 docker_rc=0
 docker run --rm \
   -v "$PKG_DIR:/pkg:ro" \
+  -v "$ROOT/packaging/RPM-GPG-KEY-dsh-desktop:/pkg-key.asc:ro" \
   -v "$ROOT/scripts/smoke-rpm-inner.sh:/smoke-inner.sh:ro" \
   -v "$SHOT_DIR:/shots:rw" \
   -v "$LOG_DIR:/smokelogs:rw" \

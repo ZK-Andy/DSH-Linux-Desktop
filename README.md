@@ -28,9 +28,14 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 > 包尚未发布；以下是目标形态。
 
+rpm 用仓库的 GPG 密钥签名，首装前先把公钥导入 rpmdb（升级由更新链自动处理）：
+
 ```bash
+sudo rpm --import ./RPM-GPG-KEY-dsh-desktop
 sudo dnf5 install ./dsh-desktop-*.rpm
 ```
+
+`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，发布后同时随 Release 提供。
 
 GNOME 默认不显示托盘图标，需要安装并启用扩展：
 
@@ -61,7 +66,7 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 ./scripts/verify.sh dist/*.rpm  # 静态验收：包名/版本/依赖/布局/desktop 入口/%post
 ```
 
-产物在 `upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，文件名 `dsh-desktop-<version>-x86_64.rpm`。安装后的验收是 `scripts/smoke-install-rpm.sh`：在 `fedora:44` 容器里 `dnf5 install`（`localpkg_gpgcheck=0`，未签名阶段）、`xvfb` 启动、`xdotool` 确认窗口、截图留档；截图与 `app.log` 经 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR` 落到宿主并上传 artifact（跑过且失败判 error，其余 warn）。
+产物在 `upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，文件名 `dsh-desktop-<version>-x86_64.rpm`，CI 收集后用 `rpmsign` 加签（私钥在 Actions secrets，公钥 `packaging/RPM-GPG-KEY-dsh-desktop`）。安装后的验收是 `scripts/smoke-install-rpm.sh`：在 `fedora:44` 容器里先导入公钥、`rpmkeys -K` 验签，再以 `localpkg_gpgcheck=1` `dnf5 install`、`xvfb` 启动、`xdotool` 确认窗口、截图留档；截图与 `app.log` 经 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR` 落到宿主并上传 artifact（跑过且失败判 error，其余 warn）。
 
 本地调试窗口（不打包）：
 
