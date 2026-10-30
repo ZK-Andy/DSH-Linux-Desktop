@@ -233,10 +233,10 @@ index c9937a3..9c4346b 100644
      pick: () => ipcRenderer.invoke(DESKTOP_IPC.directoryPick) as Promise<string | null>,
 diff --git a/apps/desktop/src/preload-linux-frame.ts b/apps/desktop/src/preload-linux-frame.ts
 new file mode 100644
-index 0000000..cc15070
+index 0000000..1ce77a5
 --- /dev/null
 +++ b/apps/desktop/src/preload-linux-frame.ts
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,59 @@
 +import { ipcRenderer } from 'electron'
 +import { DESKTOP_IPC } from './ipc.ts'
 +
@@ -272,10 +272,11 @@ index 0000000..cc15070
 + * the window drag surface through the injected stylesheet.
 + */
 +export function installLinuxFrame(): void {
-+  const root = document.documentElement
-+  root.setAttribute('data-desktop-frame', '')
-+  if (document.getElementById('dsh-window-controls') !== null) return
 +  const install = (): void => {
++    const root = document.documentElement
++    if (root === null) return
++    root.setAttribute('data-desktop-frame', '')
++    if (document.getElementById('dsh-window-controls') !== null) return
 +    const band = document.createElement('div')
 +    band.id = 'dsh-window-controls'
 +    const maximize = button('toggle-maximize', 'Maximize', GLYPHS.maximize)

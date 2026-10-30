@@ -36,7 +36,20 @@ if [[ "${1:-}" == "--launch" ]]; then
     exit 1
   fi
 
-  log "window=$window title=$(xdotool getwindowname "$window" 2>/dev/null || echo '?') class=$(xdotool getwindowclassname "$window" 2>/dev/null || echo '?')"
+  title=$(xdotool getwindowname "$window" 2>/dev/null || echo '?')
+  class=$(xdotool getwindowclassname "$window" 2>/dev/null || echo '?')
+  log "window=$window title=$title class=$class"
+  if printf '%s' "$title" | grep -qiE 'unavailable|无法使用|利用できません|no disponible|nicht verfügbar|недоступен|não está disponível'; then
+    log "窗口是启动失败对话框（title=$title），冒烟失败"
+    tail -50 "$app_log" >&2
+    exit 1
+  fi
+  # preload 抛错会让主进程走 fatal recovery，并把失败对话框当成"窗口"；必须单独判掉。
+  if grep -q 'preload-app\.cjs' "$app_log" 2>/dev/null; then
+    log "preload 抛错，冒烟失败"
+    grep -n -A6 'preload-app\.cjs' "$app_log" | head -20 >&2
+    exit 1
+  fi
   xdotool getwindowgeometry "$window" || true
   sleep 5
 
