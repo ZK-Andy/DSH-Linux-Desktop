@@ -310,7 +310,7 @@ index 4854d44..b58c3ef 100644
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
 diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
-index c9937a3..9c26d65 100644
+index c9937a3..5e5b629 100644
 --- a/apps/desktop/src/preload-app.ts
 +++ b/apps/desktop/src/preload-app.ts
 @@ -7,6 +7,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
@@ -318,7 +318,7 @@ index c9937a3..9c26d65 100644
  import { syncNativeTheme } from './preload-theme.ts'
  import { syncWindowsAppearance } from './preload-windows.ts'
 +import { FRAME_ARGUMENT } from './linux-frame.ts'
-+import { createLinuxWindowControls, FRAME_ARGUMENT } from './preload-linux-frame.ts'
++import { createLinuxWindowControls } from './preload-linux-frame.ts'
  import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
  import { createDesktopBrowserBridge } from './preload-browser.ts'
  import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
@@ -401,7 +401,7 @@ index f17cbdb..5d590a8 100644
      const root = document.documentElement
      root.dataset.windowsTitlebar = ''
 diff --git a/apps/desktop/src/settings.ts b/apps/desktop/src/settings.ts
-index a4bb67b..1c75a22 100644
+index a4bb67b..1032a9d 100644
 --- a/apps/desktop/src/settings.ts
 +++ b/apps/desktop/src/settings.ts
 @@ -5,17 +5,33 @@
@@ -438,28 +438,25 @@ index a4bb67b..1c75a22 100644
  /**
   * Read shell settings, creating the default document exclusively when missing.
   * @param userData - Electron's userData directory, independent of DSH_HOME.
-@@ -44,7 +60,19 @@ export function readDesktopSettings(userData: string): DesktopSettings {
+@@ -44,7 +60,16 @@ export function readDesktopSettings(userData: string): DesktopSettings {
      if (allow !== undefined && typeof allow !== 'boolean') {
        throw new Error('updates.allowTestAuthPopupWindow must be true or false')
      }
 -    return { updates: { allowTestAuthPopupWindow: allow ?? false } }
 +    const size = value.desktopWindowSize
-+    if (size !== undefined && (!record(size) || dimension(size.width) === undefined
-+      || dimension(size.height) === undefined || typeof size.maximized !== 'boolean')) {
-+      throw new Error('desktopWindowSize must carry positive width and height and a boolean maximized')
-+    }
 +    const updates = { updates: { allowTestAuthPopupWindow: allow ?? false } }
 +    if (size === undefined) return updates
-+    return {
-+      ...updates,
-+      desktopWindowSize: {
-+        width: dimension(size.width)!, height: dimension(size.height)!, maximized: size.maximized,
-+      },
++    const width = record(size) ? dimension(size.width) : undefined
++    const height = record(size) ? dimension(size.height) : undefined
++    const maximized = record(size) ? size.maximized : undefined
++    if (width === undefined || height === undefined || typeof maximized !== 'boolean') {
++      throw new Error('desktopWindowSize must carry positive width and height and a boolean maximized')
 +    }
++    return { ...updates, desktopWindowSize: { width, height, maximized } }
    } catch (error) {
      try {
        console.warn(`desktop settings: ${path}: using defaults because settings could not be loaded`, error)
-@@ -55,3 +83,27 @@ export function readDesktopSettings(userData: string): DesktopSettings {
+@@ -55,3 +80,27 @@ export function readDesktopSettings(userData: string): DesktopSettings {
      return defaults
    }
  }
@@ -487,6 +484,32 @@ index a4bb67b..1c75a22 100644
 +  }
 +  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
 +}
+diff --git a/apps/desktop/src/web-document.ts b/apps/desktop/src/web-document.ts
+index a74ea7c..476658e 100644
+--- a/apps/desktop/src/web-document.ts
++++ b/apps/desktop/src/web-document.ts
+@@ -13,9 +13,11 @@ const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</s
+  * Read an application-owned static asset; the index waits for asynchronous Host injections.
+  * @param request - Local application request.
+  * @param root - Packaged Web dist directory.
++ * @param document - Optional markup appended to the index `<head>`; the frameless Linux
++ *   window injects its desktop-frame marker and drag-row styling here.
+  * @returns Static response, or a missing/invalid path response.
+  */
+-export async function serveWebDocument(request: Request, root: string): Promise<Response> {
++export async function serveWebDocument(request: Request, root: string, document = ''): Promise<Response> {
+   if (!['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 405 })
+   const url = new URL(request.url)
+   let pathname: string
+@@ -29,7 +31,7 @@ export async function serveWebDocument(request: Request, root: string): Promise<
+     throw error
+   }
+   const content = pathname === '/' || pathname === '/index.html'
+-    ? body.toString().replace('<head>', '<head>' + BOOT) : new Uint8Array(body)
++    ? body.toString().replace('<head>', '<head>' + BOOT + document) : new Uint8Array(body)
+   return new Response(request.method === 'HEAD' ? null : content, {
+     headers: { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' },
+   })
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
 index a25876d..90ebf51 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
@@ -626,6 +649,28 @@ index b285bb9..2d91b42 100644
 +  expect(readDesktopSettings(userData).desktopWindowSize).toBeUndefined()
 +  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(path), expect.any(Error))
 +})
+diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
+index 2fb4f55..3a45e85 100644
+--- a/apps/desktop/tests/welcome-startup.spec.ts
++++ b/apps/desktop/tests/welcome-startup.spec.ts
+@@ -98,12 +98,16 @@ vi.mock('electron', () => ({
+   dialog: { showErrorBox: vi.fn(), showMessageBox: vi.fn() },
+   Menu: { buildFromTemplate: state.menu, setApplicationMenu: vi.fn() },
+   nativeImage: { createFromPath: (path: string) => ({ path }) },
++  screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
+ }))
+ // The Windows tray relabels through Menu as well; keep the menu call counts below platform-neutral.
+ vi.mock('../src/tray.ts', () => ({ DesktopTray: class { relabel() {} dispose() {} } }))
+ 
+ vi.mock('../src/paths.ts', () => ({ resolveDesktopPaths: () => ({ profile: '/profile' }) }))
+-vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false } }) }))
++vi.mock('../src/settings.ts', () => ({
++  readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false } }),
++  saveDesktopWindowSize: vi.fn(),
++}))
+ vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
+   ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
+   readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),
 diff --git a/apps/web/index.html b/apps/web/index.html
 index ff3ca62..5e94d83 100644
 --- a/apps/web/index.html
