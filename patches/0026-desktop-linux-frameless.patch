@@ -1,8 +1,18 @@
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 19e5f15..35af19a 100644
+index 19e5f15..fec76a7 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -184,6 +184,8 @@ export function createElectronBuilderConfig(
+@@ -136,6 +136,9 @@ export function createElectronBuilderConfig(
+     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
+     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
+     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
++    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
++    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
++    buildNumber: '2',
+     directories: { output: output.directory },
+     // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
+     // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
+@@ -184,6 +187,8 @@ export function createElectronBuilderConfig(
        ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
        // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
        ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),

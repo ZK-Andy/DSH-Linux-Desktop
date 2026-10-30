@@ -24,6 +24,12 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 开机自启不在范围内。
 
+## 版本号规则
+
+- `Version` 跟上游 tag：`0.2.2-alpha.2` 映射成 rpm 的 `0.2.2~alpha.2`（`~` 让预发布排在正式版之前）。
+- `Release` 是我们自己的打包序号，每次重新打包递增；同一个上游版本重新出包就是 `0.2.2~alpha.2-2`，dnf 据此判定升级。
+- git tag 用 `v<上游版本>-<Release>`（如 `v0.2.2-alpha.2-2`），Release 名与 tag 一致。
+
 ## 安装
 
 > 包尚未发布；以下是目标形态。
