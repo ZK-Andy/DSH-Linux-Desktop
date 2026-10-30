@@ -35,3 +35,6 @@ smoke-logs/
 .verify/
 .verify*/
 .regen*/
+
+# 本地补丁改编/重放工作树（w26 系列）
+.w26*/

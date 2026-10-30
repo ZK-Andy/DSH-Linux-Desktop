@@ -96,8 +96,10 @@ check "主程序在 /opt/deepseek-harness-desktop/deepseek-harness" \
   grep -qx '/opt/deepseek-harness-desktop/deepseek-harness' <<<"$files"
 check "desktop 文件是 dsh-desktop.desktop（desktopName + syncDesktopName）" \
   grep -qx '/usr/share/applications/dsh-desktop.desktop' <<<"$files"
-check "图标落在 hicolor" \
-  grep -q '^/usr/share/icons/hicolor/.*/apps/' <<<"$files"
+icon_count=$(grep -cE '^/usr/share/icons/hicolor/[0-9]+x[0-9]+/apps/deepseek-harness\.png$' <<<"$files" || true)
+check "自带 hicolor 尺寸集（0023，至少 4 档）" test "$icon_count" -ge 4
+check "含 512x512 档" \
+  grep -qx '/usr/share/icons/hicolor/512x512/apps/deepseek-harness.png' <<<"$files"
 check "托盘 PNG 在 resources 下（0013 的 extraResources）" \
   grep -qx '/opt/deepseek-harness-desktop/resources/tray-linux.png' <<<"$files"
 check "sharp worker 在 resources 下（0021 的 extraResources）" \

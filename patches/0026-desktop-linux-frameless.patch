@@ -1,0 +1,466 @@
+diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
+index e62a84f..3629b64 100644
+--- a/apps/desktop/src/ipc.ts
++++ b/apps/desktop/src/ipc.ts
+@@ -36,6 +36,8 @@ export const DESKTOP_IPC = {
+   windowFullscreen: 'dsh-desktop:window-fullscreen',
+   windowsAppearance: 'dsh-desktop:windows-appearance',
+   windowsMenu: 'dsh-desktop:windows-menu',
++  windowAction: 'dsh-desktop:window-action',
++  windowState: 'dsh-desktop:window-state',
+ } as const
+ 
+ /** Desktop release update state rendered by desktop-owned UI. */
+diff --git a/apps/desktop/src/linux-frame.ts b/apps/desktop/src/linux-frame.ts
+new file mode 100644
+index 0000000..26ce707
+--- /dev/null
++++ b/apps/desktop/src/linux-frame.ts
+@@ -0,0 +1,86 @@
++/**
++ * Linux frameless primary window: the document carries an inset panel and the
++ * preload draws the window controls, so the native titlebar adds nothing.
++ *
++ * The layout reuses the Web layout DSH already ships for a caption-less window
++ * (zero-width sidebar collapse, shell.leading seat, 48px top clearance); this
++ * document only supplies the panel frame the compositor cannot draw on its
++ * own: a transparent window that paints a rounded, 1px-bordered surface inset
++ * by four pixels. Window controls are ordinary DOM buttons in the top-right
++ * chrome band, wired to the main process over the windowAction channel.
++ */
++
++/** Preload argument marking the application document as a frameless Linux window. */
++export const FRAME_ARGUMENT = '--dsh-desktop-frame'
++
++/** Whether the primary window draws its own frame: every Linux desktop build does. */
++export function desktopFrameless(): boolean {
++  return process.platform === 'linux'
++}
++
++/**
++ * Markup injected into the application Web document before its own bundles run.
++ * The transparent host document and the inset panel are the only paint the
++ * window keeps outside the client bundles; the control buttons themselves are
++ * created by the preload so their clicks never reach page code.
++ * @returns Markup for the document head.
++ */
++export function frameDocument(): string {
++  return `<script>document.documentElement.setAttribute('data-desktop-frame','')</script>
++<style>
++/* Transparent host document; the inset panel below is the only opaque surface. */
++html[data-desktop-frame],
++html[data-desktop-frame] body {
++  background: transparent !important;
++}
++html[data-desktop-frame] body { isolation: isolate; }
++
++/* The window's own surface: four pixels of transparent gutter expose the
++   compositor's rounded corners, and the inset ring reads as a window border
++   without adding a layout box. */
++html[data-desktop-frame] #root {
++  box-sizing: border-box;
++  height: calc(100% - 8px);
++  margin: 4px;
++  border-radius: 12px;
++  overflow: hidden;
++  background: var(--dsw-alias-bg-base);
++  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l3, rgb(0 0 0 / 0.12));
++}
++
++/* Window controls occupy the top-right band; chrome rows that end there keep
++   their actions clear of it. */
++html[data-desktop-frame] header[data-window-drag] { padding-right: 112px; }
++
++#dsh-window-controls {
++  position: fixed;
++  top: 11px;
++  right: 16px;
++  z-index: 2147483000;
++  display: flex;
++  gap: 4px;
++  -webkit-app-region: no-drag;
++}
++#dsh-window-controls button {
++  box-sizing: border-box;
++  display: grid;
++  place-items: center;
++  width: 28px;
++  height: 28px;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--dsw-alias-label-primary);
++}
++#dsh-window-controls button:hover {
++  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
++}
++#dsh-window-controls button[data-action='close']:hover {
++  background: #e5484d;
++  color: #fff;
++}
++html[data-fullscreen] #dsh-window-controls { display: none; }
++html[data-fullscreen] header[data-window-drag] { padding-right: 28px; }
++</style>`
++}
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 3b502e2..4115292 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -34,6 +34,7 @@ import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } fro
+ import { readDeviceInfo } from './device-info.ts'
+ import { GLASS_ARGUMENT, desktopGlass, glassTint } from './glass-mode.ts'
+ import { glassDocument } from './glass-document.ts'
++import { FRAME_ARGUMENT, desktopFrameless, frameDocument } from './linux-frame.ts'
+ import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
+ import { claimDesktopSingleInstance } from './single-instance.ts'
+ import { desktopUpdateChannel } from './update-channel.ts'
+@@ -259,6 +260,7 @@ function platformLoginUrl(authorizeUrl: string): string {
+ 
+ function createWindow(preload: string, show = false, primary = false): BrowserWindow {
+   const glass = desktopGlass()
++  const frameless = desktopFrameless()
+   const window = new BrowserWindow({
+     width: 1280,
+     height: 820,
+@@ -266,11 +268,16 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+     minHeight: 600,
+     show,
+     // Glass mode paints no window background: the translucent sidebar shows the desktop through it,
+-    // and the content columns carry their own opaque fill.
+-    ...(glass ? {
++    // and the content columns carry their own opaque fill. The frameless Linux window paints its own
++    // inset panel, so the compositor only contributes the transparent gutter and rounded corners.
++    ...(glass || frameless ? {
+       transparent: true,
+       backgroundColor: '#00000000',
+     } : {}),
++    ...(frameless ? {
++      frame: false,
++      hasShadow: false,
++    } : {}),
+     ...(process.platform === 'win32' && primary ? {
+       titleBarStyle: 'hidden' as const,
+       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
+@@ -295,7 +302,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+       webSecurity: true,
+       webviewTag: primary,
+       devTools: true,
+-      ...(glass ? { additionalArguments: [GLASS_ARGUMENT] } : {}),
++      ...(frameless || glass
++        ? { additionalArguments: [...(glass ? [GLASS_ARGUMENT] : []), ...(frameless ? [FRAME_ARGUMENT] : [])] }
++        : {}),
+     },
+   })
+   // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
+@@ -305,12 +314,21 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+     if (glass) window.setAutoHideMenuBar(true)
+     window.setMenuBarVisibility(false)
+   }
++  if (frameless) {
++    // The preload button band mirrors the main process state; a maximized restore toggles the glyph.
++    const sendWindowState = (): void => {
++      if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowState, window.isMaximized())
++    }
++    window.on('maximize', sendWindowState)
++    window.on('unmaximize', sendWindowState)
++    window.webContents.on('did-finish-load', sendWindowState)
++  }
+   window.webContents.setWindowOpenHandler(({ url }) => {
+     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
+     return { action: 'deny' }
+   })
+-  if (process.platform === 'darwin' || process.platform === 'win32') {
+-    // Fullscreen hides native window controls; overlays drop their caption clearance.
++  if (process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux') {
++    // Fullscreen hides the window controls; overlays drop their caption clearance.
+     const sendFullscreen = (): void => {
+       if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
+     }
+@@ -785,9 +803,9 @@ async function main(): Promise<void> {
+       if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
+         || ['/favicon.svg', '/manifest.webmanifest'].includes(url.pathname)) {
+         const root = join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
+-        return desktopGlass()
+-          ? serveWebDocument(request, root, glassDocument(glassTint()))
+-          : serveWebDocument(request, root)
++        if (desktopGlass()) return serveWebDocument(request, root, glassDocument(glassTint()))
++        if (desktopFrameless()) return serveWebDocument(request, root, frameDocument())
++        return serveWebDocument(request, root)
+       }
+       if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
+         return Promise.resolve(new Response(null, { status: 503 }))
+@@ -1184,6 +1202,19 @@ async function main(): Promise<void> {
+     })
+   }
+ 
++  if (process.platform === 'linux') {
++    // Frameless Linux windows have no native controls; the in-page band delegates every action here.
++    ipcMain.handle(DESKTOP_IPC.windowAction, (event, action: unknown) => {
++      assertDesktopSender(event, ['app'])
++      if (mainWindow === undefined || event.sender !== mainWindow.webContents
++        || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('desktop window: rejected sender')
++      if (action === 'minimize') return mainWindow.minimize()
++      if (action === 'toggle-maximize') return mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
++      if (action === 'close') return mainWindow.close()
++      throw new Error('desktop window: unknown action')
++    })
++  }
++
+   const hideMainWindow = (window: BrowserWindow): void => {
+     if (process.platform === 'darwin' && window.isFullScreen()) {
+       // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
+diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
+index c9937a3..9c4346b 100644
+--- a/apps/desktop/src/preload-app.ts
++++ b/apps/desktop/src/preload-app.ts
+@@ -7,6 +7,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
+ import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
+ import { syncNativeTheme } from './preload-theme.ts'
+ import { syncWindowsAppearance } from './preload-windows.ts'
++import { FRAME_ARGUMENT } from './linux-frame.ts'
++import { installLinuxFrame } from './preload-linux-frame.ts'
+ import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
+ import { createDesktopBrowserBridge } from './preload-browser.ts'
+ import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
+@@ -84,6 +86,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
+     else body.setAttribute('tabindex', previous)
+   })
+   syncWindowsAppearance()
++  if (process.argv.includes(FRAME_ARGUMENT)) installLinuxFrame()
+   if (process.platform === 'win32') installMandatoryUpdateOverlay()
+   contextBridge.exposeInMainWorld('__DSH_DIRECTORY_PICKER__', {
+     pick: () => ipcRenderer.invoke(DESKTOP_IPC.directoryPick) as Promise<string | null>,
+diff --git a/apps/desktop/src/preload-linux-frame.ts b/apps/desktop/src/preload-linux-frame.ts
+new file mode 100644
+index 0000000..cc15070
+--- /dev/null
++++ b/apps/desktop/src/preload-linux-frame.ts
+@@ -0,0 +1,58 @@
++import { ipcRenderer } from 'electron'
++import { DESKTOP_IPC } from './ipc.ts'
++
++/** Window actions the frameless Linux title band delegates to the main process. */
++type WindowAction = 'minimize' | 'toggle-maximize' | 'close'
++
++/** Glyph per button; the maximize button swaps its glyph with the window state. */
++const GLYPHS = {
++  minimize: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M3.5 8h9"/></svg>',
++  maximize: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
++  restore: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5"/><path d="M6.5 4.5h5a1 1 0 0 1 1 1v5"/></svg>',
++  close: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
++} as const
++
++/** One control button; the close button borrows the destructive hover paint. */
++function button(action: WindowAction, label: string, glyph: string): HTMLButtonElement {
++  const element = document.createElement('button')
++  element.type = 'button'
++  element.dataset.action = action
++  element.setAttribute('aria-label', label)
++  element.title = label
++  element.innerHTML = glyph
++  element.addEventListener('click', () => { void ipcRenderer.invoke(DESKTOP_IPC.windowAction, action) })
++  return element
++}
++
++/**
++ * Draws the window controls for a frameless Linux window and keeps the
++ * maximize glyph in step with the main process.
++ *
++ * The band is shell-owned DOM appended after the application root: it never
++ * participates in the client layout, and its buttons subtract themselves from
++ * the window drag surface through the injected stylesheet.
++ */
++export function installLinuxFrame(): void {
++  const root = document.documentElement
++  root.setAttribute('data-desktop-frame', '')
++  if (document.getElementById('dsh-window-controls') !== null) return
++  const install = (): void => {
++    const band = document.createElement('div')
++    band.id = 'dsh-window-controls'
++    const maximize = button('toggle-maximize', 'Maximize', GLYPHS.maximize)
++    band.append(
++      button('minimize', 'Minimize', GLYPHS.minimize),
++      maximize,
++      button('close', 'Close', GLYPHS.close),
++    )
++    document.body.append(band)
++    ipcRenderer.on(DESKTOP_IPC.windowState, (_event, maximized: boolean) => {
++      maximize.innerHTML = maximized ? GLYPHS.restore : GLYPHS.maximize
++      const label = maximized ? 'Restore' : 'Maximize'
++      maximize.setAttribute('aria-label', label)
++      maximize.title = label
++    })
++  }
++  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true })
++  else install()
++}
+diff --git a/apps/desktop/src/preload-windows.ts b/apps/desktop/src/preload-windows.ts
+index aa938fc..4f52d13 100644
+--- a/apps/desktop/src/preload-windows.ts
++++ b/apps/desktop/src/preload-windows.ts
+@@ -9,9 +9,9 @@ import { installWindowsMenu } from './preload-menu.ts'
+ export function syncWindowsAppearance(): void {
+   // Glass mode keeps the Web layout: no in-page caption, and the native menu bar auto-hides.
+   if (process.argv.includes(GLASS_ARGUMENT)) return
+-  // Linux hides the native menu bar and draws the caption menubar inside the page, so it needs
+-  // the same marker and appearance reporting as Windows.
+-  if (process.platform !== 'win32' && process.platform !== 'linux') return
++  // Linux frameless windows draw their own chrome and keep the Web layout; only Windows installs
++  // the caption marker and its appearance reporting.
++  if (process.platform !== 'win32') return
+   const mark = (): void => {
+     const root = document.documentElement
+     root.dataset.windowsTitlebar = ''
+diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
+index f92695a..0fae3aa 100644
+--- a/apps/desktop/tests/main-startup.spec.ts
++++ b/apps/desktop/tests/main-startup.spec.ts
+@@ -4,6 +4,7 @@ import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
+ import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
+ import { GLASS_ARGUMENT } from '../src/glass-mode.ts'
+ import { glassDocument } from '../src/glass-document.ts'
++import { FRAME_ARGUMENT, frameDocument } from '../src/linux-frame.ts'
+ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+ import type { IpcMainInvokeEvent } from 'electron'
+ import { join } from 'node:path'
+@@ -872,19 +873,24 @@ describe('desktop main startup', () => {
+         { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
+       ])
+     } else {
++      expect(window.options).toMatchObject({ frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false })
+       expect(window.options).not.toHaveProperty('titleBarStyle')
+       expect(window.options).not.toHaveProperty('vibrancy')
+     }
+     expect(harness.hosts).toHaveLength(0)
+   })
+ 
+-  it('keeps the in-page caption configuration on linux without glass mode', async () => {
++  it('draws its own frame on linux without glass mode', async () => {
+     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+     await import('../src/main.ts')
+     await harness.preparing.promise
+     const window = harness.windows[0]!
+-    expect(window.options).not.toHaveProperty('transparent')
+-    expect(window.options).not.toHaveProperty('webPreferences.additionalArguments')
++    expect(window.options).toMatchObject({
++      frame: false,
++      transparent: true,
++      backgroundColor: '#00000000',
++      webPreferences: { additionalArguments: [FRAME_ARGUMENT] },
++    })
+     expect(window.setAutoHideMenuBar).not.toHaveBeenCalled()
+     expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
+   })
+@@ -895,7 +901,7 @@ describe('desktop main startup', () => {
+     await import('../src/main.ts')
+     await harness.preparing.promise
+     const window = harness.windows[0]!
+-    expect(window.options).toMatchObject({ webPreferences: { additionalArguments: [GLASS_ARGUMENT] } })
++    expect(window.options).toMatchObject({ webPreferences: { additionalArguments: [GLASS_ARGUMENT, FRAME_ARGUMENT] } })
+     expect(window.setAutoHideMenuBar).toHaveBeenCalledWith(true)
+     expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
+     // The window paints no background so the translucent sidebar shows the desktop through it.
+@@ -917,6 +923,17 @@ describe('desktop main startup', () => {
+     else expect(call).toHaveLength(2)
+   })
+ 
++  it('injects the frameless panel document on linux', async () => {
++    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
++    const { serveWebDocument } = await import('../src/web-document.ts')
++    await readyForUpdate()
++    const handler = harness.protocolHandle.mock.calls[0]![1]
++    const request = new Request('dsh-app://app/')
++    await handler(request)
++    const call = vi.mocked(serveWebDocument).mock.lastCall
++    expect(call?.[2]).toBe(frameDocument())
++  })
++
+   it('serves the requested sidebar tint and keeps the macOS material by default', async () => {
+     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+     vi.stubEnv('DSH_DESKTOP_GLASS', '1')
+@@ -983,14 +1000,13 @@ describe('desktop main startup', () => {
+     expect(sent()).toHaveLength(relayed)
+   })
+ 
+-  it.each(['linux'] as const)('registers no fullscreen relay on %s', async (platform) => {
+-    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
++  it('relays fullscreen state for the frameless linux window', async () => {
++    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+     await import('../src/main.ts')
+     await harness.preparing.promise
+     const window = harness.windows[0]!
+-    window.emit('enter-full-screen')
+     window.webContents.emit('did-finish-load')
+-    expect(window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toHaveLength(0)
++    expect(window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toHaveLength(1)
+   })
+ 
+   it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
+diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
+index 3b5069e..b716979 100644
+--- a/apps/desktop/tests/preload-windows.client.spec.ts
++++ b/apps/desktop/tests/preload-windows.client.spec.ts
+@@ -39,14 +39,14 @@ it('does not install Windows controls on darwin', () => {
+   expect(send).not.toHaveBeenCalled()
+ })
+ 
+-it('installs the caption menubar and reports its appearance on linux', () => {
++it('leaves the Web layout to the frameless chrome on linux', () => {
+   vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+   stubCaptionRendering()
+   document.documentElement.lang = 'en'
+   syncWindowsAppearance()
+-  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(true)
+-  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('40px')
+-  expect(send).toHaveBeenCalledWith(DESKTOP_IPC.windowsAppearance, 'en', 'rgba(255, 255, 255, 1)', 'rgba(0, 0, 0, 1)')
++  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
++  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('')
++  expect(send).not.toHaveBeenCalled()
+ })
+ 
+ it('leaves the Web layout untouched in linux glass mode', () => {
+diff --git a/packages/client/web/src/base.css b/packages/client/web/src/base.css
+index af74988..3c3150f 100644
+--- a/packages/client/web/src/base.css
++++ b/packages/client/web/src/base.css
+@@ -52,7 +52,8 @@ html[data-platform='darwin'] body {
+    otherwise drag the window instead of receiving clicks; every covering overlay
+    portals to document.body beside #root, which also puts it after every drag row
+    in document order, and one rule subtracts them all. */
+-html[data-platform='darwin'] [data-window-drag] {
++html[data-platform='darwin'] [data-window-drag],
++html[data-desktop-frame] [data-window-drag] {
+   -webkit-app-region: drag;
+ }
+ 
+@@ -64,11 +65,13 @@ html[data-platform='darwin'] [data-window-drag] {
+    is the body's own: the row marks inside still declare drag and win over it in
+    document order, so the pulse changes nothing about the composed surface — it
+    only makes Electron collect it again. */
+-html[data-platform='darwin'] [data-window-drag-recall] {
++html[data-platform='darwin'] [data-window-drag-recall],
++html[data-desktop-frame] [data-window-drag-recall] {
+   -webkit-app-region: no-drag;
+ }
+ 
+-html[data-platform='darwin'] body > :not(#root) {
++html[data-platform='darwin'] body > :not(#root),
++html[data-desktop-frame] body > :not(#root) {
+   -webkit-app-region: no-drag;
+ }
+ 
+@@ -85,6 +88,13 @@ html[data-platform='darwin'] :is(
+   [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='menuitemcheckbox'],
+   [role='menuitemradio'], [role='option'], [role='checkbox'], [role='radio'], [role='switch'],
+   [role='slider'], [role='combobox'], [role='textbox']
++),
++html[data-desktop-frame] :is(
++  button, a, input, select, textarea, summary, [contenteditable='true'], [tabindex],
++  [role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [role='tooltip'],
++  [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='menuitemcheckbox'],
++  [role='menuitemradio'], [role='option'], [role='checkbox'], [role='radio'], [role='switch'],
++  [role='slider'], [role='combobox'], [role='textbox']
+ ) {
+   -webkit-app-region: no-drag;
+ }
