@@ -97,13 +97,16 @@ jobs:
           DSH_DESKTOP_BUILD_DIRTY: '0'
         run: scripts/build.sh --rpm
 
+      # electron-builder 的产物名带 -unsigned（构建阶段确实没签）；签名在下一步发生，所以这里
+      # 先把发布名去掉后缀，保证 dist/ 与 Release 上的文件名和「已签名」事实一致。
       - name: Collect rpm
         run: |
           set -euo pipefail
           rpm=$(find upstream/apps/desktop/.desktop-build/targets/linux-x64 -name '*.rpm' | head -1)
           test -n "$rpm"
           mkdir -p dist
-          cp "$rpm" dist/
+          name=$(basename "$rpm")
+          cp "$rpm" "dist/${name%-unsigned.rpm}.rpm"
 
       # 签名是发布的前提：没有私钥就失败，不发未签名包。公钥进 rpmdb 后才能验自家签名。
       - name: Sign rpm
