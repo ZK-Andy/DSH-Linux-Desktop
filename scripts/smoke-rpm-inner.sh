@@ -75,6 +75,19 @@ dnf5 install -y --setopt=install_weak_deps=False \
   xorg-x11-server-Xvfb ImageMagick xdotool dbus-daemon dbus-tools >/dev/null \
   || { log "装 X11 工具失败"; exit 1; }
 
+# sharp 的纯 Node worker 读不了 app.asar；它的加载期依赖（detect-libc、semver）必须一起解包。
+log "验证打包内 sharp 能解码图片"
+probe=/tmp/probe.png
+convert -size 16x16 'xc:#ff0000' "$probe" 2>/dev/null || magick -size 16x16 'xc:#ff0000' "$probe" 2>/dev/null
+[ -s "$probe" ] || { log "没造出测试 PNG"; exit 1; }
+pkg=/opt/deepseek-harness-desktop/resources
+printf '{"id":1,"input":"%s","options":{"failOn":"error","limitInputPixels":false},"ops":[],"terminal":"metadata","args":[]}\n' \
+  "$(base64 -w0 "$probe")" \
+  | DSH_SHARP_MODULE_DIR="$pkg/app.asar.unpacked/dsh/node_modules" \
+    "$pkg/runtime/primary-runtime/dependencies/node/bin/node" "$pkg/sharp-worker.cjs" \
+  | grep -q '"ok":true' || { log "sharp worker 解码失败：检查 0021 的 asarUnpack 是否含 detect-libc 与 semver"; exit 1; }
+log "sharp 解码 OK"
+
 export DSH_HOME=/tmp/dsh-home
 mkdir -p "$DSH_HOME"
 xvfb=(xvfb-run -a -s "-screen 0 1280x1024x24")

@@ -109,6 +109,10 @@ check "sharp 被 unpack 到 app.asar.unpacked 的 dsh 子树" \
   grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/sharp/' <<<"$files"
 check "libvips（@img）也被 unpack" \
   grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/@img/' <<<"$files"
+check "detect-libc（sharp 的加载期依赖）也被 unpack" \
+  grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/detect-libc/' <<<"$files"
+check "semver（sharp 的加载期依赖）也被 unpack" \
+  grep -qE '^/opt/deepseek-harness-desktop/resources/app\.asar\.unpacked/.*/node_modules/semver/' <<<"$files"
 check "chrome-sandbox 存在" \
   grep -qx '/opt/deepseek-harness-desktop/chrome-sandbox' <<<"$files"
 

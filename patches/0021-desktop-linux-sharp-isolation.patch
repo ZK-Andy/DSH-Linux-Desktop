@@ -1,6 +1,6 @@
 diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
 new file mode 100644
-index 0000000..9198621
+index 00000000..91986211
 --- /dev/null
 +++ b/apps/desktop/resources/sharp-worker.cjs
 @@ -0,0 +1,57 @@
@@ -62,10 +62,10 @@ index 0000000..9198621
 +  )
 +})
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 0a832a3..f68fd9f 100644
+index f5c78d47..8c34828d 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -83,7 +83,10 @@ export function createElectronBuilderConfig(
+@@ -83,7 +83,13 @@ export function createElectronBuilderConfig(
    let dshDestination
    let windowsCode = []
    const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
@@ -73,11 +73,14 @@ index 0a832a3..f68fd9f 100644
 +    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
 +    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
 +    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
-+    '**/node_modules/sharp/**', '**/node_modules/@img/**']
++    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
++    // dependencies left inside the archive, so they are unpacked alongside the package.
++    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
++    '**/node_modules/semver/**']
    const windowsSigner = packagesWindows && !unsigned
      ? createWindowsTokenSigner({
          certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
-@@ -131,10 +134,10 @@ export function createElectronBuilderConfig(
+@@ -131,10 +137,10 @@ export function createElectronBuilderConfig(
      // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
      artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
      directories: { output: output.directory },
@@ -92,7 +95,7 @@ index 0a832a3..f68fd9f 100644
      electronDist: buildPaths.electron,
      electronFuses: { runAsNode: true },
      beforeBuild: async () => {
-@@ -176,6 +179,8 @@ export function createElectronBuilderConfig(
+@@ -176,6 +182,8 @@ export function createElectronBuilderConfig(
        // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
        ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
        ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
@@ -103,7 +106,7 @@ index 0a832a3..f68fd9f 100644
        icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
 diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 new file mode 100644
-index 0000000..96c249d
+index 00000000..96c249da
 --- /dev/null
 +++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 @@ -0,0 +1,176 @@
@@ -284,7 +287,7 @@ index 0000000..96c249d
 +    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
 +}
 diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
-index 798b21a..7649fff 100644
+index 798b21ae..7649ffff 100644
 --- a/packages/attachment/attachment-local/src/sharp.ts
 +++ b/packages/attachment/attachment-local/src/sharp.ts
 @@ -1,7 +1,7 @@
