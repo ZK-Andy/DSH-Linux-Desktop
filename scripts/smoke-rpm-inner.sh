@@ -10,7 +10,12 @@ command -v deepseek-harness || { log "没装出 /usr/bin/deepseek-harness"; exit
 
 # Xvfb 提供虚拟显示；xdotool 用来确认窗口真的建出来；ImageMagick 提供 import。
 dnf5 install -y --setopt=install_weak_deps=False \
-  dbus-tools xorg-x11-server-Xvfb ImageMagick xdotool >/dev/null || { log "装 X11 工具失败"; exit 1; }
+  xorg-x11-server-Xvfb ImageMagick xdotool >/dev/null \
+    || { log "装 X11 工具失败"; exit 1; }
+# Fedora 44 把 dbus-run-session 放在 dbus-daemon 包里，dbus-tools 只有 monitor/send/uuidgen。
+dnf5 install -y dbus-daemon dbus-tools >/dev/null 2>&1 \
+    || dnf5 install -y dbus-daemon >/dev/null 2>&1 \
+    || log "警告：dbus-daemon 装不上，冒烟将尝试无总线启动"
 
 export DSH_HOME=/tmp/dsh-home
 mkdir -p /tmp/shots
@@ -37,6 +42,20 @@ import -window root /tmp/shots/shot.png 2>/dev/null || scrot /tmp/shots/shot.png
 kill "$app" 2>/dev/null || true
 INNER
 
-dbus-run-session -- xvfb-run -a -s "-screen 0 1280x1024x24" bash /tmp/inner.sh || exit 1
+# 有 dbus-run-session 就用它；没有就自己起 dbus-daemon --session；都没有就无总线启动（仍能验窗口）。
+if command -v dbus-run-session >/dev/null 2>&1; then
+  dbus_run=(dbus-run-session --)
+elif command -v dbus-daemon >/dev/null 2>&1; then
+  bus_address="$(dbus-daemon --session --fork --print-address)"
+  export DBUS_SESSION_BUS_ADDRESS="$bus_address"
+  log "会话总线：$bus_address"
+  dbus_run=()
+else
+  log "没有 dbus-run-session / dbus-daemon，无总线启动"
+  dbus_run=()
+fi
+
+# shellcheck disable=SC2068
+"${dbus_run[@]}" xvfb-run -a -s "-screen 0 1280x1024x24" bash /tmp/inner.sh || exit 1
 cp /tmp/shots/*.png /shots/ 2>/dev/null || true
 log "完成"
