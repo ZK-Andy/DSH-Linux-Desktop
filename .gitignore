@@ -16,6 +16,10 @@ dist/
 *.tar.zst
 *.sha256
 
+# 冒烟证据（CI 里上传 artifact，本地跑完也不入库）
+shots/
+smoke-logs/
+
 # 编辑器与系统
 .DS_Store
 *.swp

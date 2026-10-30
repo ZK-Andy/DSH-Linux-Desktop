@@ -45,7 +45,7 @@
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
 - 缓存：pnpm store（`~/.local/share/pnpm/store`，key 用 fetch 之后的 `upstream/pnpm-lock.yaml`）、Electron 与 electron-builder 工具链（`~/.cache/electron`、`~/.cache/electron-builder`）；不缓存 `node_modules`。
-- 冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install` 真装、`xvfb` 启动、`xdotool` 确认窗口出现，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。
+- 冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install --setopt=localpkg_gpgcheck=0` 真装、`xvfb` 启动、`xdotool` 确认窗口出现并留 `WM_CLASS`，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。容器内脚本分两阶段自举（装包 → 会话总线+Xvfb 重入 `--launch`），容器外只做挂载（`/pkg` 只读、`/shots`、`/smokelogs`）；截图与 `app.log` 走 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR`，上传 artifact 分档：冒烟跑过且失败判 error，其余 warn。
 - CI 证明不了 GNOME 里的可见性：R2 以真实 GNOME Wayland 人工验收为准，CI 只保证对象与注册存在。
 
 ### 3.3 分发

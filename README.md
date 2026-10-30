@@ -61,7 +61,7 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 ./scripts/verify.sh dist/*.rpm  # 静态验收：包名/版本/依赖/布局/desktop 入口/%post
 ```
 
-产物在 `upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，文件名 `dsh-desktop-<version>-x86_64.rpm`。安装后的验收是 `scripts/smoke-install-rpm.sh`：在 `fedora:44` 容器里 `dnf5 install`、`xvfb` 启动、截图留档。
+产物在 `upstream/apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，文件名 `dsh-desktop-<version>-x86_64.rpm`。安装后的验收是 `scripts/smoke-install-rpm.sh`：在 `fedora:44` 容器里 `dnf5 install`（`localpkg_gpgcheck=0`，未签名阶段）、`xvfb` 启动、`xdotool` 确认窗口、截图留档；截图与 `app.log` 经 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR` 落到宿主并上传 artifact（跑过且失败判 error，其余 warn）。
 
 本地调试窗口（不打包）：
 

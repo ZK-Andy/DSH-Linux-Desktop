@@ -121,14 +121,34 @@ jobs:
           test -n "$rpm"
           bash scripts/verify.sh "$rpm"
           rpm -qip "$rpm"
+          # 留痕（不判门）：Requires 全量给人和 dnf 对照，前 60 行足够看。
+          echo "== rpm Requires =="
+          rpm -qp --requires "$rpm" 2>&1 | head -60 || true
 
-      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器。
+      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器；
+      # 截图与日志落宿主目录，按「跑过且失败=error、其余=warn」分档上传（warn 恒定的上传步
+      # 等于永不失败的门）。
       - name: Smoke install rpm
+        id: smoke
+        env:
+          SMOKE_SHOT_DIR: ${{ github.workspace }}/shots
+          SMOKE_LOG_DIR: ${{ github.workspace }}/smoke-logs
         run: bash scripts/smoke-install-rpm.sh dist
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload smoke screenshot
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: smoke-screenshot
+          name: smoke-shot-linux-x64
           path: shots/
-          if-no-files-found: warn
+          if-no-files-found: ${{ steps.smoke.outcome == 'failure' && 'error' || 'warn' }}
+          retention-days: 7
+
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log-linux-x64
+          path: smoke-logs/
+          if-no-files-found: ${{ steps.smoke.outcome == 'failure' && 'error' || 'warn' }}
+          retention-days: 7
