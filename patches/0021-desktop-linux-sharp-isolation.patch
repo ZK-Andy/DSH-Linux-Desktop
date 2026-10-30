@@ -1,6 +1,6 @@
 diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
 new file mode 100644
-index 00000000..91986211
+index 0000000..9198621
 --- /dev/null
 +++ b/apps/desktop/resources/sharp-worker.cjs
 @@ -0,0 +1,57 @@
@@ -62,7 +62,7 @@ index 00000000..91986211
 +  )
 +})
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index f5c78d47..8c34828d 100644
+index 969e104..19e5f15 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -83,7 +83,13 @@ export function createElectronBuilderConfig(
@@ -106,7 +106,7 @@ index f5c78d47..8c34828d 100644
        icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
 diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 new file mode 100644
-index 00000000..96c249da
+index 0000000..96c249d
 --- /dev/null
 +++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 @@ -0,0 +1,176 @@
@@ -287,10 +287,10 @@ index 00000000..96c249da
 +    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
 +}
 diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
-index 798b21ae..7649ffff 100644
+index 798b21a..d4972f4 100644
 --- a/packages/attachment/attachment-local/src/sharp.ts
 +++ b/packages/attachment/attachment-local/src/sharp.ts
-@@ -1,7 +1,7 @@
+@@ -1,7 +1,13 @@
 -/** Process-realm lazy access to Sharp's CommonJS-compatible entry. */
 +/** Process-realm access to Sharp through an isolated Node child. */
  
@@ -300,5 +300,11 @@ index 798b21ae..7649ffff 100644
  
 -/** Load Sharp on the first raster operation and retain its callable export. */
 -export const requireSharp = createLazyRequire<typeof sharp>('sharp', import.meta.url)
-+/** Create the Sharp factory backed by the worker; see sharp-worker-client.ts. */
-+export const requireSharp = (): typeof sharp => createSharpRunner()
++/**
++ * The Sharp factory backed by the worker; see sharp-worker-client.ts.
++ * The runner owns one child process, so it must be created once per process:
++ * every decode goes through the same worker. Creating one per call leaked a
++ * Node child and its libvips heap per image operation.
++ */
++let runner: typeof sharp | undefined
++export const requireSharp = (): typeof sharp => (runner ??= createSharpRunner())

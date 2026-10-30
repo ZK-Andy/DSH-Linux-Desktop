@@ -861,10 +861,10 @@ index b3b07c2..8598f63 100644
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index ac6cb69..a643433 100644
+index ac6cb69..089022b 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-@@ -628,3 +628,43 @@
+@@ -628,3 +628,41 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
@@ -877,8 +877,6 @@ index ac6cb69..a643433 100644
 +  width: 100%;
 +}
 +
-+/* Frameless Linux: the header action row seats the window controls (ZCode
-+   WorkspaceHeaderActionSection keeps them in the trailing action cluster). */
 +.windowControls {
 +  display: flex;
 +  flex: none;
@@ -909,7 +907,7 @@ index ac6cb69..a643433 100644
 +  color: #fff;
 +}
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
-index deaddcf..16a4ef7 100644
+index deaddcf..29c25c1 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 @@ -3,6 +3,7 @@
@@ -920,20 +918,20 @@ index deaddcf..16a4ef7 100644
  import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
  import type { SessionId } from '@deepseek-ai/dsh-session/types'
  import type {
-@@ -203,6 +204,7 @@ export function ConversationSessionHeader({
-               </nav>
-               <div className={css.headerActions}>
-                 {renderSlot('conversation.session.header.actions', {})}
-+                <WindowControls />
-               </div>
-             </div>
-             <div className={css.headerUtilities}>
+@@ -212,6 +213,7 @@ export function ConversationSessionHeader({
+         )}
+         <div className={css.headerCorner} data-conversation-header-corner="">
+           {renderSlot('conversation.session.header.corner', {})}
++          <WindowControls />
+         </div>
+       </div>
+       {showTabs && (
 diff --git a/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
 new file mode 100644
-index 0000000..fb2bbed
+index 0000000..44ba82e
 --- /dev/null
 +++ b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,97 @@
 +/**
 + * Linux frameless window controls: the page renders the three buttons and the
 + * product API drives the main process (ZCode renders DesktopWindowControls and
@@ -966,9 +964,10 @@ index 0000000..fb2bbed
 +}
 +
 +/** Window state changes arrive from the main process; the icon swaps with them.
-+ * Inline seat: the Conversation header action row owns the controls, so the
-+ * shell needs no floating band over the header (ZCode seats its
-+ * DesktopWindowControls in WorkspaceHeaderActionSection the same way). */
++ * Inline seat: the Conversation header's far-right corner seat owns the
++ * controls (the same trailing seat the header reserves for corner occupants),
++ * so the shell needs no floating band over the header. ZCode seats its
++ * DesktopWindowControls in the header action section the same way. */
 +export function WindowControls(): ReactElement | null {
 +  const [api] = useState(windowControls)
 +  const [maximized, setMaximized] = useState(false)
