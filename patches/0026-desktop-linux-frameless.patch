@@ -511,7 +511,7 @@ index a74ea7c..476658e 100644
      headers: { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' },
    })
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index a25876d..90ebf51 100644
+index a25876d..f2dc5cd 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -550,10 +550,10 @@ index a25876d..90ebf51 100644
 +    expect(window.options).toMatchObject({
 +      frame: false,
 +      hasShadow: false,
++      autoHideMenuBar: true,
 +      webPreferences: { additionalArguments: [FRAME_ARGUMENT] },
 +    })
 +    expect(window.options).not.toHaveProperty('transparent')
-+    expect(window.setAutoHideMenuBar).not.toHaveBeenCalled()
 +    expect(window.setMenuBarVisibility).toHaveBeenCalledWith(false)
 +  })
 +
