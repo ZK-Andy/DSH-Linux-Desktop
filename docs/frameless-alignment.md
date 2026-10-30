@@ -26,6 +26,7 @@
 | A5 | 启动恢复最大化 | `desktopWindowChrome.ts:644-646` | `createWindow` 里 `if (primary && size.maximized) window.maximize()` | `[x]` 随 A2 一起做 |
 | A6 | zoom 档位恢复 | `desktopWindowChrome.ts:629/681` | 无 | `[ ]` A6-2 不做（用户拍板） |
 | A7 | 外链处理 | `desktopWindowChrome.ts:635-643` | http/https 交系统浏览器，其余 deny | `[~]` 产品行为不同（无内嵌浏览器） |
+| A8 | 窗口创建即可见 | `desktopWindowChrome.ts:615`（不传 `show`） | 原先 `show=false`，等 `navigateMain` 完才 `show()` | `[x]` `createWindow(appPreload, true, true)`，frameless 加 `backgroundColor: chromeFallbackFill()` 防白闪；加载由启动壳遮挡 |
 
 ### B. 页面壳与几何
 
@@ -58,8 +59,8 @@
 
 | # | 项 | ZCode 出处 | 我们现状 | 状态 |
 | --- | --- | --- | --- | --- |
-| E1 | 启动淡入 0.16s | `renderer/index.html` | 无 | `[x]` |
-| E2 | logo pop 0.72s | `renderer/index.html` | 无 | `[ ]` |
+| E1 | 启动淡入 0.16s | `renderer/index.html` | `apps/web/index.html`：`#root` 0.16s 淡入、`#loading` 0.16s 淡出 | `[x]` 只在 `dsh-workspace-ready`（`AppFrame` 首帧后双 rAF 派发）到达后触发，8s 兜底 |
+| E2 | logo pop 0.72s | `renderer/index.html` | 无 | `[x]` pop 0.72s 后接 `startup-logo-breathe` 1.5s 循环（对齐 ZCode SMIL 的 1;0.3;1），壳不再按动画时长收场 |
 | E3 | 页面加载路径 | `loadFile(index.html)` | `serveWebDocument` 注入 | `[~]` 改 loadFile 要动 Web 打包 |
 
 ### F. 自创清理
