@@ -41,7 +41,7 @@ sudo rpm --import ./RPM-GPG-KEY-dsh-desktop
 sudo dnf5 install ./dsh-desktop-*.rpm
 ```
 
-`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，发布后同时随 Release 提供。
+`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，同时随每个 Release 提供（与 rpm、`version.json`、`SHA256SUMS.txt` 一起）。
 
 GNOME 默认不显示托盘图标，需要安装并启用扩展：
 
@@ -63,6 +63,19 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 ## 构建
 
 CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出 rpm；本机没有 `rpmbuild`，出包只走 CI。本地只跑 dev（`./scripts/dev-desktop.sh`）。
+
+两条入口共用 `package.yml`（出包腿：补丁 → 构建 → 签名 → 静态验收 → 容器冒烟）：
+
+- `.github/workflows/build.yml`（周一定时 / 手动）只出包，不碰 Release。
+- `.github/workflows/release.yml`（push tag `v*`）出包后聚合资产、生成 `version.json` 与 `SHA256SUMS.txt`、跑 `scripts/release-preflight.sh`（资产矩阵、验签、version.json 与包内事实逐项核对），最后创建 Release。
+
+发版就是打 tag 并推送（tag 尾部的数字即 rpm Release 段）：
+
+```bash
+git tag -a v0.2.2-alpha.2-2 -m "DSH Linux Desktop v0.2.2-alpha.2-2"
+git push origin v0.2.2-alpha.2-2
+```
+
 
 ```bash
 ./scripts/fetch-upstream.sh     # 按 upstream-tag 浅克隆到 upstream/
