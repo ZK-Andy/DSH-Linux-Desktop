@@ -5,23 +5,21 @@ set -uo pipefail
 
 log() { printf '[rpm-smoke] %s\n' "$*"; }
 
-dnf5 install -y --setopt=install_weak_deps=False /pkg/*.rpm || { log "dnf5 安装失败"; exit 1; }
+dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=0 /pkg/*.rpm || { log "dnf5 安装失败"; exit 1; }
 command -v deepseek-harness || { log "没装出 /usr/bin/deepseek-harness"; exit 1; }
 
 # Xvfb 提供虚拟显示；xdotool 用来确认窗口真的建出来；ImageMagick 提供 import。
 dnf5 install -y --setopt=install_weak_deps=False \
-  xorg-x11-server-Xvfb ImageMagick xdotool >/dev/null \
+  xorg-x11-server-Xvfb ImageMagick xdotool dbus-daemon dbus-tools >/dev/null \
     || { log "装 X11 工具失败"; exit 1; }
-# Fedora 44 把 dbus-run-session 放在 dbus-daemon 包里，dbus-tools 只有 monitor/send/uuidgen。
-dnf5 install -y dbus-daemon dbus-tools >/dev/null 2>&1 \
-    || dnf5 install -y dbus-daemon >/dev/null 2>&1 \
-    || log "警告：dbus-daemon 装不上，冒烟将尝试无总线启动"
+# Fedora 44 的 dbus-tools 只有 monitor/send/uuidgen，dbus-run-session 在 dbus-daemon 包里；
+# 两者一起装，装不上也不让冒烟直接死（下面还有自起总线/无总线兜底）。
 
 export DSH_HOME=/tmp/dsh-home
 mkdir -p /tmp/shots
 cat > /tmp/inner.sh <<'INNER'
 set -uo pipefail
-/usr/bin/deepseek-harness --no-sandbox --disable-gpu > /tmp/app.log 2>&1 &
+/usr/bin/deepseek-harness --no-sandbox --disable-gpu --disable-dev-shm-usage > /tmp/app.log 2>&1 &
 app=$!
 window=""
 for _ in $(seq 1 30); do
@@ -35,6 +33,7 @@ done
 if [ -z "$window" ]; then
   echo "60 秒内没有可见窗口"; cat /tmp/app.log; exit 1
 fi
+echo "window=$window title=$(xdotool getwindowname "$window" 2>/dev/null || echo '?') class=$(xdotool getwindowclassname "$window" 2>/dev/null || echo '?')"
 xdotool getwindowgeometry "$window" || true
 sleep 5
 import -window root /tmp/shots/shot.png 2>/dev/null || scrot /tmp/shots/shot.png 2>/dev/null \

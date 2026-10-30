@@ -97,7 +97,7 @@
 - 菜单显示名：`productName` 必须是路径安全的 token（它决定 `/opt` 目录与 `Exec`），所以 `productName: "deepseek-harness-desktop"`；desktop 文件里的 `Name` 由 `0020` 的 `linux.desktop.entry.Name` 单独覆盖成 `DeepSeek Harness`，不把空格塞进路径。
 - 图标：`0003` 把 `linux.icon` 指向 `resources/icon-macos.svg`，electron-builder 按 scalable SVG 装到 `hicolor/scalable/apps/`。
 - `chrome-sandbox` 与缓存刷新用 electron-builder 的默认 after-install 模板（不需要自写脚本）：模板先探 `/proc/self/ns/user` + `unshare --user true`，可用则 0755、否则 4755；顺带 `update-alternatives`/`ln -s` 建 `/usr/bin/deepseek-harness`、跑 `update-desktop-database`，Ubuntu 上还装 AppArmor profile。
-- `Requires` 由 `0020` 显式给出（`AutoReqProv` 类自动扫描对 Electron 自带的 `.so` 不可靠）：gtk3、nss、libnotify、libXScrnSaver、`(libXtst or libXtst6)`、xdg-utils、at-spi2-core、`(libuuid or libuuid1)`、libsecret、libdbusmenu；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加（M2 用 `rpm -qpR` 复核）。rpmbuild 后处理按 macOS-Terminal 的配方关掉：`_build_id_links none`、`__os_install_post %{nil}`、`__strip`/`__brp_strip` 指 `/bin/true`、`_binary_payload w19.zstdio`。
+- `Requires` 由 `0020` 显式给出（`AutoReqProv` 类自动扫描对 Electron 自带的 `.so` 不可靠）：gtk3、nss、nspr、libnotify、libXScrnSaver、`(libXtst or libXtst6)`、xdg-utils、at-spi2-core、`(libuuid or libuuid1)`、libsecret、libdbusmenu（dlopen 的托盘菜单库），以及 Electron 直接链接/加载的一族：alsa-lib、libdrm、mesa-libgbm、mesa-libGL、libxkbcommon、cups-libs、expat、glib2、pango、cairo、gdk-pixbuf2、dbus-libs、systemd-libs、libX11、libXcomposite、libXdamage、libXext、libXfixes、libXrandr、libxcb；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加（M2 用 `rpm -qpR` 复核）。rpmbuild 后处理按 macOS-Terminal 的配方关掉：`_build_id_links none`、`__os_install_post %{nil}`、`__strip`/`__brp_strip` 指 `/bin/true`、`_binary_payload w19.zstdio`。
 
 ## 4. 仓库结构
 

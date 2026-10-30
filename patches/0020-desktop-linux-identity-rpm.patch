@@ -14,7 +14,7 @@ index 7185dc9..3dfb1af 100644
  # The mandatory-update policy channel is Windows and macOS only. The policy service identifies its
  # Desktop clients as desktop-win or desktop-mac and has no Linux identity, and a Linux release carries
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 027803e..0a832a3 100644
+index 027803e..f5c78d4 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -119,17 +119,17 @@ export function createElectronBuilderConfig(
@@ -47,7 +47,7 @@ index 027803e..0a832a3 100644
        // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
        ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
        target: linuxFormats ?? ['AppImage'],
-@@ -299,8 +301,28 @@ export function createElectronBuilderConfig(
+@@ -299,8 +301,33 @@ export function createElectronBuilderConfig(
      // rejects it with "Tag takes single token only", so both formats name the package explicitly.
      // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
      // Group as "default", which names neither a Debian section nor an RPM group.
@@ -64,8 +64,13 @@ index 027803e..0a832a3 100644
 +      packageName: 'dsh-desktop',
 +      packageCategory: 'Development/Tools',
 +      depends: [
-+        'gtk3', 'nss', 'libnotify', 'libXScrnSaver', '(libXtst or libXtst6)', 'xdg-utils',
++        'gtk3', 'nss', 'nspr', 'libnotify', 'libXScrnSaver', '(libXtst or libXtst6)', 'xdg-utils',
 +        'at-spi2-core', '(libuuid or libuuid1)', 'libsecret', 'libdbusmenu',
++        // Electron 运行时直接 dlopen/链接的系统库。只列 gtk3 一族不够：容器与最小安装里
++        // libgbm/alsa/libxkbcommon 是必查项，缺一个窗口就起不来。
++        'alsa-lib', 'libdrm', 'mesa-libgbm', 'mesa-libGL', 'libxkbcommon', 'cups-libs',
++        'expat', 'glib2', 'pango', 'cairo', 'gdk-pixbuf2', 'dbus-libs', 'systemd-libs',
++        'libX11', 'libXcomposite', 'libXdamage', 'libXext', 'libXfixes', 'libXrandr', 'libxcb',
 +      ],
 +      fpm: [
 +        '--rpm-rpmbuild-define', '_build_id_links none',

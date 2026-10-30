@@ -80,7 +80,10 @@ fi
 
 # --- 依赖：显式声明，含两个 dlopen-only 的库（ldd 看不见）---
 requires="$(rpm -qp --requires "$rpm" 2>/dev/null)"
-for dep in gtk3 nss libnotify libXScrnSaver xdg-utils at-spi2-core libsecret libdbusmenu; do
+deps=(gtk3 nss nspr libnotify libXScrnSaver xdg-utils at-spi2-core libsecret libdbusmenu \
+  alsa-lib libdrm mesa-libgbm mesa-libGL libxkbcommon cups-libs expat glib2 pango cairo gdk-pixbuf2 \
+  dbus-libs systemd-libs libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb)
+for dep in "${deps[@]}"; do
   check "Requires 含 $dep" grep -qx "$dep" <<<"$requires"
 done
 check "Requires 含 libXtst 备选表达式" grep -q 'libXtst' <<<"$requires"
