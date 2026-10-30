@@ -688,10 +688,10 @@ index 2fb4f55..3a45e85 100644
    ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
    readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),
 diff --git a/apps/web/index.html b/apps/web/index.html
-index ff3ca62..8fc5d86 100644
+index ff3ca62..164da9b 100644
 --- a/apps/web/index.html
 +++ b/apps/web/index.html
-@@ -10,9 +10,146 @@
+@@ -10,9 +10,158 @@
      <link rel="icon" type="image/svg+xml" href="/favicon-dark.svg" media="(prefers-color-scheme: dark)" />
      <link rel="icon" type="image/svg+xml" href="/favicon.svg" media="(prefers-color-scheme: light)" />
      <title>DSH Local Build</title>
@@ -822,9 +822,14 @@ index ff3ca62..8fc5d86 100644
 +      const STARTUP_READY_EVENT = 'dsh-workspace-ready'
 +      // Bounded: a boot failure or a frame that never mounts must not leave the
 +      // cover on screen forever.
-+      const STARTUP_READY_TIMEOUT_MS = 8000
++      const STARTUP_READY_TIMEOUT_MS = 20000
++      const STARTUP_POLL_MS = 50
 +      let finished = false
++      let workspaceReady = false
 +
++      // The frame's first commit can land while the client still shows its own
++      // boot layer ([data-dsh-boot]). Lift the cover only when the frame painted
++      // and that layer is gone, so the kernel splash never uncovers a spinner.
 +      const finishStartup = () => {
 +        if (finished) return
 +        finished = true
@@ -832,8 +837,15 @@ index ff3ca62..8fc5d86 100644
 +        window.setTimeout(() => startupLoading?.remove(), 500)
 +      }
 +
-+      window.addEventListener(STARTUP_READY_EVENT, finishStartup, { once: true })
-+      window.setTimeout(finishStartup, STARTUP_READY_TIMEOUT_MS)
++      const bootLayerVisible = () => document.querySelector('[data-dsh-boot]') !== null
++      const poll = window.setInterval(() => {
++        if (!workspaceReady || bootLayerVisible()) return
++        window.clearInterval(poll)
++        finishStartup()
++      }, STARTUP_POLL_MS)
++
++      window.addEventListener(STARTUP_READY_EVENT, () => { workspaceReady = true }, { once: true })
++      window.setTimeout(() => { window.clearInterval(poll); finishStartup() }, STARTUP_READY_TIMEOUT_MS)
 +    </script>
      <script type="module" src="/src/main.ts"></script>
    </body>
