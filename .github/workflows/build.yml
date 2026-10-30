@@ -97,21 +97,30 @@ jobs:
           DSH_DESKTOP_BUILD_DIRTY: '0'
         run: scripts/build.sh --rpm
 
-      - name: Verify rpm (static)
+      - name: Collect rpm
         run: |
           set -euo pipefail
           rpm=$(find upstream/apps/desktop/.desktop-build/targets/linux-x64 -name '*.rpm' | head -1)
           test -n "$rpm"
           mkdir -p dist
           cp "$rpm" dist/
-          bash scripts/verify.sh "dist/$(basename "$rpm")"
-          rpm -qip "$rpm"
 
-      - uses: actions/upload-artifact@v4
+      # 先传产物再验收：验收脚本自己出问题时，失败的那次 run 里也拿得到 rpm 复现。
+      - name: Upload rpm
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: dsh-desktop-rpm
           path: dist/*.rpm
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Verify rpm (static)
+        run: |
+          set -euo pipefail
+          rpm=$(find dist -maxdepth 1 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          bash scripts/verify.sh "$rpm"
+          rpm -qip "$rpm"
 
       # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器。
       - name: Smoke install rpm

@@ -35,12 +35,27 @@ check() { # check <描述> <命令...>
   fi
 }
 
+check_not() { # check_not <描述> <命令...>：命令命中即失败
+  local what="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    fail=$((fail+1)); printf '  FAIL %s\n' "$what"
+  else
+    pass=$((pass+1)); printf '  ok   %s\n' "$what"
+  fi
+}
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 # 从包体里读一个文件到 stdout；参数是 rpm 里的绝对路径（/usr/share/...）。
 # cpio 归档里的名字不带前导斜杠，所以匹配前先剥掉。
-rpm_cat() { local path="${1#/}"; rpm2cpio "$rpm" | ( cd "$tmp" && cpio -i --to-stdout --quiet "$path" ); }
+# cpio 归档里的名字带 ./ 前缀（rpm 4.14+），这里两种写法都试，匹配不上就输出为空。
+rpm_cat() {
+  local path="${1#/}" out
+  out="$(rpm2cpio "$rpm" | ( cd "$tmp" && cpio -i --to-stdout --quiet "./$path" "$path" 2>/dev/null ))"
+  [[ -n "$out" ]] || out="$(rpm2cpio "$rpm" | ( cd "$tmp" && cpio -i --to-stdout --quiet "/$path" 2>/dev/null ))"
+  printf '%s' "$out"
+}
 
 echo "==> rpm: $rpm"
 
@@ -52,8 +67,8 @@ check "包名是 dsh-desktop（不是上游的 deepseek-harness）" test "$name"
 check "架构是 x86_64（本项目只发 x86_64）" test "$arch" = "x86_64"
 # unsigned 构建带 -unsigned 后缀（desktopArtifactOutput 决定），发布签名后才去掉。
 base="$(basename "$rpm")"
-check "文件名是 dsh-desktop-<version>[-unsigned]-x86_64.rpm" \
-  bash -c "[[ \"$base\" == \"dsh-desktop-${version//\~/-}\"-x86_64.rpm || \"$base\" == \"dsh-desktop-${version//\~/-}-unsigned-x86_64.rpm\" ]]"
+check "文件名是 dsh-desktop-<version>-x86_64[-unsigned].rpm" \
+  bash -c "[[ \"$base\" == \"dsh-desktop-${version//\~/-}-x86_64.rpm\" || \"$base\" == \"dsh-desktop-${version//\~/-}-x86_64-unsigned.rpm\" ]]"
 
 if [[ -f "$TAG_FILE" ]]; then
   tag="$(head -n1 "$TAG_FILE" | tr -d '[:space:]')"
@@ -70,7 +85,7 @@ for dep in gtk3 nss libnotify libXScrnSaver xdg-utils at-spi2-core libsecret lib
 done
 check "Requires 含 libXtst 备选表达式" grep -q 'libXtst' <<<"$requires"
 check "Requires 含 libuuid 备选表达式" grep -q 'libuuid' <<<"$requires"
-check "没有把上游包名当依赖（deepseek-harness）" bash -c "! grep -qx 'deepseek-harness' <<<'$requires'"
+check_not "没有把上游包名当依赖（deepseek-harness）" grep -qx 'deepseek-harness' <<<"$requires"
 
 # --- 安装布局 ---
 files="$(rpm -qpl "$rpm" 2>/dev/null)"
@@ -107,7 +122,7 @@ check "%post 处理 chrome-sandbox" grep -q 'chrome-sandbox' <<<"$post"
 check "%post 用 unshare 探测 user namespace 后再决定 4755/0755" grep -q 'unshare --user true' <<<"$post"
 check "%post 刷新 desktop 数据库" grep -q 'update-desktop-database' <<<"$post"
 check "%post 建 /usr/bin/deepseek-harness 入口" grep -q '/usr/bin/deepseek-harness' <<<"$post"
-check "%post 不往用户 home 写东西" bash -c "! grep -q '/home/' <<<'$post'"
+check_not "%post 不往用户 home 写东西" grep -q '/home/' <<<"$post"
 
 echo
 printf '==> %d 项通过，%d 项失败\n' "$pass" "$fail"
