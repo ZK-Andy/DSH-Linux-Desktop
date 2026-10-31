@@ -203,7 +203,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
 
-执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步已完成（重组 + 把实现搬进模块文件），条目已删除。M6 的断言随 `patch-surface.sh` 一起写。
+执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M6、M7 已完成，条目已删除；对应断言已转为 `patch-surface.sh` 的常规检查。
 
 ### M2 收拢 `electron-builder-config.mjs`
 
@@ -254,20 +254,6 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
   4. 文档同步：README（version.json、应用内下载、sha256、`rpm -Kv` 相关段落）与 PLAN.md R4、§3.4、§6（「不做应用内自更新」「暂不建 dnf 仓库」）按 dnf-only 改写；`grep -n 'version.json' README.md PLAN.md` 只命中本节。
 - 负责补丁：`0008-updates-dnf.patch`。
 
-### M6 补丁内嵌的资源副本
-
-- 现状：`0002-packaging.patch` 以新文件形式内嵌以下落点：`apps/desktop/resources/RPM-GPG-KEY-dsh-desktop`、`apps/desktop/resources/dsh-update-helper`、`apps/desktop/resources/org.deepseek.harness.desktop.update.policy`、`apps/desktop/resources/rpm-post-install.sh`、`apps/desktop/resources/rpm-post-remove.sh`；`scripts/apply-patches.sh` 已从 `assets/`、`packaging/` 放置同名文件。
-- 目标：补丁不含这些文件，只由 `apply-patches.sh` 放置。
-- 验收：`patch-surface.sh` 断言 `patches/` 新增文件的目标路径不与 `apply-patches.sh` 的 `ASSETS` 表重合。
-- 负责补丁：随 `0002-packaging.patch` 清理。
-
-### M7 `WindowControls` 多份实现
-
-- 现状：`ui-conversation`、`ui-layout`、`ui-sidebar-right` 各有一份 `WindowControls.tsx`（`0006-window-frameless.patch` 新增）。
-- 目标：移到 `packages/client/ui-primitives`，三处引用它。上游 `packages/client/AGENTS.md` 规定 feature plugin 之间不得 runtime import，共享运行时代码只能放静态库。`ui-primitives` 不用 cordis，组件只用 props 与 preload 暴露在 `window` 上的桥，不碰 ctx。
-- 验收：`patches/` 中新增的 `WindowControls.tsx` 只有一份，且位于 `packages/client/ui-primitives/` 下。
-- 负责补丁：`0006-window-frameless.patch`。
-
 ### M8 补丁首行与门禁
 
 - 现状：8 个模块补丁都已写 `变化理由：` 首行；`0006-window-frameless.patch` 不再需要 `例外：规则 4`（实现搬进模块后 `main.ts` 净增为负）。`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 已落地并在 CI 里于 `apply-patches.sh` 之前运行。
@@ -276,7 +262,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
   - 除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；
   - 单补丁 `main.ts` 净增 ≤15 行，或有 `例外：规则 4` 行；
   - 本节每条引用的补丁存在；
-  - 补丁新增文件不与 `ASSETS` 表重合（M6）。
+  - 补丁新增文件不与 `ASSETS` 表重合。
 - 验收：CI 在 `apply-patches.sh` 之前运行该脚本；对现状输出的违规恰好是本节登记的项。
 - `apply-patches.sh --check` 对叠加补丁不成立（每条都对干净树试打，后置补丁依赖前置补丁新建的文件），待修成累积试打或删除该选项。
 - 负责补丁：不涉及补丁（`scripts/`）；首行随各模块补丁重写补齐（已完成）。

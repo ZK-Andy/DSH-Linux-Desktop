@@ -1,6 +1,6 @@
 变化理由：把上游仓库变成可构建的 Linux 桌面工程：下载与解包、补齐 workspace 入口、包骨架、运行时依赖、托盘图标生成、office 与 assets 放置。
 diff --git a/.gitignore b/.gitignore
-index 3cb86ce8..58b44e9e 100644
+index 3cb86ce8..de74baa8 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -2,6 +2,7 @@ CLAUDE.local.md
@@ -11,6 +11,18 @@ index 3cb86ce8..58b44e9e 100644
  apps/desktop/*.p12
  node_modules/
  lib/
+@@ -47,3 +48,11 @@ worktrees/
+ .agents/worktrees/
+ .typert-*/
+ native/system/test/bin/
++
++# 由 scripts/apply-patches.sh 从 assets/ 与 packaging/ 放置，不进补丁
++apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
++apps/desktop/resources/dsh-update-helper
++apps/desktop/resources/org.deepseek.harness.desktop.update.policy
++apps/desktop/resources/rpm-post-install.sh
++apps/desktop/resources/rpm-post-remove.sh
++node_modules
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
 index 081a90ea..faeba5bd 100644
 --- a/apps/desktop/package.json

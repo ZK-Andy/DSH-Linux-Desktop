@@ -331,7 +331,7 @@ index 00000000..97ddbcaa
 +  })
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4770fe83..ac0ec2ed 100644
+index 4770fe83..91f33e8c 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -1,5 +1,4 @@
@@ -471,7 +471,7 @@ index 4770fe83..ac0ec2ed 100644
  }
  
  async function main(): Promise<void> {
-@@ -455,8 +355,12 @@ async function main(): Promise<void> {
+@@ -455,8 +355,14 @@ async function main(): Promise<void> {
    // Copy comes from the same locale as the update prompts so the dialog
    // chrome and its content never mix languages.
    const showAbout = async (): Promise<void> => {
@@ -479,13 +479,15 @@ index 4770fe83..ac0ec2ed 100644
 +    // upstream client version the shell was built from.
 +    const release = process.platform === 'linux' ? installedRpmReleaseSync() : undefined
 +    const packaged = release === undefined ? app.getVersion() : `${app.getVersion().replace('-', '~')}-${release}`
++    const lines = [formatDesktopMessage(locale.messages.aboutVersion, { version: packaged })]
++    if (release !== undefined) lines.push(formatDesktopMessage(locale.messages.aboutUpstreamVersion, { version: app.getVersion() }))
      await ordinaryMessageBox({ type: 'info', title: locale.messages.aboutMenu, message: locale.messages.aboutProduct,
 -      detail: formatDesktopMessage(locale.messages.aboutVersion, { version: app.getVersion() }),
-+      detail: `${formatDesktopMessage(locale.messages.aboutVersion, { version: packaged })}\n${formatDesktopMessage(locale.messages.aboutUpstreamVersion, { version: app.getVersion() })}`,
++      detail: lines.join('\n'),
        buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
    }
    const commandManager = new DesktopCommandManager({
-@@ -676,6 +580,10 @@ async function main(): Promise<void> {
+@@ -676,6 +582,10 @@ async function main(): Promise<void> {
  
    const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
    const updateChannel = desktopUpdateChannel(manifest)
@@ -496,7 +498,7 @@ index 4770fe83..ac0ec2ed 100644
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
      async () => {
-@@ -731,7 +639,9 @@ async function main(): Promise<void> {
+@@ -731,7 +641,9 @@ async function main(): Promise<void> {
        }
        return true
      },
@@ -507,7 +509,7 @@ index 4770fe83..ac0ec2ed 100644
      (success, reason) => { void track('desktop_upgrade_download_result', { is_success: success, ...reason === undefined ? {} : { error_reason: reason } }) },
      updateChannel,
    )
-@@ -765,8 +675,10 @@ async function main(): Promise<void> {
+@@ -765,8 +677,10 @@ async function main(): Promise<void> {
        url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
@@ -520,7 +522,7 @@ index 4770fe83..ac0ec2ed 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1084,15 +996,26 @@ async function main(): Promise<void> {
+@@ -1084,15 +998,26 @@ async function main(): Promise<void> {
      tray?.relabel()
    }
    refreshApplicationMenu()
@@ -552,7 +554,7 @@ index 4770fe83..ac0ec2ed 100644
      ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
        locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
      : undefined
-@@ -1106,10 +1029,11 @@ async function main(): Promise<void> {
+@@ -1106,10 +1031,11 @@ async function main(): Promise<void> {
      focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
      // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
      // size directly, where the 1024 px PNG would be scaled down by GDI.
@@ -566,7 +568,7 @@ index 4770fe83..ac0ec2ed 100644
      ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
        assertDesktopSender(event, ['app'])
        if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1150,10 +1074,16 @@ async function main(): Promise<void> {
+@@ -1150,10 +1076,16 @@ async function main(): Promise<void> {
        // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
        const validColor = (value: unknown): value is string => typeof value === 'string'
          && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
@@ -584,14 +586,15 @@ index 4770fe83..ac0ec2ed 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1164,11 +1094,12 @@ async function main(): Promise<void> {
+@@ -1164,11 +1096,13 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
 -    const window = createWindow(appPreload, false, true)
-+    // Visible from creation, like ZCode: the startup shell covers the load, so hiding the
-+    // window until did-finish-load would keep the logo animation off screen entirely.
-+    const window = createWindow(appPreload, true, true)
++    // Linux's frameless shell covers the load with its own startup screen, so the window is
++    // visible from creation there (ZCode does the same). Other platforms keep the upstream
++    // behaviour of showing only once the renderer is ready.
++    const window = createWindow(appPreload, desktopFrameless(), true)
      mainWindow = window
      browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
      shortcuts.attach(window)
@@ -728,8 +731,32 @@ index 61fda9e3..364f5805 100644
    disposeActiveHandlers?.()
    let active = true
    const disposeHandlers = (): void => {
+diff --git a/apps/desktop/tests/expected/application-menu-en-US.json b/apps/desktop/tests/expected/application-menu-en-US.json
+index 4e3c9819..ecd6dbd1 100644
+--- a/apps/desktop/tests/expected/application-menu-en-US.json
++++ b/apps/desktop/tests/expected/application-menu-en-US.json
+@@ -19,6 +19,6 @@
+   },
+   {
+     "role": "quit",
+-    "label": "Quit DeepSeek Harness"
++    "label": "Quit"
+   }
+ ]
+diff --git a/apps/desktop/tests/expected/application-menu-zh-CN.json b/apps/desktop/tests/expected/application-menu-zh-CN.json
+index f39b2d88..e4801735 100644
+--- a/apps/desktop/tests/expected/application-menu-zh-CN.json
++++ b/apps/desktop/tests/expected/application-menu-zh-CN.json
+@@ -19,6 +19,6 @@
+   },
+   {
+     "role": "quit",
+-    "label": "退出 DeepSeek Harness"
++    "label": "退出"
+   }
+ ]
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index 20325642..e72ab827 100644
+index 20325642..f27bc95c 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -740,15 +767,26 @@ index 20325642..e72ab827 100644
  import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
  import type { IpcMainInvokeEvent } from 'electron'
  import { join } from 'node:path'
-@@ -127,6 +128,7 @@ const harness = await vi.hoisted(async () => {
+@@ -117,6 +118,10 @@ const harness = await vi.hoisted(async () => {
+     readonly setFullScreen = vi.fn((flag: boolean) => { this.fullscreen = flag; this.emit(flag ? 'enter-full-screen' : 'leave-full-screen') })
+     minimized = false
+     isMinimized() { return this.minimized }
++    maximized = false
++    isMaximized() { return this.maximized }
++    readonly maximize = vi.fn(() => { this.maximized = true; this.emit('maximize') })
++    readonly unmaximize = vi.fn(() => { this.maximized = false; this.emit('unmaximize') })
+     visible = true
+     isVisible() { return this.visible }
+     isFocused() { return true }
+@@ -127,6 +132,7 @@ const harness = await vi.hoisted(async () => {
      }
      static getAllWindows() { return windows.filter(window => !window.destroyed) }
      setMenu() {}
-+    setMenuBarVisibility() {}
++    readonly setMenuBarVisibility = vi.fn()
      getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
      setBounds() {}
      setTitle = vi.fn()
-@@ -323,6 +325,7 @@ vi.mock('electron', () => ({
+@@ -323,6 +329,7 @@ vi.mock('electron', () => ({
    powerMonitor: harness.powerMonitor,
    Tray: harness.FakeTray,
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -756,16 +794,16 @@ index 20325642..e72ab827 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-@@ -586,7 +589,7 @@ describe('desktop main startup', () => {
-     await vi.advanceTimersByTimeAsync(0)
+@@ -587,7 +594,7 @@ describe('desktop main startup', () => {
      const zh = locale === 'zh-CN'
      expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
--      type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
-+      type: 'info', title: zh ? '关于' : 'About', message: 'DeepSeek Harness',
-       detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
+       type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
+-      detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
++      detail: zh ? '桌面端版本：V1.0.0' : 'Desktop version: V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
      }))
      // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
-@@ -868,12 +871,40 @@ describe('desktop main startup', () => {
+     harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
+@@ -868,12 +875,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
@@ -806,7 +844,7 @@ index 20325642..e72ab827 100644
    it('serves packaged shell documents instead of rejecting the shell origin', async () => {
      const { serveWebDocument } = await import('../src/web-document.ts')
      vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))
-@@ -909,14 +940,18 @@ describe('desktop main startup', () => {
+@@ -909,14 +944,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
@@ -827,15 +865,6 @@ index 20325642..e72ab827 100644
    })
  
    it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
-@@ -1030,7 +1065,7 @@ describe('desktop main startup', () => {
-     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
-     const application = handler(event, 'application', 48, 34)
-     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
--      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
-+      '关于', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
-     ])
-     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
-     expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
 diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
 index e59b7ebb..cc055f0a 100644
 --- a/apps/desktop/tests/preload-windows.client.spec.ts
@@ -1107,13 +1136,13 @@ index 5f4786ac..6cc73a52 100644
  } catch (reason) {
    reportFailure(reason)
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
-index b3b07c2b..8598f63d 100644
+index b3b07c2b..e8f17cdf 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 @@ -1,5 +1,6 @@
  /** Resident conversation navigation and Session-specific header content. */
  import clsx from 'clsx'
-+import { WindowControls } from './WindowControls.tsx'
++import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
  import type { ConversationHeaderProps } from '../contract/slots.ts'
  import { conversationPhase } from '../contract/snapshot.ts'
  import css from './ConversationRoot.module.css'
@@ -1122,15 +1151,15 @@ index b3b07c2b..8598f63d 100644
        </div>
        {sessionId === undefined
 -        ? <div className={css.titleRow} />
-+        ? <div className={css.titleRow}><span className={css.blankWindowControls}><WindowControls /></span></div>
++        ? <div className={css.titleRow}><span className={css.blankWindowControls}><WindowControls seat="header" /></span></div>
          : renderSlot('conversation.session.header', { hideChrome: blank })}
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index ac6cb69f..089022b0 100644
+index ac6cb69f..a68a8e46 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-@@ -628,3 +628,41 @@
+@@ -628,3 +628,12 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
@@ -1143,44 +1172,15 @@ index ac6cb69f..089022b0 100644
 +  width: 100%;
 +}
 +
-+.windowControls {
-+  display: flex;
-+  flex: none;
-+  align-items: center;
-+  gap: 2px;
-+  -webkit-app-region: no-drag;
-+}
-+
-+.windowControl {
-+  box-sizing: border-box;
-+  display: grid;
-+  place-items: center;
-+  width: 28px;
-+  height: 28px;
-+  padding: 0;
-+  border: 0;
-+  border-radius: 6px;
-+  background: transparent;
-+  color: var(--dsw-alias-label-primary);
-+}
-+
-+.windowControl:hover {
-+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
-+}
-+
-+.windowControlClose:hover {
-+  background: #e5484d;
-+  color: #fff;
-+}
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
-index deaddcf7..29c25c10 100644
+index deaddcf7..eee89220 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 @@ -3,6 +3,7 @@
  import { useLayoutEffect, useMemo, useRef, useState } from 'react'
  import clsx from 'clsx'
  import { Button, IconEllipsisOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-+import { WindowControls } from './WindowControls.tsx'
++import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
  import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
  import type { SessionId } from '@deepseek-ai/dsh-session/types'
  import type {
@@ -1188,115 +1188,37 @@ index deaddcf7..29c25c10 100644
          )}
          <div className={css.headerCorner} data-conversation-header-corner="">
            {renderSlot('conversation.session.header.corner', {})}
-+          <WindowControls />
++          <WindowControls seat="header" />
          </div>
        </div>
        {showTabs && (
-diff --git a/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
-new file mode 100644
-index 00000000..7d316c32
---- /dev/null
-+++ b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
-@@ -0,0 +1,97 @@
-+/**
-+ * Linux frameless window controls: the page renders the three buttons and the
-+ * product API drives the main process (ZCode renders DesktopWindowControls and
-+ * dispatches DesktopCommandIds; this is the same split — renderer owns the
-+ * control, main owns the window). The band only exists when the preload marked
-+ * the document as a frameless desktop frame.
-+ */
-+import { useEffect, useState } from 'react'
-+import type { ReactElement } from 'react'
-+import css from './ConversationRoot.module.css'
-+
-+/** Snapshot of the frameless window's chrome state. */
-+interface WindowState {
-+  maximized: boolean
-+  fullscreen: boolean
-+}
-+
-+/** Window-controls surface exposed on `window.dshDesktop` by the preload. */
-+interface WindowControlsApi {
-+  minimize(): Promise<void>
-+  toggleMaximize(): Promise<void>
-+  close(): Promise<void>
-+  state(): Promise<WindowState>
-+  subscribe(listener: (state: WindowState) => void): () => void
-+}
-+
-+function windowControls(): WindowControlsApi | undefined {
-+  return (globalThis as typeof globalThis & { dshDesktop?: { windowControls?: WindowControlsApi } })
-+    .dshDesktop?.windowControls
-+}
-+
-+/** Window state changes arrive from the main process; the icon swaps with them.
-+ * Inline seat: the Conversation header's far-right corner seat owns the
-+ * controls (the same trailing seat the header reserves for corner occupants),
-+ * so the shell needs no floating band over the header. ZCode seats its
-+ * DesktopWindowControls in the header action section the same way. */
-+export function WindowControls(): ReactElement | null {
-+  const [api] = useState(windowControls)
-+  const [maximized, setMaximized] = useState(false)
-+  useEffect(() => {
-+    if (api === undefined) return
-+    let live = true
-+    void api.state().then((state) => { if (live) setMaximized(state.maximized) })
-+    const unsubscribe = api.subscribe((state) => setMaximized(state.maximized))
-+    return () => {
-+      live = false
-+      unsubscribe()
-+    }
-+  }, [api])
-+  if (api === undefined) return null
-+  return (
-+    <div className={css.windowControls} data-desktop-window-controls="header">
-+      <button
-+        type="button"
-+        className={css.windowControl}
-+        aria-label="Minimize window"
-+        title="Minimize window"
-+        onClick={() => { void api.minimize() }}
-+      >
-+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
-+          <path d="M3.5 8h9" />
-+        </svg>
-+      </button>
-+      <button
-+        type="button"
-+        className={css.windowControl}
-+        aria-label={maximized ? 'Restore window' : 'Maximize window'}
-+        title={maximized ? 'Restore window' : 'Maximize window'}
-+        onClick={() => { void api.toggleMaximize() }}
-+      >
-+        {maximized
-+          ? (
-+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
-+              <rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5" />
-+              <path d="M6.5 4.5h5a1 1 0 0 1 1 1v5" />
-+            </svg>
-+          )
-+          : (
-+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
-+              <rect x="4" y="4" width="8" height="8" rx="1.5" />
-+            </svg>
-+          )}
-+      </button>
-+      <button
-+        type="button"
-+        className={`${css.windowControl} ${css.windowControlClose}`}
-+        aria-label="Close window"
-+        title="Close window"
-+        onClick={() => { void api.close() }}
-+      >
-+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
-+          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-+        </svg>
-+      </button>
-+    </div>
-+  )
-+}
+diff --git a/packages/client/ui-layout/package.json b/packages/client/ui-layout/package.json
+index b0205ffa..9c2b64f0 100644
+--- a/packages/client/ui-layout/package.json
++++ b/packages/client/ui-layout/package.json
+@@ -47,16 +47,17 @@
+     "@deepseek-ai/cordis": "workspace:~"
+   },
+   "devDependencies": {
++    "@deepseek-ai/cordis": "workspace:~",
+     "@deepseek-ai/dsh-brand": "workspace:*",
+     "@deepseek-ai/dsh-client-locale": "workspace:*",
++    "@deepseek-ai/dsh-client-shortcuts": "workspace:*",
+     "@deepseek-ai/dsh-client-store": "workspace:*",
++    "@deepseek-ai/dsh-client-ui-primitives": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-renderer": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-session": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-slots": "workspace:*",
+     "@deepseek-ai/dsh-client-ui-theme": "workspace:*",
+-    "@deepseek-ai/cordis": "workspace:~",
+-    "react": "^18.2.0",
+-    "@deepseek-ai/dsh-client-shortcuts": "workspace:*"
++    "react": "^18.2.0"
+   },
+   "files": [
+     "locale/*.json",
 diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
-index 5b71ebec..e41d1769 100644
+index 5b71ebec..1b2a1710 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.module.css
 +++ b/packages/client/ui-layout/src/client/AppFrame.module.css
 @@ -7,6 +7,19 @@
@@ -1359,7 +1281,7 @@ index 5b71ebec..e41d1769 100644
  .leadingSeat {
    position: absolute;
    top: 11px;
-@@ -288,3 +327,39 @@
+@@ -288,3 +327,32 @@
  .overlayLayer > * {
    pointer-events: auto;
  }
@@ -1392,23 +1314,15 @@ index 5b71ebec..e41d1769 100644
 +  bottom: 16px;
 +}
 +
-+/* Frameless shell, open right panel: the panel's own strip chrome owns the
-+   window's top-right corner (ZCode moves DesktopWindowControls into the side
-+   pane's header), so the conversation header's copy steps out and the two
-+   never draw a duplicated band beside the ⋯ menu. */
-+:global(html[data-desktop-controls='pane']) [data-desktop-window-controls='header'] {
-+  display: none;
-+}
 diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
-index 56149474..ab44fc2b 100644
+index 56149474..01f884fc 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.tsx
 +++ b/packages/client/ui-layout/src/client/AppFrame.tsx
-@@ -21,9 +21,13 @@ import type {
- } from '@deepseek-ai/dsh-client-ui-slots'
+@@ -22,8 +22,12 @@ import type {
  import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
  import { DocumentTitle } from './DocumentTitle.tsx'
-+import { WindowControls } from './WindowControls.tsx'
  import type { createLayoutStore } from './stores.ts'
++import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
  import css from './AppFrame.module.css'
  
 +/** Window event the desktop startup shell waits for (apps/web/index.html). */
@@ -1499,26 +1413,30 @@ index 56149474..ab44fc2b 100644
          useSessions={useSessions}
          usePanelInfo={usePanelInfo}
        />
-+      {desktopFrame ? <WindowControls overlay /> : null}
++      {desktopFrame ? <WindowControls seat="overlay" /> : null}
        <div className={css.sidebarCol}>
          {sidebar}
        </div>
-diff --git a/packages/client/ui-layout/src/client/WindowControls.module.css b/packages/client/ui-layout/src/client/WindowControls.module.css
+diff --git a/packages/client/ui-primitives/src/WindowControls.module.css b/packages/client/ui-primitives/src/WindowControls.module.css
 new file mode 100644
-index 00000000..177adf18
+index 00000000..2778ba03
 --- /dev/null
-+++ b/packages/client/ui-layout/src/client/WindowControls.module.css
-@@ -0,0 +1,50 @@
-+/* Frameless window controls: the same 28px band the preload used to draw, now
-+   rendered by the page over the product API. */
++++ b/packages/client/ui-primitives/src/WindowControls.module.css
+@@ -0,0 +1,53 @@
++/* Frameless window controls (Linux): the page owns the three buttons, the
++   product API on `window.dshDesktop` drives the main process. One component
++   renders every seat; the shell marks which seat is live through
++   `html[data-desktop-controls]`. */
 +.controls {
 +  display: flex;
++  flex: none;
++  align-items: center;
 +  gap: 2px;
 +  -webkit-app-region: no-drag;
 +}
 +
-+/* Chrome-less seat: panels without a header row keep the controls floating over
-+   their top-right corner (ZCode DesktopOverlayWindowControls right-1 top-1). */
++/* Chrome-less seats: panels without a header row keep the controls floating
++   over their top-right corner (ZCode DesktopOverlayWindowControls). */
 +.overlay {
 +  position: fixed;
 +  top: 11px;
@@ -1526,9 +1444,14 @@ index 00000000..177adf18
 +  z-index: 30;
 +}
 +
-+/* Only one of the two seats is live: the shell marks which one the active panel
-+   uses (main panel id === 'conversation' has a header row). */
-+:global(html[data-desktop-controls='header']) .overlay {
++:global(html[data-desktop-controls='header']) .overlay,
++:global(html[data-desktop-controls='pane']) .overlay {
++  display: none;
++}
++
++/* The right panel owns the corner while it is open, so the conversation
++   header's inline seat steps out of the way. */
++:global(html[data-desktop-controls='pane']) .controls[data-desktop-window-controls='header'] {
 +  display: none;
 +}
 +
@@ -1553,28 +1476,27 @@ index 00000000..177adf18
 +  background: #e5484d;
 +  color: #fff;
 +}
-+
-+/* The right panel owns the corner while it is open: the floating seat would
-+   draw a second band over the same pixels. */
-+:global(html[data-desktop-controls='pane']) .overlay {
-+  display: none;
-+}
-diff --git a/packages/client/ui-layout/src/client/WindowControls.tsx b/packages/client/ui-layout/src/client/WindowControls.tsx
+diff --git a/packages/client/ui-primitives/src/WindowControls.tsx b/packages/client/ui-primitives/src/WindowControls.tsx
 new file mode 100644
-index 00000000..8e090bcc
+index 00000000..9ca4c533
 --- /dev/null
-+++ b/packages/client/ui-layout/src/client/WindowControls.tsx
-@@ -0,0 +1,96 @@
++++ b/packages/client/ui-primitives/src/WindowControls.tsx
+@@ -0,0 +1,103 @@
 +/**
-+ * Linux frameless window controls: the page renders the three buttons and the
-+ * product API drives the main process (ZCode renders DesktopWindowControls and
-+ * dispatches DesktopCommandIds; this is the same split — renderer owns the
-+ * control, main owns the window). The band only exists when the preload marked
-+ * the document as a frameless desktop frame.
++ * Linux frameless window controls.
++ *
++ * The page renders the three buttons and the product API on `window.dshDesktop`
++ * drives the main process (ZCode renders DesktopWindowControls and dispatches
++ * window commands; this is the same split — renderer owns the control, main
++ * owns the window). The component is shared by every seat so the three copies
++ * that grew per plugin package stay one implementation.
 + */
 +import { useEffect, useState } from 'react'
 +import type { ReactElement } from 'react'
 +import css from './WindowControls.module.css'
++
++/** Where the controls sit; the shell decides which seat is live. */
++export type WindowControlsSeat = 'header' | 'pane' | 'overlay'
 +
 +/** Snapshot of the frameless window's chrome state. */
 +interface WindowState {
@@ -1596,11 +1518,13 @@ index 00000000..8e090bcc
 +    .dshDesktop?.windowControls
 +}
 +
-+/** Window state changes arrive from the main process; the icon swaps with them.
-+ * `overlay` is the chrome-less seat for panels that own no header row (the
-+ * counterpart of ZCode's DesktopOverlayWindowControls); header panels mount the
-+ * inline seat instead and CSS picks whichever the active panel needs. */
-+export function WindowControls({ overlay = false }: { readonly overlay?: boolean } = {}): ReactElement | null {
++/**
++ * Renders the three controls, or nothing when the preload did not expose them
++ * (plain web session, macOS, or a platform that draws its own chrome).
++ * @param props.seat where the controls are seated in the current panel.
++ * @returns the controls, or `null` when the window is not frameless.
++ */
++export function WindowControls({ seat }: { seat: WindowControlsSeat }): ReactElement | null {
 +  const [api] = useState(windowControls)
 +  const [maximized, setMaximized] = useState(false)
 +  useEffect(() => {
@@ -1615,7 +1539,7 @@ index 00000000..8e090bcc
 +  }, [api])
 +  if (api === undefined) return null
 +  return (
-+    <div className={overlay ? `${css.controls} ${css.overlay}` : css.controls}>
++    <div className={seat === 'overlay' ? `${css.controls} ${css.overlay}` : css.controls} data-desktop-window-controls={seat}>
 +      <button
 +        type="button"
 +        className={css.control}
@@ -1661,15 +1585,26 @@ index 00000000..8e090bcc
 +    </div>
 +  )
 +}
+diff --git a/packages/client/ui-primitives/src/index.ts b/packages/client/ui-primitives/src/index.ts
+index 67b77dde..637da161 100644
+--- a/packages/client/ui-primitives/src/index.ts
++++ b/packages/client/ui-primitives/src/index.ts
+@@ -137,3 +137,6 @@ export type { ImageLightboxLabels } from './ImageLightbox.tsx'
+ export { QuotePreview } from './QuotePreview.tsx'
+ export type { QuotePreviewProps, QuotePreviewRemoval } from './QuotePreview.tsx'
+ export { formatQuoteText } from './markdown/quote-text.ts'
++
++export { WindowControls } from './WindowControls.tsx'
++export type { WindowControlsSeat } from './WindowControls.tsx'
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
-index 0f39af5d..fba6d408 100644
+index 0f39af5d..9e406c4d 100644
 --- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 +++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 @@ -50,6 +50,7 @@ import { canCloseTab } from '../stores.ts'
  import type { TabOccurrence } from '../tab-domain.ts'
  import type { SidebarRightTabNavigation } from '../contract/slots.ts'
  import type { TabHookContext } from '../tab-info.ts'
-+import { WindowControls } from './WindowControls.tsx'
++import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
  import css from './SidebarRight.module.css'
  
  /** The store share the seat receives. */
@@ -1677,152 +1612,10 @@ index 0f39af5d..fba6d408 100644
            <IconPanelLeftOutlineRegular className={css.collapseGlyph} />
          </button>
        </Tooltip>
-+      <WindowControls />
++      <WindowControls seat="pane" />
      </>
    )
  }
-diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
-new file mode 100644
-index 00000000..b3e1084a
---- /dev/null
-+++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
-@@ -0,0 +1,30 @@
-+.windowControls {
-+  display: flex;
-+  flex: none;
-+  align-items: center;
-+  gap: 2px;
-+  -webkit-app-region: no-drag;
-+}
-+
-+.windowControl {
-+  box-sizing: border-box;
-+  display: grid;
-+  place-items: center;
-+  width: 28px;
-+  height: 28px;
-+  padding: 0;
-+  border: 0;
-+  border-radius: 6px;
-+  background: transparent;
-+  color: var(--dsw-alias-label-primary);
-+  cursor: default;
-+}
-+
-+.windowControl:hover {
-+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent);
-+}
-+
-+.windowControlClose:hover {
-+  background: #e5484d;
-+  color: #fff;
-+}
-diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
-new file mode 100644
-index 00000000..9b75b8da
---- /dev/null
-+++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
-@@ -0,0 +1,100 @@
-+/**
-+ * Linux frameless window controls for the right panel's chrome seat.
-+ *
-+ * The right panel owns the window's top-right corner while it is open: its tab
-+ * strip's trailing chrome slot is where ZCode seats DesktopWindowControls when a
-+ * side pane is up (AnimatedSidePanePanel's closeSidePaneButton). The controls
-+ * are a per-package copy because a client feature plugin cannot runtime-import
-+ * another feature plugin's component; the product API on `window.dshDesktop`
-+ * is the only shared contract.
-+ */
-+import { useEffect, useState } from 'react'
-+import type { ReactElement } from 'react'
-+import css from './WindowControls.module.css'
-+
-+/** Snapshot of the frameless window's chrome state. */
-+interface WindowState {
-+  maximized: boolean
-+  fullscreen: boolean
-+}
-+
-+/** Window-controls surface exposed on `window.dshDesktop` by the preload. */
-+interface WindowControlsApi {
-+  minimize(): Promise<void>
-+  toggleMaximize(): Promise<void>
-+  close(): Promise<void>
-+  state(): Promise<WindowState>
-+  subscribe(listener: (state: WindowState) => void): () => void
-+}
-+
-+function windowControls(): WindowControlsApi | undefined {
-+  return (globalThis as typeof globalThis & { dshDesktop?: { windowControls?: WindowControlsApi } })
-+    .dshDesktop?.windowControls
-+}
-+
-+/**
-+ * Renders the three controls, or nothing when the preload did not expose them
-+ * (plain web session, macOS, or a platform that draws its own chrome).
-+ * @returns the controls in the panel strip's trailing chrome slot.
-+ */
-+export function WindowControls(): ReactElement | null {
-+  const [api] = useState(windowControls)
-+  const [maximized, setMaximized] = useState(false)
-+  useEffect(() => {
-+    if (api === undefined) return
-+    let live = true
-+    void api.state().then((state) => { if (live) setMaximized(state.maximized) })
-+    const unsubscribe = api.subscribe((state) => setMaximized(state.maximized))
-+    return () => {
-+      live = false
-+      unsubscribe()
-+    }
-+  }, [api])
-+  if (api === undefined) return null
-+  return (
-+    <div className={css.windowControls} data-desktop-window-controls="pane">
-+      <button
-+        type="button"
-+        className={css.windowControl}
-+        aria-label="Minimize window"
-+        title="Minimize window"
-+        onClick={() => { void api.minimize() }}
-+      >
-+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
-+          <path d="M3.5 8h9" />
-+        </svg>
-+      </button>
-+      <button
-+        type="button"
-+        className={css.windowControl}
-+        aria-label={maximized ? 'Restore window' : 'Maximize window'}
-+        title={maximized ? 'Restore window' : 'Maximize window'}
-+        onClick={() => { void api.toggleMaximize() }}
-+      >
-+        {maximized
-+          ? (
-+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
-+              <rect x="3.5" y="6" width="6.5" height="6.5" rx="1.5" />
-+              <path d="M6.5 4.5h5a1 1 0 0 1 1 1v5" />
-+            </svg>
-+          )
-+          : (
-+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
-+              <rect x="4" y="4" width="8" height="8" rx="1.5" />
-+            </svg>
-+          )}
-+      </button>
-+      <button
-+        type="button"
-+        className={`${css.windowControl} ${css.windowControlClose}`}
-+        aria-label="Close window"
-+        title="Close window"
-+        onClick={() => { void api.close() }}
-+      >
-+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
-+          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
-+        </svg>
-+      </button>
-+    </div>
-+  )
-+}
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 index 2560e375..1b9b76d3 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
@@ -1997,3 +1790,17 @@ index af74988c..3c3150f8 100644
  ) {
    -webkit-app-region: no-drag;
  }
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 3bb5b2fd..58601cf0 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -4593,6 +4593,9 @@ importers:
+       '@deepseek-ai/cordis':
+         specifier: workspace:~
+         version: link:../../../vendor/cordis
++      '@deepseek-ai/dsh-client-ui-primitives':
++        specifier: workspace:*
++        version: link:../ui-primitives
+       '@deepseek-ai/dsh-brand':
+         specifier: workspace:*
+         version: link:../../util/brand
