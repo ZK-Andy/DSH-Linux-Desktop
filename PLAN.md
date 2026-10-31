@@ -203,6 +203,8 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
 
+执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ M1 第一步（重组，各补丁首行随之经 `regen-patch.sh` 补齐）→ M1 第二步 → 其余条目。M6 的断言随 `patch-surface.sh` 一起写，清理随 M1 拆分一起做。
+
 ### M1 拆分 0026
 
 - 现状：`0026` 一个补丁含 44 个文件，混合窗口外观、托盘菜单、窗口尺寸记忆、更新渠道与 Web 端窗口控件；`main.ts` 净增 154 行（+171/−17），大部分是实现，不是挂钩。
