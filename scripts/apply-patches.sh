@@ -31,6 +31,7 @@ ASSETS=(
   'assets/rpm-post-install.sh:apps/desktop/resources/rpm-post-install.sh:755'
   'assets/rpm-post-remove.sh:apps/desktop/resources/rpm-post-remove.sh:755'
   'packaging/RPM-GPG-KEY-dsh-desktop:apps/desktop/resources/RPM-GPG-KEY-dsh-desktop:644'
+  'packaging/dsh-desktop.repo:apps/desktop/resources/dsh-desktop.repo:644'
 )
 
 # 放置或撤掉上表里的资产。
@@ -61,6 +62,12 @@ place_assets() {
       install -Dm"$mode" "$src" "$target"
     fi
   done
+  # 空目录占位：fpm 的 dir 映射把它装成 /var/log/dsh-desktop（%dir 归属）。
+  if [[ "$action" == "remove" ]]; then
+    rmdir "$UPSTREAM/apps/desktop/resources/log-dir" 2>/dev/null || true
+  else
+    mkdir -p "$UPSTREAM/apps/desktop/resources/log-dir"
+  fi
 }
 
 MODE="apply"

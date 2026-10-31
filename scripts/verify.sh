@@ -102,6 +102,16 @@ check "自带 hicolor 尺寸集（0023，至少 4 档）" test "$icon_count" -ge
 check "更新链 helper 随包发布" grep -qx '/opt/deepseek-harness-desktop/resources/dsh-update-helper' <<<"$files"
 check "polkit 策略随包发布" grep -qx '/opt/deepseek-harness-desktop/resources/org.deepseek.harness.desktop.update.policy' <<<"$files"
 check "签名公钥随包发布" grep -qx '/opt/deepseek-harness-desktop/resources/RPM-GPG-KEY-dsh-desktop' <<<"$files"
+check "rpm 拥有 helper 的系统位置" grep -qx '/usr/libexec/dsh-update-helper' <<<"$files"
+check "rpm 拥有 polkit 策略的系统位置" \
+  grep -qx '/usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy' <<<"$files"
+check "rpm 拥有 dnf 仓库文件" grep -qx '/etc/yum.repos.d/dsh-desktop.repo' <<<"$files"
+check "rpm 拥有公钥（M5 的 .repo 指向它）" \
+  grep -qx '/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$files"
+check "rpm 以 %dir 拥有 /var/log/dsh-desktop" grep -qx '/var/log/dsh-desktop' <<<"$files"
+repo_flags="$(rpm -qp --qf '[%{FILEFLAGS:fflags} %{FILENAMES}\n]' "$rpm" 2>/dev/null \
+  | awk '$2 == "/etc/yum.repos.d/dsh-desktop.repo" { print $1 }')"
+check ".repo 标为 %config（用户改镜像/代理后升级不覆盖）" grep -q 'c' <<<"$repo_flags"
 check "含 512x512 档" \
   grep -qx '/usr/share/icons/hicolor/512x512/apps/deepseek-harness.png' <<<"$files"
 check "托盘 PNG 在 resources 下（0013 的 extraResources）" \
@@ -136,8 +146,11 @@ check "%post 用 unshare 探测 user namespace 后再决定 4755/0755" grep -q '
 check "%post 刷新 desktop 数据库" grep -q 'update-desktop-database' <<<"$post"
 check "%post 建 /usr/bin/deepseek-harness 入口" grep -q '/usr/bin/deepseek-harness' <<<"$post"
 check_not "%post 不往用户 home 写东西" grep -q '/home/' <<<"$post"
-check "%post 装 helper 到 /usr/libexec" grep -q '/usr/libexec/dsh-update-helper' <<<"$post"
-check "%post 装 polkit 策略" grep -q 'org.deepseek.harness.desktop.update.policy' <<<"$post"
+check_not "%post 不再复制 helper（改由 rpm 拥有）" grep -q '/usr/libexec/dsh-update-helper' <<<"$post"
+check_not "%post 不再复制 polkit 策略（改由 rpm 拥有）" grep -q 'org.deepseek.harness.desktop.update.policy' <<<"$post"
+postun="$(rpm -qp --scripts "$rpm" 2>/dev/null | sed -n '/^postuninstall scriptlet/,/^[a-z].* scriptlet/p')"
+check_not "%postun 不删 rpm 拥有的 helper" grep -q '/usr/libexec/dsh-update-helper' <<<"$postun"
+check_not "%postun 不删 rpm 拥有的 polkit 策略" grep -q 'org.deepseek.harness.desktop.update.policy' <<<"$postun"
 
 echo
 printf '==> %d 项通过，%d 项失败\n' "$pass" "$fail"

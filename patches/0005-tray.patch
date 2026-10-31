@@ -1,6 +1,6 @@
 变化理由：Linux 托盘：图标、菜单、关于与检查更新入口，随语言重建。
 diff --git a/apps/desktop/scripts/render-tray-icon.ts b/apps/desktop/scripts/render-tray-icon.ts
-index 01bacde..b857c54 100644
+index 01bacdea..b857c541 100644
 --- a/apps/desktop/scripts/render-tray-icon.ts
 +++ b/apps/desktop/scripts/render-tray-icon.ts
 @@ -1,11 +1,14 @@
@@ -87,7 +87,7 @@ index 01bacde..b857c54 100644
  
  if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) await main()
 diff --git a/apps/desktop/src/background-notice.ts b/apps/desktop/src/background-notice.ts
-index c2a0007..64053e4 100644
+index c2a0007d..64053e43 100644
 --- a/apps/desktop/src/background-notice.ts
 +++ b/apps/desktop/src/background-notice.ts
 @@ -1,4 +1,4 @@
@@ -98,7 +98,7 @@ index c2a0007..64053e4 100644
  import { dirname } from 'node:path'
 diff --git a/apps/desktop/src/linux-tray.ts b/apps/desktop/src/linux-tray.ts
 new file mode 100644
-index 0000000..0720ef9
+index 00000000..0720ef9c
 --- /dev/null
 +++ b/apps/desktop/src/linux-tray.ts
 @@ -0,0 +1,45 @@
@@ -149,7 +149,7 @@ index 0000000..0720ef9
 +}
 diff --git a/apps/desktop/src/locale-linux.ts b/apps/desktop/src/locale-linux.ts
 new file mode 100644
-index 0000000..e28ad89
+index 00000000..e28ad895
 --- /dev/null
 +++ b/apps/desktop/src/locale-linux.ts
 @@ -0,0 +1,70 @@
@@ -224,17 +224,19 @@ index 0000000..e28ad89
 +  return { ...dictionary, ...linuxMessages[key] }
 +}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 74a1f19..6ae3ae2 100644
+index 74a1f199..7c10d75a 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
-@@ -1,5 +1,7 @@
+@@ -1,6 +1,8 @@
  /** Typed shell copy for every shipped language owned by the Electron shell. */
  
+-export const en = {
 +import { withLinuxMessages, type LinuxMessages } from './locale-linux.ts'
 +
- export const en = {
++const enBase = {
    cliCommandMenu: 'Manage dsh Command…',
    cliCommandTitle: 'Manage dsh Command',
+   cliCommandLocation: 'Desktop command: {path}',
 @@ -33,12 +35,12 @@ export const en = {
    closePage: 'Close Page or Window',
    aboutMenu: 'About DeepSeek Harness',
@@ -251,19 +253,22 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Quit',
    cancel: 'Cancel',
    quitTitle: 'Quit DeepSeek Harness?',
-@@ -177,7 +179,11 @@ export const en = {
+@@ -177,9 +179,13 @@ export const en = {
  } as const
  
  /** Every Desktop locale supplies the complete English key set. */
 -export type DesktopMessages = { readonly [Key in keyof typeof en]: string }
 +/** Upstream shell copy shipped with the shared dictionaries. */
-+export type BaseMessages = { readonly [Key in keyof typeof en]: string }
++export type BaseMessages = { readonly [Key in keyof typeof enBase]: string }
 +
 +/** Everything the Desktop shell renders: upstream copy plus the Linux additions. */
 +export type DesktopMessages = BaseMessages & LinuxMessages
  
- export const zh = {
+-export const zh = {
++const zhBase = {
    cliCommandMenu: '管理 dsh 命令…',
+   cliCommandTitle: '管理 dsh 命令',
+   cliCommandLocation: 'Desktop 命令：{path}',
 @@ -212,12 +218,12 @@ export const zh = {
    closePage: '关闭页面或窗口',
    aboutMenu: '关于 DeepSeek Harness',
@@ -280,7 +285,7 @@ index 74a1f19..6ae3ae2 100644
    quit: '退出',
    cancel: '取消',
    quitTitle: '退出 DeepSeek Harness？',
-@@ -353,7 +359,7 @@ export const zh = {
+@@ -353,10 +359,10 @@ export const zh = {
    mandatoryCopyFailed: '复制失败，请手动选择并复制下方链接。',
    mandatoryAddress: '下载链接',
    mandatoryNotification: '返回应用确认安装并重启。',
@@ -288,7 +293,11 @@ index 74a1f19..6ae3ae2 100644
 +} as const satisfies BaseMessages
  
  /** Japanese copy, checked against the English keys. */
- export const ja = {
+-export const ja = {
++const jaBase = {
+   cliCommandMenu: 'dsh コマンドを管理…',
+   cliCommandTitle: 'dsh コマンドを管理',
+   cliCommandLocation: 'デスクトップコマンド: {path}',
 @@ -389,12 +395,12 @@ export const ja = {
    closePage: 'ページまたはウィンドウを閉じる',
    aboutMenu: 'DeepSeek Harness について',
@@ -305,6 +314,19 @@ index 74a1f19..6ae3ae2 100644
    quit: '終了',
    cancel: 'キャンセル',
    quitTitle: 'DeepSeek Harness を終了しますか？',
+@@ -530,10 +536,10 @@ export const ja = {
+   mandatoryCopyFailed: 'リンクをコピーできませんでした。以下から選択してコピーしてください。',
+   mandatoryAddress: 'ダウンロードリンク',
+   mandatoryNotification: 'アプリに戻り、インストールと再起動を確認してください。',
+-} satisfies Record<keyof typeof en, string>
++} satisfies Record<keyof typeof enBase, string>
+ 
+ /** Spanish dictionary, checked against the English keys. */
+-export const es = {
++const esBase = {
+   cliCommandMenu: 'Administrar el comando dsh…',
+   cliCommandTitle: 'Administrar el comando dsh',
+   cliCommandLocation: 'Comando de escritorio: {path}',
 @@ -566,12 +572,12 @@ export const es = {
    closePage: 'Cerrar página o ventana',
    aboutMenu: 'Acerca de DeepSeek Harness',
@@ -321,7 +343,7 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Salir',
    cancel: 'Cancelar',
    quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -707,7 +713,7 @@ export const es = {
+@@ -707,10 +713,10 @@ export const es = {
    mandatoryCopyFailed: 'No se pudo copiar el enlace. Selecciónelo y cópielo a continuación.',
    mandatoryAddress: 'Enlace de descarga',
    mandatoryNotification: 'Regrese a la aplicación para confirmar la instalación y reiniciar.',
@@ -329,7 +351,11 @@ index 74a1f19..6ae3ae2 100644
 +} satisfies BaseMessages
  
  /** French dictionary, checked against the English keys. */
- export const fr = {
+-export const fr = {
++const frBase = {
+   cliCommandMenu: 'Gérer la commande dsh…',
+   cliCommandTitle: 'Gérer la commande dsh',
+   cliCommandLocation: 'Commande de bureau : {path}',
 @@ -743,12 +749,12 @@ export const fr = {
    closePage: 'Fermer la page ou la fenêtre',
    aboutMenu: 'À propos de DeepSeek Harness',
@@ -346,7 +372,7 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Quitter',
    cancel: 'Annuler',
    quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -884,7 +890,7 @@ export const fr = {
+@@ -884,10 +890,10 @@ export const fr = {
    mandatoryCopyFailed: 'Impossible de copier le lien. Sélectionnez-le et copiez-le ci-dessous.',
    mandatoryAddress: 'Lien de téléchargement',
    mandatoryNotification: "Revenez à l'application pour confirmer l'installation et redémarrer.",
@@ -354,7 +380,11 @@ index 74a1f19..6ae3ae2 100644
 +} satisfies BaseMessages
  
  /** German dictionary, checked against the English keys. */
- export const de = {
+-export const de = {
++const deBase = {
+   cliCommandMenu: 'dsh-Befehl verwalten…',
+   cliCommandTitle: 'dsh-Befehl verwalten',
+   cliCommandLocation: 'Desktop-Befehl: {path}',
 @@ -920,12 +926,12 @@ export const de = {
    closePage: 'Seite oder Fenster schließen',
    aboutMenu: 'Über DeepSeek Harness',
@@ -371,7 +401,7 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Beenden',
    cancel: 'Abbrechen',
    quitTitle: 'DeepSeek Harness beenden?',
-@@ -1061,7 +1067,7 @@ export const de = {
+@@ -1061,10 +1067,10 @@ export const de = {
    mandatoryCopyFailed: 'Der Link konnte nicht kopiert werden. Wählen Sie es aus und kopieren Sie es unten.',
    mandatoryAddress: 'Download-Link',
    mandatoryNotification: 'Kehren Sie zur Anwendung zurück, um die Installation zu bestätigen und neu zu starten.',
@@ -379,7 +409,11 @@ index 74a1f19..6ae3ae2 100644
 +} satisfies BaseMessages
  
  /** Russian dictionary, checked against the English keys. */
- export const ru = {
+-export const ru = {
++const ruBase = {
+   cliCommandMenu: 'Управление командой dsh…',
+   cliCommandTitle: 'Управление командой dsh',
+   cliCommandLocation: 'Команда Desktop: {path}',
 @@ -1095,14 +1101,14 @@ export const ru = {
    application: 'Приложение',
    fileMenu: 'Файл',
@@ -399,7 +433,7 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Выйти',
    cancel: 'Отмена',
    quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1238,7 +1244,7 @@ export const ru = {
+@@ -1238,10 +1244,10 @@ export const ru = {
    mandatoryCopyFailed: 'Не удалось скопировать ссылку. Выделите и скопируйте его ниже.',
    mandatoryAddress: 'Ссылка для скачивания',
    mandatoryNotification: 'Вернитесь в приложение, чтобы подтвердить установку и перезапустить.',
@@ -407,7 +441,11 @@ index 74a1f19..6ae3ae2 100644
 +} satisfies BaseMessages
  
  /** Portuguese dictionary, checked against the English keys. */
- export const pt = {
+-export const pt = {
++const ptBase = {
+   cliCommandMenu: 'Gerenciar comando dsh…',
+   cliCommandTitle: 'Gerenciar comando dsh',
+   cliCommandLocation: 'Comando da área de trabalho: {path}',
 @@ -1272,14 +1278,14 @@ export const pt = {
    application: 'Aplicativo',
    fileMenu: 'Arquivo',
@@ -427,19 +465,28 @@ index 74a1f19..6ae3ae2 100644
    quit: 'Sair',
    cancel: 'Cancelar',
    quitTitle: 'Sair de DeepSeek Harness?',
-@@ -1415,9 +1421,9 @@ export const pt = {
+@@ -1415,9 +1421,18 @@ export const pt = {
    mandatoryCopyFailed: 'Não foi possível copiar o link. Selecione e copie abaixo.',
    mandatoryAddress: 'Link de download',
    mandatoryNotification: 'Retorne ao aplicativo para confirmar a instalação e reinicie.',
 -} satisfies DesktopMessages
 +} satisfies BaseMessages
++
++export const en = withLinuxMessages(enBase, 'en')
++export const zh = withLinuxMessages(zhBase, 'zh')
++export const ja = withLinuxMessages(jaBase, 'ja')
++export const es = withLinuxMessages(esBase, 'es')
++export const fr = withLinuxMessages(frBase, 'fr')
++export const de = withLinuxMessages(deBase, 'de')
++export const ru = withLinuxMessages(ruBase, 'ru')
++export const pt = withLinuxMessages(ptBase, 'pt')
  
 -const dictionaries = { en, zh, ja, es, fr, de, ru, pt }
-+const dictionaries = { en, zh, ja, es, fr, de, ru, pt } satisfies Record<string, BaseMessages>
++const dictionaries = { en: enBase, zh: zhBase, ja: jaBase, es: esBase, fr: frBase, de: deBase, ru: ruBase, pt: ptBase } satisfies Record<string, BaseMessages>
  
  /** Locale payload exposed to the Desktop-owned renderer. */
  export interface DesktopLocale {
-@@ -1430,9 +1436,9 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
+@@ -1430,9 +1445,9 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
    const primary = locale.toLowerCase().split('-')[0]
    if (primary !== undefined && Object.hasOwn(dictionaries, primary)) {
      const id = primary as keyof typeof dictionaries
@@ -452,7 +499,7 @@ index 74a1f19..6ae3ae2 100644
  
  /**
 diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index b2ce416..e749b4e 100644
+index b2ce416b..e749b4e2 100644
 --- a/apps/desktop/src/tray.ts
 +++ b/apps/desktop/src/tray.ts
 @@ -1,17 +1,24 @@
@@ -504,7 +551,7 @@ index b2ce416..e749b4e 100644
  
    /** Remove the icon; called once the quit is confirmed so no dead icon outlives the process. */
 diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a48..42e2706 100644
+index 11c3a488..42e27064 100644
 --- a/apps/desktop/tests/tray.spec.ts
 +++ b/apps/desktop/tests/tray.spec.ts
 @@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM
@@ -575,3 +622,15 @@ index 11c3a48..42e2706 100644
    f.tray.dispose()
    f.tray.dispose()
    expect(f.native.destroy).toHaveBeenCalledOnce()
+diff --git a/apps/desktop/tsconfig.client.json b/apps/desktop/tsconfig.client.json
+index 3de33f06..35a696a1 100644
+--- a/apps/desktop/tsconfig.client.json
++++ b/apps/desktop/tsconfig.client.json
+@@ -7,6 +7,7 @@
+   "include": [
+     "src/client",
+     "src/welcome-api.ts",
++    "src/locale-linux.ts",
+     "src/locale.ts"
+   ],
+   "references": [

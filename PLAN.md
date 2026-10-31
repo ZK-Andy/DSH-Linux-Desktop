@@ -62,8 +62,8 @@
 - **复用官方更新 UI**：改 `apps/desktop/src/update-coordinator.ts` 的状态机（:54 目前直接 `new autoUpdater`，:55 依赖 `app-update.yml`），保留 `update-dialog` / `update-presentation` 的渲染层契约，不另做原生 dialog，不搞两套更新界面。
 - 检查源：`https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/version.json`（走重定向，不碰 API 限流）；`version.json` 含版本号、rpm 地址、sha256。
 - 检查时机：启动后延迟一次 + 托盘/应用菜单「检查更新」；不静默下载。
-- 流程：检查版本 → 提示 → 下载 rpm 到 `~/.cache/dsh-desktop/` → 校验 sha256 → `rpmkeys --checksig` → `pkexec /usr/libexec/dsh-update-helper` → helper 先 `rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` → `dnf5 install <本地 rpm>` → `app.relaunch()` + `app.exit()`。
-- helper 与 polkit 策略随包安装，`allow_active` 直接放行一次授权；helper 写日志到 `/var/log/dsh-desktop/update.log`。
+- 流程：检查版本 → 提示 → 下载 rpm 到 `~/.cache/dsh-desktop/` → 校验 sha256 → `rpmkeys --checksig` → `pkexec /usr/libexec/dsh-update-helper` → helper 先 `rpm --import` 随包公钥 → `dnf5 upgrade dsh-desktop` → `app.relaunch()` + `app.exit()`。
+- helper、polkit 策略与 `/etc/yum.repos.d/dsh-desktop.repo` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`），`%post` 不复制、`%postun` 不删除；`allow_active` 直接放行一次授权；helper 写日志到 `/var/log/dsh-desktop/update.log`。
 - electron-updater 的下载/安装路径在补丁里整体替换（不是「禁用后另开一路」），避免两套状态机并存。
 
 ### 3.5 桌面集成
@@ -203,19 +203,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
 
-执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M2、M3、M6、M7 已完成，条目已删除；对应断言（每文件单补丁、Linux 文案与 builder 配置的归属）已转为 `patch-surface.sh` 的常规检查。
-
-### M4 系统文件由 rpm 拥有
-
-- 现状：`assets/rpm-post-install.sh` 在 `%post` 中用 `install` 把 `dsh-update-helper` 和 polkit 策略从 `resources/` 复制到 `/usr`；`%postun` 删除。rpm 文件清单不拥有它们。
-- 目标：通过 electron-builder 的 `fpm` 参数（dir 源的 `源=目标` 映射）让 rpm 直接拥有 `/usr/libexec/dsh-update-helper`、`/usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy`、`/etc/yum.repos.d/dsh-desktop.repo`；`%post` 不再复制。
-- 验收：
-  1. 先在 electron-builder 26.17 上实测映射是否生效；不生效则回到评审讨论是否改为「幂等安装 + `verify.sh` 断言 + `%postun` 删除」；
-  2. `rpm -qlp` 列出上述三个路径；
-  3. `.repo` 标 `%config(noreplace)`（用户会改镜像地址或 proxy）；
-  4. 安装后 `rpm -V dsh-desktop` 无输出；
-  5. `rpm-post-install.sh` 中无对 `/usr`、`/etc` 的复制。
-- 负责补丁：`0002-packaging.patch`（映射）、`0008-updates-dnf.patch`（helper、策略、`.repo` 内容）。
+执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M2、M3、M4、M6、M7 已完成，条目已删除；对应断言（每文件单补丁、Linux 文案与 builder 配置的归属）已转为 `patch-surface.sh` 的常规检查。
 
 ### M5 更新收敛为 dnf-only
 
