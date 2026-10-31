@@ -1,6 +1,73 @@
 变化理由：记住窗口尺寸与最大化状态，下次启动还原。
+diff --git a/apps/desktop/src/linux-window-size.ts b/apps/desktop/src/linux-window-size.ts
+new file mode 100644
+index 00000000..cc14e7a8
+--- /dev/null
++++ b/apps/desktop/src/linux-window-size.ts
+@@ -0,0 +1,61 @@
++import { app, screen, type BrowserWindow } from 'electron'
++import { readDesktopSettings, saveDesktopWindowSize } from './settings.ts'
++
++/** Default frameless window size, matching the reference desktop shell. */
++const DEFAULT_WINDOW_WIDTH = 1200
++const DEFAULT_WINDOW_HEIGHT = 800
++/** Floor shared by the BrowserWindow minimum and the restored value. */
++export const MIN_WINDOW_WIDTH = 480
++export const MIN_WINDOW_HEIGHT = 640
++const WINDOW_SIZE_PERSIST_DEBOUNCE_MS = 250
++
++/**
++ * Restored frameless window size, clamped to the primary display's work area.
++ * Maximized stays a separate flag: the normal bounds are what gets persisted.
++ * @returns Initial width and height in DIP and whether to start maximized.
++ */
++export function restoredWindowSize(): { width: number; height: number; maximized: boolean } {
++  const persisted = readDesktopSettings(app.getPath('userData')).desktopWindowSize
++  const { width: areaWidth, height: areaHeight } = screen.getPrimaryDisplay().workAreaSize
++  const clamp = (value: number, minimum: number, available: number): number =>
++    Math.min(Math.max(Math.floor(value), minimum), Math.max(minimum, Math.floor(available)))
++  return {
++    width: clamp(persisted?.width ?? DEFAULT_WINDOW_WIDTH, MIN_WINDOW_WIDTH, areaWidth),
++    height: clamp(persisted?.height ?? DEFAULT_WINDOW_HEIGHT, MIN_WINDOW_HEIGHT, areaHeight),
++    maximized: persisted?.maximized ?? false,
++  }
++}
++
++/**
++ * Persist the normal bounds and the maximized flag once the user settles the
++ * window; the maximized bounds equal the work area and would erase the last
++ * hand-picked size.
++ * @param window - primary window whose geometry is recorded.
++ */
++export function attachWindowSizePersistence(window: BrowserWindow): void {
++  let timer: NodeJS.Timeout | undefined
++  const save = (): void => {
++    if (window.isDestroyed()) return
++    try {
++      const bounds = window.getNormalBounds()
++      saveDesktopWindowSize(app.getPath('userData'), {
++        width: Math.max(MIN_WINDOW_WIDTH, Math.floor(bounds.width)),
++        height: Math.max(MIN_WINDOW_HEIGHT, Math.floor(bounds.height)),
++        maximized: window.isMaximized(),
++      })
++    } catch (error) {
++      console.warn('desktop window size: not persisted', error)
++    }
++  }
++  const schedule = (): void => {
++    if (timer !== undefined) clearTimeout(timer)
++    timer = setTimeout(() => { timer = undefined; save() }, WINDOW_SIZE_PERSIST_DEBOUNCE_MS)
++  }
++  window.on('resize', schedule)
++  window.on('maximize', schedule)
++  window.on('unmaximize', schedule)
++  window.on('close', () => {
++    if (timer !== undefined) { clearTimeout(timer); timer = undefined }
++    save()
++  })
++}
 diff --git a/apps/desktop/src/settings.ts b/apps/desktop/src/settings.ts
-index a4bb67b..1032a9d 100644
+index a4bb67b3..1032a9d6 100644
 --- a/apps/desktop/src/settings.ts
 +++ b/apps/desktop/src/settings.ts
 @@ -5,17 +5,33 @@
@@ -84,7 +151,7 @@ index a4bb67b..1032a9d 100644
 +  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
 +}
 diff --git a/apps/desktop/tests/settings.spec.ts b/apps/desktop/tests/settings.spec.ts
-index b285bb9..2d91b42 100644
+index b285bb98..2d91b42c 100644
 --- a/apps/desktop/tests/settings.spec.ts
 +++ b/apps/desktop/tests/settings.spec.ts
 @@ -3,7 +3,7 @@ import * as fs from 'node:fs'

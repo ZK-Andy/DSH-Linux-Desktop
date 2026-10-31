@@ -1,201 +1,160 @@
 变化理由：Linux 无边框窗口：自绘标题栏与窗口按钮、窗口状态 IPC、尺寸持久化接线，以及相关 main.ts 挂钩。
-例外：规则 4，main.ts 净增 154 行；待迁移：M1 第二步。
-diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 583bf74..76ef3b4 100644
---- a/apps/desktop/src/main.ts
-+++ b/apps/desktop/src/main.ts
-@@ -1087,15 +1087,22 @@ async function main(): Promise<void> {
-     tray?.relabel()
-   }
-   refreshApplicationMenu()
--  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
--  if (process.platform === 'win32') {
-+  // Windows picks a bitmap out of the multi-size ICO by display scale; Linux's StatusNotifierItem host
-+  // scales the single PNG to the panel's icon size instead.
-+  const trayIconPath = development
-+    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'tray-windows.ico' : 'tray-linux.png')
-+    : join(process.resourcesPath, process.platform === 'win32' ? 'tray.ico' : 'tray-linux.png')
-+  if (process.platform === 'win32' || process.platform === 'linux') {
-     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
-+    // On Linux the context menu is the entry that always works: a StatusNotifierItem host is free to show the
-+    // menu on a left click instead of forwarding one.
-     try {
-       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
-         open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
-     } catch (error) { console.warn('desktop tray: unavailable', error) }
-   }
--  const backgroundNotice = process.platform === 'win32'
-+  // The confirmation sends the user to the tray, so it covers exactly the platforms that create one.
-+  const backgroundNotice = process.platform === 'win32' || process.platform === 'linux'
-     ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
-       locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
-     : undefined
-diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 76ef3b4..fdc7e8e 100644
---- a/apps/desktop/src/main.ts
-+++ b/apps/desktop/src/main.ts
-@@ -290,6 +290,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-       devTools: true,
-     },
-   })
-+  // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
-+  // The application menu stays set so its accelerators keep working.
-+  if (process.platform === 'linux') window.setMenuBarVisibility(false)
-   window.webContents.setWindowOpenHandler(({ url }) => {
-     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
-     return { action: 'deny' }
-@@ -348,7 +351,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-       const messages = currentDesktopLocale().messages
-       Menu.buildFromTemplate(items.map(item => ({
-         ...item,
--        ...(process.platform === 'win32' && item.role !== undefined && item.role in messages
-+        ...((process.platform === 'win32' || process.platform === 'linux')
-+          && item.role !== undefined && item.role in messages
-           ? { label: messages[item.role as keyof typeof messages] } : {}),
-         accelerator: '',
-       }))).popup({ window })
-@@ -1119,7 +1123,8 @@ async function main(): Promise<void> {
-     ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
-   })
- 
--  if (process.platform === 'win32') {
-+  // Linux's caption menubar opens the same native popups; Windows also reports its overlay colours here.
-+  if (process.platform === 'win32' || process.platform === 'linux') {
-     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
-       assertDesktopSender(event, ['app'])
-       if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1160,7 +1165,8 @@ async function main(): Promise<void> {
-       // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
-       const validColor = (value: unknown): value is string => typeof value === 'string'
-         && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
--      if (validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
-+      // The overlay exists only on Windows primary windows; Linux borrows the caption menubar alone.
-+      if (process.platform === 'win32' && validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
-     })
-   }
- 
-diff --git a/apps/desktop/src/preload-windows.ts b/apps/desktop/src/preload-windows.ts
-index 5b9ed75..f17cbdb 100644
---- a/apps/desktop/src/preload-windows.ts
-+++ b/apps/desktop/src/preload-windows.ts
-@@ -4,9 +4,11 @@ import { ipcRenderer } from 'electron'
- import { DESKTOP_IPC } from './ipc.ts'
- import { installWindowsMenu } from './preload-menu.ts'
- 
--/** Install the Windows-only titlebar marker and observe application language and palette changes. */
-+/** Install the caption titlebar marker and observe application language and palette changes. */
- export function syncWindowsAppearance(): void {
--  if (process.platform !== 'win32') return
-+  // Linux hides the native menu bar and draws the caption menubar inside the page, so it needs
-+  // the same marker and appearance reporting as Windows.
-+  if (process.platform !== 'win32' && process.platform !== 'linux') return
-   const mark = (): void => {
-     const root = document.documentElement
-     root.dataset.windowsTitlebar = ''
-diff --git a/apps/desktop/src/welcome-window.ts b/apps/desktop/src/welcome-window.ts
-index 61fda9e..364f580 100644
---- a/apps/desktop/src/welcome-window.ts
-+++ b/apps/desktop/src/welcome-window.ts
-@@ -59,6 +59,8 @@ let disposeActiveHandlers: (() => void) | undefined
- export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
-   const options = welcomeWindowOptions(process.platform, locale)
-   const window = new BrowserWindow(options)
-+  // This window carries no caption menubar, so on Linux the native one would sit alone under the titlebar.
-+  if (process.platform === 'linux') window.setMenuBarVisibility(false)
-   disposeActiveHandlers?.()
-   let active = true
-   const disposeHandlers = (): void => {
-diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index 448241c..954430a 100644
---- a/apps/desktop/tests/main-startup.spec.ts
-+++ b/apps/desktop/tests/main-startup.spec.ts
-@@ -127,6 +127,7 @@ const harness = await vi.hoisted(async () => {
-     }
-     static getAllWindows() { return windows.filter(window => !window.destroyed) }
-     setMenu() {}
-+    setMenuBarVisibility() {}
-     getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
-     setBounds() {}
-     setTitle = vi.fn()
-diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
-index e59b7eb..735b77f 100644
---- a/apps/desktop/tests/preload-windows.client.spec.ts
-+++ b/apps/desktop/tests/preload-windows.client.spec.ts
-@@ -17,16 +17,8 @@ afterEach(() => {
-   send.mockClear()
- })
- 
--it.each(['darwin', 'linux'] as const)('does not install Windows controls on %s', (platform) => {
--  vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
--  syncWindowsAppearance()
--  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
--  expect(send).not.toHaveBeenCalled()
--})
--
--it('synchronizes live language and palette changes and stops observing a closed document', async () => {
--  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
--  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
-+/** Stubs the computed colours and 2D canvas the caption reads to report an appearance. */
-+function stubCaptionRendering(): void {
-   vi.spyOn(globalThis, 'getComputedStyle').mockImplementation(() => ({
-     backgroundColor: document.body.hasAttribute('data-ds-dark-theme') ? 'oklch(0.2 0 0)' : 'hsl(0 0% 100%)',
-     color: 'black',
-@@ -37,6 +29,29 @@ it('synchronizes live language and palette changes and stops observing a closed
-       ? [0, 0, 0, 255] : context.fillStyle.startsWith('oklch') ? [27, 27, 28, 255] : [255, 255, 255, 255]) }),
-   }
-   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
+diff --git a/apps/desktop/src/desktop-window.ts b/apps/desktop/src/desktop-window.ts
+new file mode 100644
+index 00000000..e194d369
+--- /dev/null
++++ b/apps/desktop/src/desktop-window.ts
+@@ -0,0 +1,148 @@
++import { BrowserWindow, Menu, nativeTheme, shell } from 'electron'
++import type { MenuItemConstructorOptions } from 'electron'
++import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
++import { SCHEME } from './ipc.ts'
++import { FRAME_ARGUMENT, desktopFrameless } from './linux-frame.ts'
++import { attachFramelessWindowState, attachFullscreenState, framelessWindowIcon, hideLinuxMenuBar, linuxFramelessWindowOptions } from './linux-window.ts'
++import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, attachWindowSizePersistence, restoredWindowSize } from './linux-window-size.ts'
++import type { DesktopLocale } from './locale.ts'
++
++export interface DesktopWindowOptions {
++  preload: string
++  show: boolean
++  primary: boolean
++  /** Chrome fill for the current theme; read lazily so a theme switch is picked up. */
++  fill: () => string
++  /** Resolves the locale for native context menus. */
++  locale: () => DesktopLocale
 +}
 +
-+it('does not install Windows controls on darwin', () => {
-+  vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-+  syncWindowsAppearance()
-+  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
-+  expect(send).not.toHaveBeenCalled()
-+})
++/**
++ * Creates a desktop window. Single windows only need a preload; the primary window restores its
++ * size, starts maximized when the user left it that way, and records geometry on every change.
++ * @param options - preload entry, visibility, primary flag, theme fill and locale source.
++ */
++export function createDesktopWindow(options: DesktopWindowOptions): BrowserWindow {
++  const { preload, show, primary, fill, locale } = options
++  const frameless = desktopFrameless()
++  const size = primary ? restoredWindowSize() : { width: 1280, height: 820, maximized: false }
++  const icon = framelessWindowIcon()
++  const window = new BrowserWindow({
++    width: size.width,
++    height: size.height,
++    ...(icon === undefined ? {} : { icon }),
++    minWidth: MIN_WINDOW_WIDTH,
++    minHeight: MIN_WINDOW_HEIGHT,
++    show,
++    // Linux frameless keeps Electron's native menu bar out of the window: some
++    // desktops still show it, which leaves two menu bars on screen.
++    autoHideMenuBar: process.platform === 'linux',
++    // The frameless Linux window is opaque: it fills its whole rectangle and never asks the
++    // compositor for an alpha surface. Paint it in the chrome fill so showing the window
++    // before the page loads cannot flash a white rectangle (ZCode shows its window at
++    // creation too and covers the gap with the startup shell).
++    ...(frameless ? linuxFramelessWindowOptions(fill()) : {}),
++    ...(process.platform === 'win32' && primary ? {
++      titleBarStyle: 'hidden' as const,
++      titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: fill(),
++        symbolColor: nativeTheme.shouldUseDarkColors ? '#f9fafb' : '#0f1115' },
++    } : {}),
++    // hiddenInset places traffic lights inside the sidebar; sidebar vibrancy
++    // needs a transparent window background to show through the page.
++    ...(process.platform === 'darwin' ? {
++      titleBarStyle: 'hiddenInset' as const,
++      trafficLightPosition: { x: 16, y: 18 },
++      vibrancy: 'sidebar' as const,
++      // 'active' keeps the vibrancy material stable when the window blurs;
++      // 'followWindow' washes the sidebar out behind an unfocused window.
++      visualEffectState: 'active' as const,
++      backgroundColor: '#00000000',
++    } : {}),
++    webPreferences: {
++      preload,
++      nodeIntegration: false,
++      contextIsolation: true,
++      sandbox: true,
++      webSecurity: true,
++      webviewTag: primary,
++      devTools: true,
++      ...(frameless ? { additionalArguments: [FRAME_ARGUMENT] } : {}),
++    },
++  })
++  // The application menu stays set so its accelerators keep working, but the frameless Linux
++  // window draws no native menu bar: the Web layout owns that strip.
++  hideLinuxMenuBar(window)
++  if (frameless) attachFramelessWindowState(window)
++  if (process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux') {
++    attachFullscreenState(window)
++  }
++  window.webContents.setWindowOpenHandler(({ url }) => {
++    if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
++    return { action: 'deny' }
++  })
++  if (process.platform === 'darwin') {
++    // Deminiaturize reattaches the NSVisualEffectView material late
++    // (electron/electron#25368), so a transparent window shows the desktop
++    // through the sidebar until then. Paint an opaque base while minimized or
++    // hidden so the deminiaturize animation and the reattachment gap show a
++    // solid fill; restoring flips back, and the null -> 'sidebar' transition
++    // forces the material to reattach.
++    const applyBackdrop = (): void => {
++      if (window.isDestroyed()) return
++      if (window.isMinimized() || !window.isVisible()) {
++        window.setVibrancy(null)
++        window.setBackgroundColor(fill())
++      } else {
++        window.setVibrancy('sidebar')
++        window.setBackgroundColor('#00000000')
++      }
++    }
++    window.on('minimize', applyBackdrop)
++    window.on('hide', applyBackdrop)
++    window.on('restore', applyBackdrop)
++    window.on('show', applyBackdrop)
++  }
++  window.webContents.on('context-menu', (_event, { isEditable, selectionText, editFlags }) => {
++    const items: MenuItemConstructorOptions[] = []
++    if (isEditable) {
++      items.push(
++        { role: 'undo', enabled: editFlags.canUndo },
++        { role: 'redo', enabled: editFlags.canRedo },
++        { type: 'separator' },
++        { role: 'cut', enabled: editFlags.canCut },
++        { role: 'copy', enabled: editFlags.canCopy },
++        { role: 'paste', enabled: editFlags.canPaste },
++        { type: 'separator' },
++        { role: 'selectAll', enabled: editFlags.canSelectAll },
++      )
++    } else if (selectionText.length > 0) {
++      items.push({ role: 'copy', enabled: editFlags.canCopy })
++    }
++    // Empty accelerators suppress Electron's default shortcut labels for native roles.
++    if (items.length > 0) {
++      const messages = locale().messages
++      Menu.buildFromTemplate(items.map(item => ({
++        ...item,
++        ...((process.platform === 'win32' || process.platform === 'linux')
++          && item.role !== undefined && item.role in messages
++          ? { label: messages[item.role as keyof typeof messages] } : {}),
++        accelerator: '',
++      }))).popup({ window })
++    }
++  })
++  window.webContents.on('will-navigate', (event, url) => {
++    const destination = new URL(url)
++    const current = new URL(window.webContents.getURL())
++    if (destination.protocol !== `${SCHEME}:`
++      && !(destination.protocol === 'http:' && destination.origin === current.origin)) {
++      event.preventDefault()
++      if (['http:', 'https:'].includes(destination.protocol)) void shell.openExternal(url)
++    }
++  })
++  if (primary) {
++    if (size.maximized) window.maximize()
++    attachWindowSizePersistence(window)
++  }
++  return window
++}
 +
-+it('installs the caption menubar and reports its appearance on linux', () => {
-+  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
-+  stubCaptionRendering()
-+  document.documentElement.lang = 'en'
-+  syncWindowsAppearance()
-+  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(true)
-+  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('40px')
-+  expect(send).toHaveBeenCalledWith(DESKTOP_IPC.windowsAppearance, 'en', 'rgba(255, 255, 255, 1)', 'rgba(0, 0, 0, 1)')
-+})
-+
-+it('synchronizes live language and palette changes and stops observing a closed document', async () => {
-+  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-+  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
-+  stubCaptionRendering()
-   document.documentElement.lang = 'en'
-   syncWindowsAppearance()
-   expect(send).not.toHaveBeenCalled()
-diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
-index 7915248..2fb4f55 100644
---- a/apps/desktop/tests/welcome-startup.spec.ts
-+++ b/apps/desktop/tests/welcome-startup.spec.ts
-@@ -74,6 +74,7 @@ vi.mock('electron', () => ({
-     static getAllWindows() { return [] }
-     once(name: string, callback: () => void) { if (name === 'ready-to-show') this.ready = callback; return this }
-     on() { return this }
-+    setMenuBarVisibility() {}
-     isDestroyed() { return false }
-     isMinimized() { return false }
-     restore = vi.fn()
-diff --git a/apps/desktop/tests/welcome-window.spec.ts b/apps/desktop/tests/welcome-window.spec.ts
-index 6d2807c..2100de7 100644
---- a/apps/desktop/tests/welcome-window.spec.ts
-+++ b/apps/desktop/tests/welcome-window.spec.ts
-@@ -33,6 +33,7 @@ function createWindow() {
-     isDestroyed: vi.fn().mockReturnValue(false),
-     destroy: vi.fn(),
-     show: vi.fn(),
-+    setMenuBarVisibility: vi.fn(),
-     once: vi.fn<(name: string, callback: () => void) => void>(),
-   }
- }
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
-index e62a84f..5109c39 100644
+index e62a84f0..5109c39b 100644
 --- a/apps/desktop/src/ipc.ts
 +++ b/apps/desktop/src/ipc.ts
 @@ -36,6 +36,9 @@ export const DESKTOP_IPC = {
@@ -244,7 +203,7 @@ index e62a84f..5109c39 100644
     * @returns `name=value` fields separated by `; `, with no hostname, user name, or serial number.
 diff --git a/apps/desktop/src/linux-frame.ts b/apps/desktop/src/linux-frame.ts
 new file mode 100644
-index 0000000..d74c314
+index 00000000..d74c314d
 --- /dev/null
 +++ b/apps/desktop/src/linux-frame.ts
 @@ -0,0 +1,35 @@
@@ -283,80 +242,18 @@ index 0000000..d74c314
 +html[data-desktop-controls='overlay'] header[data-window-drag] { padding-right: 112px; }
 +</style>`
 +}
-diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4854d44..9626d23 100644
---- a/apps/desktop/src/main.ts
-+++ b/apps/desktop/src/main.ts
-@@ -2,6 +2,7 @@ import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-prod
- import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
- /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
- 
-+import { existsSync } from 'node:fs'
- import { access, readFile, writeFile } from 'node:fs/promises'
- import { join } from 'node:path'
- import { fileURLToPath } from 'node:url'
-@@ -17,6 +18,7 @@ import {
-   nativeTheme,
-   net,
-   protocol,
-+  screen,
-   session,
-   shell,
-   type IpcMainInvokeEvent,
-@@ -32,10 +34,13 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
- import { DesktopBackendController } from './backend-controller.ts'
- import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
- import { readDeviceInfo } from './device-info.ts'
-+import { FRAME_ARGUMENT, desktopFrameless, frameDocument } from './linux-frame.ts'
- import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
- import { claimDesktopSingleInstance } from './single-instance.ts'
- import { desktopUpdateChannel } from './update-channel.ts'
- import { DesktopUpdateCoordinator } from './update-coordinator.ts'
-+import { LINUX_UPDATE_FEED_URL } from './update-feed.ts'
-+import { LinuxPackageUpdater, defaultCacheDir, installedRpmReleaseSync } from './update-linux.ts'
- import { prepareDesktopUpdateWindow } from './update-window.ts'
- import { DesktopCommandManager } from './command-management.ts'
- import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
-@@ -56,7 +61,7 @@ import { DesktopMandatoryUpdatePolicy, resolveDesktopPolicyConfig, type DesktopP
- import { desktopClientMetadata, desktopClientVersion } from './client-metadata.ts'
- import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
- import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
--import { readDesktopSettings } from './settings.ts'
-+import { readDesktopSettings, saveDesktopWindowSize } from './settings.ts'
- import { readDesktopLocaleCache, writeDesktopLocaleCache } from './locale-cache.ts'
- import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
- import { readDesktopRuntime } from './runtime-tree.ts'
-@@ -255,13 +260,96 @@ function platformLoginUrl(authorizeUrl: string): string {
-   return url.href
- }
- 
-+/** Default frameless window size, matching the reference desktop shell. */
-+const DEFAULT_WINDOW_WIDTH = 1200
-+const DEFAULT_WINDOW_HEIGHT = 800
-+/** Floor shared by the BrowserWindow minimum and the restored value. */
-+const MIN_WINDOW_WIDTH = 480
-+const MIN_WINDOW_HEIGHT = 640
-+const WINDOW_SIZE_PERSIST_DEBOUNCE_MS = 250
+diff --git a/apps/desktop/src/linux-window.ts b/apps/desktop/src/linux-window.ts
+new file mode 100644
+index 00000000..97ddbcaa
+--- /dev/null
++++ b/apps/desktop/src/linux-window.ts
+@@ -0,0 +1,82 @@
++import { app, ipcMain, type BrowserWindow } from 'electron'
++import { join } from 'node:path'
++import { DESKTOP_IPC, assertDesktopSender } from './ipc.ts'
 +
-+/**
-+ * Restored frameless window size, clamped to the primary display's work area.
-+ * Maximized stays a separate flag: the normal bounds are what gets persisted.
-+ * @returns Initial width and height in DIP and whether to start maximized.
-+ */
-+function restoredWindowSize(): { width: number; height: number; maximized: boolean } {
-+  const persisted = readDesktopSettings(app.getPath('userData')).desktopWindowSize
-+  const { width: areaWidth, height: areaHeight } = screen.getPrimaryDisplay().workAreaSize
-+  const clamp = (value: number, minimum: number, available: number): number =>
-+    Math.min(Math.max(Math.floor(value), minimum), Math.max(minimum, Math.floor(available)))
-+  return {
-+    width: clamp(persisted?.width ?? DEFAULT_WINDOW_WIDTH, MIN_WINDOW_WIDTH, areaWidth),
-+    height: clamp(persisted?.height ?? DEFAULT_WINDOW_HEIGHT, MIN_WINDOW_HEIGHT, areaHeight),
-+    maximized: persisted?.maximized ?? false,
-+  }
-+}
-+
-+/** Linux task icon: Wayland ignores BrowserWindow icons, X11 sessions draw it. */
-+function framelessWindowIcon(): string | undefined {
++/** Task icon for the frameless window: Wayland ignores it, X11 sessions draw it. */
++export function framelessWindowIcon(): string | undefined {
 +  if (process.platform !== 'linux') return undefined
 +  return app.isPackaged
 +    ? join(process.resourcesPath, 'app-icon.png')
@@ -364,116 +261,217 @@ index 4854d44..9626d23 100644
 +}
 +
 +/**
-+ * Persist the normal bounds and the maximized flag once the user settles the
-+ * window; the maximized bounds equal the work area and would erase the last
-+ * hand-picked size.
-+ * @param window - primary window whose geometry is recorded.
++ * Opaque frameless window options: the window fills its whole rectangle and never asks the
++ * compositor for an alpha surface. The fill is painted at creation so showing the window
++ * before the page loads cannot flash a white rectangle.
++ * @param fill - chrome fill for the current theme.
 + */
-+function attachWindowSizePersistence(window: BrowserWindow): void {
-+  let timer: NodeJS.Timeout | undefined
-+  const save = (): void => {
-+    if (window.isDestroyed()) return
-+    try {
-+      const bounds = window.getNormalBounds()
-+      saveDesktopWindowSize(app.getPath('userData'), {
-+        width: Math.max(MIN_WINDOW_WIDTH, Math.floor(bounds.width)),
-+        height: Math.max(MIN_WINDOW_HEIGHT, Math.floor(bounds.height)),
-+        maximized: window.isMaximized(),
-+      })
-+    } catch (error) {
-+      console.warn('desktop window size: not persisted', error)
-+    }
++export function linuxFramelessWindowOptions(fill: string): Partial<Electron.BrowserWindowConstructorOptions> {
++  return {
++    backgroundColor: fill,
++    frame: false,
++    hasShadow: false,
 +  }
-+  const schedule = (): void => {
-+    if (timer !== undefined) clearTimeout(timer)
-+    timer = setTimeout(() => { timer = undefined; save() }, WINDOW_SIZE_PERSIST_DEBOUNCE_MS)
-+  }
-+  window.on('resize', schedule)
-+  window.on('maximize', schedule)
-+  window.on('unmaximize', schedule)
-+  window.on('close', () => {
-+    if (timer !== undefined) { clearTimeout(timer); timer = undefined }
-+    save()
-+  })
 +}
 +
++/** Frameless windows keep Electron's native menu bar out: some desktops show it otherwise. */
++export function hideLinuxMenuBar(window: BrowserWindow): void {
++  if (process.platform === 'linux') window.setMenuBarVisibility(false)
++}
++
++/**
++ * Mirrors the frameless window state the preload button band renders: a maximized restore
++ * toggles the glyph. Resent after every load, because a reload drops the preload listeners.
++ * @param window - frameless window to keep in sync.
++ */
++export function attachFramelessWindowState(window: BrowserWindow): void {
++  const sendWindowState = (): void => {
++    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowState, window.isMaximized())
++  }
++  window.on('maximize', sendWindowState)
++  window.on('unmaximize', sendWindowState)
++  window.webContents.on('did-finish-load', sendWindowState)
++}
++
++/**
++ * Fullscreen hides the window controls and overlays drop their caption clearance. Resent after
++ * every load so a fullscreen reload does not fall back to windowed CSS.
++ * @param window - window whose fullscreen state is relayed to the page.
++ */
++export function attachFullscreenState(window: BrowserWindow): void {
++  const sendFullscreen = (): void => {
++    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
++  }
++  window.on('enter-full-screen', sendFullscreen)
++  window.on('leave-full-screen', sendFullscreen)
++  window.webContents.on('did-finish-load', sendFullscreen)
++}
++
++/**
++ * Window controls live in the frame because the frameless window has no native caption.
++ * Only the window's own renderer may drive them.
++ * @param current - resolves the primary window, which may not exist yet.
++ */
++export function registerLinuxWindowIpc(current: () => BrowserWindow | undefined): void {
++  ipcMain.handle(DESKTOP_IPC.windowAction, (event, action: unknown) => {
++    assertDesktopSender(event, ['app'])
++    const window = current()
++    if (window === undefined || event.sender !== window.webContents
++      || event.senderFrame !== window.webContents.mainFrame) throw new Error('desktop window: rejected sender')
++    if (action === 'minimize') return window.minimize()
++    if (action === 'toggle-maximize') return window.isMaximized() ? window.unmaximize() : window.maximize()
++    if (action === 'close') return window.close()
++    throw new Error('desktop window: unknown action')
++  })
++  ipcMain.handle(DESKTOP_IPC.windowStateGet, (event) => {
++    assertDesktopSender(event, ['app'])
++    const window = current()
++    if (window === undefined || event.sender !== window.webContents) throw new Error('desktop window: rejected sender')
++    return { maximized: window.isMaximized(), fullscreen: window.isFullScreen() }
++  })
++}
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 4770fe83..ac0ec2ed 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -1,5 +1,4 @@
+ import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/types'
+-import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
+ /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
+ 
+ import { access, readFile, writeFile } from 'node:fs/promises'
+@@ -32,10 +31,16 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
+ import { DesktopBackendController } from './backend-controller.ts'
+ import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
+ import { readDeviceInfo } from './device-info.ts'
++import { desktopFrameless, frameDocument } from './linux-frame.ts'
++import { registerLinuxWindowIpc } from './linux-window.ts'
++import { createLinuxTray, trayIconPath } from './linux-tray.ts'
++import { createDesktopWindow } from './desktop-window.ts'
++import { linuxUpdateRuntime } from './linux-updates.ts'
+ import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
+ import { claimDesktopSingleInstance } from './single-instance.ts'
+ import { desktopUpdateChannel } from './update-channel.ts'
+ import { DesktopUpdateCoordinator } from './update-coordinator.ts'
++import { installedRpmReleaseSync } from './update-linux.ts'
+ import { prepareDesktopUpdateWindow } from './update-window.ts'
+ import { DesktopCommandManager } from './command-management.ts'
+ import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
+@@ -256,112 +261,7 @@ function platformLoginUrl(authorizeUrl: string): string {
+ }
+ 
  function createWindow(preload: string, show = false, primary = false): BrowserWindow {
-+  const frameless = desktopFrameless()
-+  const size = primary ? restoredWindowSize() : { width: 1280, height: 820, maximized: false }
-+  const icon = framelessWindowIcon()
-   const window = new BrowserWindow({
+-  const window = new BrowserWindow({
 -    width: 1280,
 -    height: 820,
 -    minWidth: 520,
 -    minHeight: 600,
-+    width: size.width,
-+    height: size.height,
-+    ...(icon === undefined ? {} : { icon }),
-+    minWidth: MIN_WINDOW_WIDTH,
-+    minHeight: MIN_WINDOW_HEIGHT,
-     show,
-+    // Linux frameless keeps Electron's native menu bar out of the window: some
-+    // desktops still show it, which leaves two menu bars on screen.
-+    autoHideMenuBar: process.platform === 'linux',
-+    // The frameless Linux window is opaque: it fills its whole rectangle and never asks the
-+    // compositor for an alpha surface. Paint it in the chrome fill so showing the window
-+    // before the page loads cannot flash a white rectangle (ZCode shows its window at
-+    // creation too and covers the gap with the startup shell).
-+    ...(frameless ? {
-+      backgroundColor: chromeFallbackFill(),
-+      frame: false,
-+      hasShadow: false,
-+    } : {}),
-     ...(process.platform === 'win32' && primary ? {
-       titleBarStyle: 'hidden' as const,
-       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
-@@ -286,17 +374,29 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-       webSecurity: true,
-       webviewTag: primary,
-       devTools: true,
-+      ...(frameless ? { additionalArguments: [FRAME_ARGUMENT] } : {}),
-     },
-   })
--  // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
--  // The application menu stays set so its accelerators keep working.
--  if (process.platform === 'linux') window.setMenuBarVisibility(false)
-+  // The application menu stays set so its accelerators keep working, but the frameless Linux
-+  // window draws no native menu bar: the Web layout owns that strip.
-+  if (process.platform === 'linux') {
-+    window.setMenuBarVisibility(false)
-+  }
-+  if (frameless) {
-+    // The preload button band mirrors the main process state; a maximized restore toggles the glyph.
-+    const sendWindowState = (): void => {
-+      if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowState, window.isMaximized())
-+    }
-+    window.on('maximize', sendWindowState)
-+    window.on('unmaximize', sendWindowState)
-+    window.webContents.on('did-finish-load', sendWindowState)
-+  }
-   window.webContents.setWindowOpenHandler(({ url }) => {
-     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
-     return { action: 'deny' }
-   })
+-    show,
+-    ...(process.platform === 'win32' && primary ? {
+-      titleBarStyle: 'hidden' as const,
+-      titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
+-        symbolColor: nativeTheme.shouldUseDarkColors ? '#f9fafb' : '#0f1115' },
+-    } : {}),
+-    // hiddenInset places traffic lights inside the sidebar; sidebar vibrancy
+-    // needs a transparent window background to show through the page.
+-    ...(process.platform === 'darwin' ? {
+-      titleBarStyle: 'hiddenInset' as const,
+-      trafficLightPosition: { x: 16, y: 18 },
+-      vibrancy: 'sidebar' as const,
+-      // 'active' keeps the vibrancy material stable when the window blurs;
+-      // 'followWindow' washes the sidebar out behind an unfocused window.
+-      visualEffectState: 'active' as const,
+-      backgroundColor: '#00000000',
+-    } : {}),
+-    webPreferences: {
+-      preload,
+-      nodeIntegration: false,
+-      contextIsolation: true,
+-      sandbox: true,
+-      webSecurity: true,
+-      webviewTag: primary,
+-      devTools: true,
+-    },
+-  })
+-  window.webContents.setWindowOpenHandler(({ url }) => {
+-    if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
+-    return { action: 'deny' }
+-  })
 -  if (process.platform === 'darwin' || process.platform === 'win32') {
 -    // Fullscreen hides native window controls; overlays drop their caption clearance.
-+  if (process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux') {
-+    // Fullscreen hides the window controls; overlays drop their caption clearance.
-     const sendFullscreen = (): void => {
-       if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
-     }
-@@ -365,6 +465,10 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
-       if (['http:', 'https:'].includes(destination.protocol)) void shell.openExternal(url)
-     }
-   })
-+  if (primary) {
-+    if (size.maximized) window.maximize()
-+    attachWindowSizePersistence(window)
-+  }
-   return window
+-    const sendFullscreen = (): void => {
+-      if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
+-    }
+-    window.on('enter-full-screen', sendFullscreen)
+-    window.on('leave-full-screen', sendFullscreen)
+-    // Reloads and navigations re-register the preload listener; resend the
+-    // current state so a fullscreen reload does not fall back to windowed CSS.
+-    window.webContents.on('did-finish-load', sendFullscreen)
+-  }
+-  if (process.platform === 'darwin') {
+-    // Deminiaturize reattaches the NSVisualEffectView material late
+-    // (electron/electron#25368), so a transparent window shows the desktop
+-    // through the sidebar until then. Paint an opaque base while minimized or
+-    // hidden so the deminiaturize animation and the reattachment gap show a
+-    // solid fill; restoring flips back, and the null -> 'sidebar' transition
+-    // forces the material to reattach.
+-    const applyBackdrop = (): void => {
+-      if (window.isDestroyed()) return
+-      if (window.isMinimized() || !window.isVisible()) {
+-        window.setVibrancy(null)
+-        window.setBackgroundColor(chromeFallbackFill())
+-      } else {
+-        window.setVibrancy('sidebar')
+-        window.setBackgroundColor('#00000000')
+-      }
+-    }
+-    window.on('minimize', applyBackdrop)
+-    window.on('hide', applyBackdrop)
+-    window.on('restore', applyBackdrop)
+-    window.on('show', applyBackdrop)
+-  }
+-  window.webContents.on('context-menu', (_event, { isEditable, selectionText, editFlags }) => {
+-    const items: MenuItemConstructorOptions[] = []
+-    if (isEditable) {
+-      items.push(
+-        { role: 'undo', enabled: editFlags.canUndo },
+-        { role: 'redo', enabled: editFlags.canRedo },
+-        { type: 'separator' },
+-        { role: 'cut', enabled: editFlags.canCut },
+-        { role: 'copy', enabled: editFlags.canCopy },
+-        { role: 'paste', enabled: editFlags.canPaste },
+-        { type: 'separator' },
+-        { role: 'selectAll', enabled: editFlags.canSelectAll },
+-      )
+-    } else if (selectionText.length > 0) {
+-      items.push({ role: 'copy', enabled: editFlags.canCopy })
+-    }
+-    // Empty accelerators suppress Electron's default shortcut labels for native roles.
+-    if (items.length > 0) {
+-      const messages = currentDesktopLocale().messages
+-      Menu.buildFromTemplate(items.map(item => ({
+-        ...item,
+-        ...(process.platform === 'win32' && item.role !== undefined && item.role in messages
+-          ? { label: messages[item.role as keyof typeof messages] } : {}),
+-        accelerator: '',
+-      }))).popup({ window })
+-    }
+-  })
+-  window.webContents.on('will-navigate', (event, url) => {
+-    const destination = new URL(url)
+-    const current = new URL(window.webContents.getURL())
+-    if (destination.protocol !== `${SCHEME}:`
+-      && !(destination.protocol === 'http:' && destination.origin === current.origin)) {
+-      event.preventDefault()
+-      if (['http:', 'https:'].includes(destination.protocol)) void shell.openExternal(url)
+-    }
+-  })
+-  return window
++  return createDesktopWindow({ preload, show, primary, fill: chromeFallbackFill, locale: currentDesktopLocale })
  }
  
-@@ -459,8 +563,12 @@ async function main(): Promise<void> {
+ async function main(): Promise<void> {
+@@ -455,8 +355,12 @@ async function main(): Promise<void> {
    // Copy comes from the same locale as the update prompts so the dialog
    // chrome and its content never mix languages.
    const showAbout = async (): Promise<void> => {
@@ -487,42 +485,29 @@ index 4854d44..9626d23 100644
        buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
    }
    const commandManager = new DesktopCommandManager({
-@@ -680,6 +788,21 @@ async function main(): Promise<void> {
+@@ -676,6 +580,10 @@ async function main(): Promise<void> {
  
    const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
    const updateChannel = desktopUpdateChannel(manifest)
 +  // Linux installs through the package manager, so the coordinator talks to a release-manifest
 +  // updater whose install step is a polkit-authorized helper; the embedded updater is never used.
-+  const linuxUpdater = process.platform === 'linux'
-+    ? new LinuxPackageUpdater({
-+        feedUrl: LINUX_UPDATE_FEED_URL,
-+        cacheDir: defaultCacheDir(),
-+        // Tests and development runs have no resourcesPath; an update is then simply unavailable.
-+        ...process.resourcesPath === undefined ? {} : { keyPath: join(process.resourcesPath, 'RPM-GPG-KEY-dsh-desktop') },
-+        ...existsSync('/usr/libexec/dsh-update-helper') ? { helperPath: '/usr/libexec/dsh-update-helper' } : {},
-+      })
-+    : undefined
-+  // Installed release is part of the version the coordinator compares against, otherwise every
-+  // start would offer the build that is already installed.
-+  const linuxRelease = process.platform === 'linux' ? installedRpmReleaseSync() : undefined
++  const linuxUpdates = linuxUpdateRuntime()
 +
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
      async () => {
-@@ -735,7 +858,11 @@ async function main(): Promise<void> {
+@@ -731,7 +639,9 @@ async function main(): Promise<void> {
        }
        return true
      },
 -    undefined, undefined, undefined,
-+    linuxUpdater as unknown as ConstructorParameters<typeof DesktopUpdateCoordinator>[2],
-+    process.platform === 'linux' ? () => linuxUpdater !== undefined && linuxUpdater.available() : undefined,
-+    process.platform === 'linux' && linuxRelease !== undefined
-+      ? () => `${app.getVersion()}.${linuxRelease}`
-+      : undefined,
++    linuxUpdates.updater as unknown as ConstructorParameters<typeof DesktopUpdateCoordinator>[2],
++    linuxUpdates.enabled,
++    linuxUpdates.currentVersion,
      (success, reason) => { void track('desktop_upgrade_download_result', { is_success: success, ...reason === undefined ? {} : { error_reason: reason } }) },
      updateChannel,
    )
-@@ -769,8 +896,10 @@ async function main(): Promise<void> {
+@@ -765,8 +675,10 @@ async function main(): Promise<void> {
        url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
@@ -535,47 +520,71 @@ index 4854d44..9626d23 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1099,7 +1228,13 @@ async function main(): Promise<void> {
-     // menu on a left click instead of forwarding one.
+@@ -1084,15 +996,26 @@ async function main(): Promise<void> {
+     tray?.relabel()
+   }
+   refreshApplicationMenu()
+-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
+-  if (process.platform === 'win32') {
++  // Windows picks a bitmap out of the multi-size ICO by display scale; Linux's StatusNotifierItem host
++  // scales the single PNG to the panel's icon size instead.
++  if (process.platform === 'win32' || process.platform === 'linux') {
+     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
      try {
-       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
+-      tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
 -        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
++      tray = createLinuxTray({
++        development,
++        locale: currentDesktopLocale,
 +        open: () => { focusPrimaryWindow() },
 +        // Same entry point as the application menu; a manual check reports "already current" when there is nothing newer.
 +        checkUpdate: () => { void openUpdatePrompt(true) },
 +        // Restart keeps the same argv and skips the quit confirmation the user just answered by choosing it.
 +        restart: () => { app.relaunch(); quitWithoutConfirmation() },
 +        quit: () => { app.quit() },
-+        about: () => { void showAbout() } })
++        about: () => { void showAbout() },
++      })
      } catch (error) { console.warn('desktop tray: unavailable', error) }
    }
-   // The confirmation sends the user to the tray, so it covers exactly the platforms that create one.
-@@ -1167,6 +1302,24 @@ async function main(): Promise<void> {
+-  const backgroundNotice = process.platform === 'win32'
++  // The confirmation sends the user to the tray, so it covers exactly the platforms that create one.
++  const backgroundNotice = process.platform === 'win32' || process.platform === 'linux'
+     ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
+       locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
+     : undefined
+@@ -1106,10 +1029,11 @@ async function main(): Promise<void> {
+     focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
+     // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
+     // size directly, where the 1024 px PNG would be scaled down by GDI.
+-    ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
++    ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath(development)) } : {}),
+   })
+ 
+-  if (process.platform === 'win32') {
++  // Linux's caption menubar opens the same native popups; Windows also reports its overlay colours here.
++  if (process.platform === 'win32' || process.platform === 'linux') {
+     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
+       assertDesktopSender(event, ['app'])
+       if (mainWindow === undefined || event.sender !== mainWindow.webContents
+@@ -1150,10 +1074,16 @@ async function main(): Promise<void> {
+       // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
+       const validColor = (value: unknown): value is string => typeof value === 'string'
+         && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
+-      if (validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
++      // The overlay exists only on Windows primary windows; Linux borrows the caption menubar alone.
++      if (process.platform === 'win32' && validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
      })
    }
  
 +  if (process.platform === 'linux') {
 +    // Frameless Linux windows have no native controls; the in-page band delegates every action here.
-+    ipcMain.handle(DESKTOP_IPC.windowAction, (event, action: unknown) => {
-+      assertDesktopSender(event, ['app'])
-+      if (mainWindow === undefined || event.sender !== mainWindow.webContents
-+        || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('desktop window: rejected sender')
-+      if (action === 'minimize') return mainWindow.minimize()
-+      if (action === 'toggle-maximize') return mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
-+      if (action === 'close') return mainWindow.close()
-+      throw new Error('desktop window: unknown action')
-+    })
-+    ipcMain.handle(DESKTOP_IPC.windowStateGet, (event) => {
-+      assertDesktopSender(event, ['app'])
-+      if (mainWindow === undefined || event.sender !== mainWindow.webContents) throw new Error('desktop window: rejected sender')
-+      return { maximized: mainWindow.isMaximized(), fullscreen: mainWindow.isFullScreen() }
-+    })
++    registerLinuxWindowIpc(() => mainWindow)
 +  }
 +
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1177,11 +1330,12 @@ async function main(): Promise<void> {
+@@ -1164,11 +1094,12 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -591,7 +600,7 @@ index 4854d44..9626d23 100644
      window.on('close', (event) => {
        if (quitting || shellInstallerOwnsQuit || sessionEnding) return
 diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
-index c9937a3..5e5b629 100644
+index c9937a30..5e5b629f 100644
 --- a/apps/desktop/src/preload-app.ts
 +++ b/apps/desktop/src/preload-app.ts
 @@ -7,6 +7,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
@@ -615,7 +624,7 @@ index c9937a3..5e5b629 100644
        prepare: (source, requestId) => ipcRenderer.invoke(DESKTOP_IPC.fileDragPrepare, source, requestId) as
 diff --git a/apps/desktop/src/preload-linux-frame.ts b/apps/desktop/src/preload-linux-frame.ts
 new file mode 100644
-index 0000000..9b827f6
+index 00000000..9b827f68
 --- /dev/null
 +++ b/apps/desktop/src/preload-linux-frame.ts
 @@ -0,0 +1,45 @@
@@ -665,24 +674,23 @@ index 0000000..9b827f6
 +  }
 +}
 diff --git a/apps/desktop/src/preload-windows.ts b/apps/desktop/src/preload-windows.ts
-index f17cbdb..5d590a8 100644
+index 5b9ed756..5d590a82 100644
 --- a/apps/desktop/src/preload-windows.ts
 +++ b/apps/desktop/src/preload-windows.ts
-@@ -6,9 +6,9 @@ import { installWindowsMenu } from './preload-menu.ts'
+@@ -4,8 +4,10 @@ import { ipcRenderer } from 'electron'
+ import { DESKTOP_IPC } from './ipc.ts'
+ import { installWindowsMenu } from './preload-menu.ts'
  
- /** Install the caption titlebar marker and observe application language and palette changes. */
+-/** Install the Windows-only titlebar marker and observe application language and palette changes. */
++/** Install the caption titlebar marker and observe application language and palette changes. */
  export function syncWindowsAppearance(): void {
--  // Linux hides the native menu bar and draws the caption menubar inside the page, so it needs
--  // the same marker and appearance reporting as Windows.
--  if (process.platform !== 'win32' && process.platform !== 'linux') return
 +  // Linux frameless windows draw their own chrome and keep the Web layout; only Windows installs
 +  // the caption marker and its appearance reporting.
-+  if (process.platform !== 'win32') return
+   if (process.platform !== 'win32') return
    const mark = (): void => {
      const root = document.documentElement
-     root.dataset.windowsTitlebar = ''
 diff --git a/apps/desktop/src/web-document.ts b/apps/desktop/src/web-document.ts
-index a74ea7c..476658e 100644
+index a74ea7c7..476658ea 100644
 --- a/apps/desktop/src/web-document.ts
 +++ b/apps/desktop/src/web-document.ts
 @@ -13,9 +13,11 @@ const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</s
@@ -707,8 +715,21 @@ index a74ea7c..476658e 100644
    return new Response(request.method === 'HEAD' ? null : content, {
      headers: { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' },
    })
+diff --git a/apps/desktop/src/welcome-window.ts b/apps/desktop/src/welcome-window.ts
+index 61fda9e3..364f5805 100644
+--- a/apps/desktop/src/welcome-window.ts
++++ b/apps/desktop/src/welcome-window.ts
+@@ -59,6 +59,8 @@ let disposeActiveHandlers: (() => void) | undefined
+ export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
+   const options = welcomeWindowOptions(process.platform, locale)
+   const window = new BrowserWindow(options)
++  // This window carries no caption menubar, so on Linux the native one would sit alone under the titlebar.
++  if (process.platform === 'linux') window.setMenuBarVisibility(false)
+   disposeActiveHandlers?.()
+   let active = true
+   const disposeHandlers = (): void => {
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index a25876d..e72ab82 100644
+index 20325642..e72ab827 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -719,7 +740,15 @@ index a25876d..e72ab82 100644
  import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
  import type { IpcMainInvokeEvent } from 'electron'
  import { join } from 'node:path'
-@@ -324,6 +325,7 @@ vi.mock('electron', () => ({
+@@ -127,6 +128,7 @@ const harness = await vi.hoisted(async () => {
+     }
+     static getAllWindows() { return windows.filter(window => !window.destroyed) }
+     setMenu() {}
++    setMenuBarVisibility() {}
+     getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
+     setBounds() {}
+     setTitle = vi.fn()
+@@ -323,6 +325,7 @@ vi.mock('electron', () => ({
    powerMonitor: harness.powerMonitor,
    Tray: harness.FakeTray,
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -727,7 +756,7 @@ index a25876d..e72ab82 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-@@ -587,7 +589,7 @@ describe('desktop main startup', () => {
+@@ -586,7 +589,7 @@ describe('desktop main startup', () => {
      await vi.advanceTimersByTimeAsync(0)
      const zh = locale === 'zh-CN'
      expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -736,7 +765,7 @@ index a25876d..e72ab82 100644
        detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
      }))
      // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
-@@ -869,12 +871,40 @@ describe('desktop main startup', () => {
+@@ -868,12 +871,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
@@ -777,7 +806,7 @@ index a25876d..e72ab82 100644
    it('serves packaged shell documents instead of rejecting the shell origin', async () => {
      const { serveWebDocument } = await import('../src/web-document.ts')
      vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))
-@@ -910,14 +940,18 @@ describe('desktop main startup', () => {
+@@ -909,14 +940,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
@@ -798,7 +827,7 @@ index a25876d..e72ab82 100644
    })
  
    it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
-@@ -1031,7 +1065,7 @@ describe('desktop main startup', () => {
+@@ -1030,7 +1065,7 @@ describe('desktop main startup', () => {
      expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
      const application = handler(event, 'application', 48, 34)
      expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
@@ -808,33 +837,69 @@ index a25876d..e72ab82 100644
      expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
      expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
 diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
-index 735b77f..cc055f0 100644
+index e59b7ebb..cc055f0a 100644
 --- a/apps/desktop/tests/preload-windows.client.spec.ts
 +++ b/apps/desktop/tests/preload-windows.client.spec.ts
-@@ -38,14 +38,12 @@ it('does not install Windows controls on darwin', () => {
-   expect(send).not.toHaveBeenCalled()
+@@ -17,16 +17,8 @@ afterEach(() => {
+   send.mockClear()
  })
  
--it('installs the caption menubar and reports its appearance on linux', () => {
+-it.each(['darwin', 'linux'] as const)('does not install Windows controls on %s', (platform) => {
+-  vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+-  syncWindowsAppearance()
+-  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
+-  expect(send).not.toHaveBeenCalled()
+-})
+-
+-it('synchronizes live language and palette changes and stops observing a closed document', async () => {
+-  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+-  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
++/** Stubs the computed colours and 2D canvas the caption reads to report an appearance. */
++function stubCaptionRendering(): void {
+   vi.spyOn(globalThis, 'getComputedStyle').mockImplementation(() => ({
+     backgroundColor: document.body.hasAttribute('data-ds-dark-theme') ? 'oklch(0.2 0 0)' : 'hsl(0 0% 100%)',
+     color: 'black',
+@@ -37,6 +29,27 @@ it('synchronizes live language and palette changes and stops observing a closed
+       ? [0, 0, 0, 255] : context.fillStyle.startsWith('oklch') ? [27, 27, 28, 255] : [255, 255, 255, 255]) }),
+   }
+   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
++}
++
++it('does not install Windows controls on darwin', () => {
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
++  syncWindowsAppearance()
++  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
++  expect(send).not.toHaveBeenCalled()
++})
++
 +it('leaves the Web layout to the frameless chrome on linux', () => {
-   vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
--  stubCaptionRendering()
--  document.documentElement.lang = 'en'
-   syncWindowsAppearance()
--  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(true)
--  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('40px')
--  expect(send).toHaveBeenCalledWith(DESKTOP_IPC.windowsAppearance, 'en', 'rgba(255, 255, 255, 1)', 'rgba(0, 0, 0, 1)')
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
++  syncWindowsAppearance()
 +  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
 +  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('')
 +  expect(send).not.toHaveBeenCalled()
- })
- 
- it('synchronizes live language and palette changes and stops observing a closed document', async () => {
++})
++
++it('synchronizes live language and palette changes and stops observing a closed document', async () => {
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
++  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
++  stubCaptionRendering()
+   document.documentElement.lang = 'en'
+   syncWindowsAppearance()
+   expect(send).not.toHaveBeenCalled()
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
-index 2fb4f55..3a45e85 100644
+index 79152482..3a45e85d 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts
 +++ b/apps/desktop/tests/welcome-startup.spec.ts
-@@ -98,12 +98,16 @@ vi.mock('electron', () => ({
+@@ -74,6 +74,7 @@ vi.mock('electron', () => ({
+     static getAllWindows() { return [] }
+     once(name: string, callback: () => void) { if (name === 'ready-to-show') this.ready = callback; return this }
+     on() { return this }
++    setMenuBarVisibility() {}
+     isDestroyed() { return false }
+     isMinimized() { return false }
+     restore = vi.fn()
+@@ -97,12 +98,16 @@ vi.mock('electron', () => ({
    dialog: { showErrorBox: vi.fn(), showMessageBox: vi.fn() },
    Menu: { buildFromTemplate: state.menu, setApplicationMenu: vi.fn() },
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -852,8 +917,20 @@ index 2fb4f55..3a45e85 100644
  vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
    ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
    readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),
+diff --git a/apps/desktop/tests/welcome-window.spec.ts b/apps/desktop/tests/welcome-window.spec.ts
+index 6d2807c4..2100de70 100644
+--- a/apps/desktop/tests/welcome-window.spec.ts
++++ b/apps/desktop/tests/welcome-window.spec.ts
+@@ -33,6 +33,7 @@ function createWindow() {
+     isDestroyed: vi.fn().mockReturnValue(false),
+     destroy: vi.fn(),
+     show: vi.fn(),
++    setMenuBarVisibility: vi.fn(),
+     once: vi.fn<(name: string, callback: () => void) => void>(),
+   }
+ }
 diff --git a/apps/web/index.html b/apps/web/index.html
-index ff3ca62..164da9b 100644
+index ff3ca620..164da9b5 100644
 --- a/apps/web/index.html
 +++ b/apps/web/index.html
 @@ -10,9 +10,158 @@
@@ -1016,7 +1093,7 @@ index ff3ca62..164da9b 100644
    </body>
  </html>
 diff --git a/apps/web/src/main.ts b/apps/web/src/main.ts
-index 5f4786a..6cc73a5 100644
+index 5f4786ac..6cc73a52 100644
 --- a/apps/web/src/main.ts
 +++ b/apps/web/src/main.ts
 @@ -34,6 +34,9 @@ try {
@@ -1030,7 +1107,7 @@ index 5f4786a..6cc73a5 100644
  } catch (reason) {
    reportFailure(reason)
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
-index b3b07c2..8598f63 100644
+index b3b07c2b..8598f63d 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 @@ -1,5 +1,6 @@
@@ -1050,7 +1127,7 @@ index b3b07c2..8598f63 100644
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index ac6cb69..089022b 100644
+index ac6cb69f..089022b0 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 @@ -628,3 +628,41 @@
@@ -1096,7 +1173,7 @@ index ac6cb69..089022b 100644
 +  color: #fff;
 +}
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
-index deaddcf..29c25c1 100644
+index deaddcf7..29c25c10 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 @@ -3,6 +3,7 @@
@@ -1117,7 +1194,7 @@ index deaddcf..29c25c1 100644
        {showTabs && (
 diff --git a/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
 new file mode 100644
-index 0000000..7d316c3
+index 00000000..7d316c32
 --- /dev/null
 +++ b/packages/client/ui-conversation/src/client/skeleton/WindowControls.tsx
 @@ -0,0 +1,97 @@
@@ -1219,7 +1296,7 @@ index 0000000..7d316c3
 +  )
 +}
 diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
-index 5b71ebe..e41d176 100644
+index 5b71ebec..e41d1769 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.module.css
 +++ b/packages/client/ui-layout/src/client/AppFrame.module.css
 @@ -7,6 +7,19 @@
@@ -1323,7 +1400,7 @@ index 5b71ebe..e41d176 100644
 +  display: none;
 +}
 diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
-index 5614947..ab44fc2 100644
+index 56149474..ab44fc2b 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.tsx
 +++ b/packages/client/ui-layout/src/client/AppFrame.tsx
 @@ -21,9 +21,13 @@ import type {
@@ -1428,7 +1505,7 @@ index 5614947..ab44fc2 100644
        </div>
 diff --git a/packages/client/ui-layout/src/client/WindowControls.module.css b/packages/client/ui-layout/src/client/WindowControls.module.css
 new file mode 100644
-index 0000000..177adf1
+index 00000000..177adf18
 --- /dev/null
 +++ b/packages/client/ui-layout/src/client/WindowControls.module.css
 @@ -0,0 +1,50 @@
@@ -1484,7 +1561,7 @@ index 0000000..177adf1
 +}
 diff --git a/packages/client/ui-layout/src/client/WindowControls.tsx b/packages/client/ui-layout/src/client/WindowControls.tsx
 new file mode 100644
-index 0000000..8e090bc
+index 00000000..8e090bcc
 --- /dev/null
 +++ b/packages/client/ui-layout/src/client/WindowControls.tsx
 @@ -0,0 +1,96 @@
@@ -1585,7 +1662,7 @@ index 0000000..8e090bc
 +  )
 +}
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
-index 0f39af5..fba6d40 100644
+index 0f39af5d..fba6d408 100644
 --- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 +++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 @@ -50,6 +50,7 @@ import { canCloseTab } from '../stores.ts'
@@ -1606,7 +1683,7 @@ index 0f39af5..fba6d40 100644
  }
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
 new file mode 100644
-index 0000000..b3e1084
+index 00000000..b3e1084a
 --- /dev/null
 +++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.module.css
 @@ -0,0 +1,30 @@
@@ -1642,7 +1719,7 @@ index 0000000..b3e1084
 +}
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
 new file mode 100644
-index 0000000..9b75b8d
+index 00000000..9b75b8da
 --- /dev/null
 +++ b/packages/client/ui-sidebar-right/src/client/shell/WindowControls.tsx
 @@ -0,0 +1,100 @@
@@ -1747,7 +1824,7 @@ index 0000000..9b75b8d
 +  )
 +}
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
-index 2560e37..1b9b76d 100644
+index 2560e375..1b9b76d3 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 @@ -53,7 +53,13 @@
@@ -1778,7 +1855,7 @@ index 2560e37..1b9b76d 100644
     tucks 12px back under it, still clear of the toggle (28px control centered
     in the strip ends at y 40). */
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-index c4083d2..419585c 100644
+index c4083d22..419585c6 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 @@ -239,6 +239,10 @@ export function SidebarRoot({
@@ -1877,7 +1954,7 @@ index c4083d2..419585c 100644
        {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
        {canStartSession && (
 diff --git a/packages/client/web/src/base.css b/packages/client/web/src/base.css
-index af74988..3c3150f 100644
+index af74988c..3c3150f8 100644
 --- a/packages/client/web/src/base.css
 +++ b/packages/client/web/src/base.css
 @@ -52,7 +52,8 @@ html[data-platform='darwin'] body {

@@ -1,7 +1,7 @@
 变化理由：把 sharp 移出 asar 并用独立 Node 子进程解码，避免 Electron 主进程加载 libvips。
 diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
 new file mode 100644
-index 0000000..9198621
+index 00000000..91986211
 --- /dev/null
 +++ b/apps/desktop/resources/sharp-worker.cjs
 @@ -0,0 +1,57 @@
@@ -64,7 +64,7 @@ index 0000000..9198621
 +})
 diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 new file mode 100644
-index 0000000..96c249d
+index 00000000..96c249da
 --- /dev/null
 +++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 @@ -0,0 +1,176 @@
@@ -245,7 +245,7 @@ index 0000000..96c249d
 +    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
 +}
 diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
-index 798b21a..d4972f4 100644
+index 798b21ae..d4972f4f 100644
 --- a/packages/attachment/attachment-local/src/sharp.ts
 +++ b/packages/attachment/attachment-local/src/sharp.ts
 @@ -1,7 +1,13 @@

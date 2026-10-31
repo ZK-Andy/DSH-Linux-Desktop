@@ -1,6 +1,31 @@
 变化理由：把上游仓库变成可构建的 Linux 桌面工程：下载与解包、补齐 workspace 入口、包骨架、运行时依赖、托盘图标生成、office 与 assets 放置。
+diff --git a/.gitignore b/.gitignore
+index 3cb86ce8..58b44e9e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,6 +2,7 @@ CLAUDE.local.md
+ .env
+ apps/desktop/.env.windows
+ apps/desktop/.env.macos
++apps/desktop/.env.linux
+ apps/desktop/*.p12
+ node_modules/
+ lib/
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+index 081a90ea..faeba5bd 100644
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -38,6 +38,8 @@
+     "package:win:x64": "tsx scripts/package-target.ts win-x64",
+     "package:win:x64:unsigned": "tsx scripts/package-target.ts win-x64 --unsigned",
+     "package:win:x64:dir": "tsx scripts/package-target.ts win-x64 --dir",
++    "package:linux:x64": "tsx scripts/package-target.ts linux-x64 --unsigned",
++    "package:linux:x64:dir": "tsx scripts/package-target.ts linux-x64 --unsigned --dir",
+     "upload:mac:arm64": "tsx scripts/upload-target.ts mac-arm64",
+     "upload:mac:x64": "tsx scripts/upload-target.ts mac-x64",
+     "upload:win:x64": "tsx scripts/upload-target.ts win-x64",
 diff --git a/apps/desktop/scripts/desktop-auto-update-environment.d.mts b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
-index 4d42b3d..87b29de 100644
+index 4d42b3dd..87b29dee 100644
 --- a/apps/desktop/scripts/desktop-auto-update-environment.d.mts
 +++ b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
 @@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
@@ -13,7 +38,7 @@ index 4d42b3d..87b29de 100644
  /**
   * Name the fixed installer object shared by uploading and cache refresh.
 diff --git a/apps/desktop/scripts/desktop-auto-update-environment.mjs b/apps/desktop/scripts/desktop-auto-update-environment.mjs
-index 835bead..8cf84b3 100644
+index 835beadd..8cf84b36 100644
 --- a/apps/desktop/scripts/desktop-auto-update-environment.mjs
 +++ b/apps/desktop/scripts/desktop-auto-update-environment.mjs
 @@ -33,7 +33,7 @@ const UPDATE_ENVIRONMENTS = {
@@ -43,8 +68,65 @@ index 835bead..8cf84b3 100644
   * @returns {string} Filename stored beside electron-builder artifacts.
   */
  export function desktopBuildRecordFilename(target) {
+diff --git a/apps/desktop/scripts/desktop-build-commit.d.mts b/apps/desktop/scripts/desktop-build-commit.d.mts
+index 82118e24..57a792cb 100644
+--- a/apps/desktop/scripts/desktop-build-commit.d.mts
++++ b/apps/desktop/scripts/desktop-build-commit.d.mts
+@@ -11,7 +11,7 @@ export const DESKTOP_BUILD_COMMIT_ENV: 'DSH_DESKTOP_BUILD_COMMIT'
+ export const DESKTOP_BUILD_DIRTY_ENV: 'DSH_DESKTOP_BUILD_DIRTY'
+ 
+ /**
+- * Read the checkout's current commit and whether it carries uncommitted changes.
++ * Read the commit being packaged and whether its tree carried uncommitted changes.
+  * @param repositoryRoot - Directory to inspect.
+  * @returns The commit being packaged and whether its tree was modified.
+  */
+diff --git a/apps/desktop/scripts/desktop-build-commit.mjs b/apps/desktop/scripts/desktop-build-commit.mjs
+index 28d7cda5..3cb19643 100644
+--- a/apps/desktop/scripts/desktop-build-commit.mjs
++++ b/apps/desktop/scripts/desktop-build-commit.mjs
+@@ -7,7 +7,7 @@
+  * child process, which run against a build tree rather than a checkout.
+  */
+ 
+-import { execFileSync } from 'node:child_process'
++import { execFileSync, spawnSync } from 'node:child_process'
+ 
+ /** Environment variable that carries the packaged commit. */
+ export const DESKTOP_BUILD_COMMIT_ENV = 'DSH_DESKTOP_BUILD_COMMIT'
+@@ -16,11 +16,29 @@ export const DESKTOP_BUILD_COMMIT_ENV = 'DSH_DESKTOP_BUILD_COMMIT'
+ export const DESKTOP_BUILD_DIRTY_ENV = 'DSH_DESKTOP_BUILD_DIRTY'
+ 
+ /**
+- * Read the checkout's current commit and whether it carries uncommitted changes.
++ * Read the commit being packaged and whether its tree carried uncommitted changes.
++ *
++ * A packaging run records the pair once and passes it to every child process, which run against a
++ * build tree rather than a checkout — a build tree that happens to sit inside an unrelated checkout
++ * would otherwise be mistaken for the sources being packaged. With no recording, read the checkout;
++ * a directory that is neither refuses the build.
+  * @param {string} repositoryRoot - Directory to inspect.
+  * @returns {{ commit: string, dirty: boolean }} The commit being packaged and whether its tree was modified.
+  */
+ export function readDesktopBuildCommit(repositoryRoot) {
++  const recorded = resolveDesktopBuildCommit(process.env)
++  if (recorded !== undefined) return recorded
++  const probe = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
++    cwd: repositoryRoot,
++    encoding: 'utf8',
++    stdio: ['ignore', 'pipe', 'ignore'],
++  })
++  if (probe.error !== undefined || probe.status !== 0 || probe.stdout.trim() !== 'true') {
++    throw new Error(
++      `desktop build commit: ${repositoryRoot} is not a Git checkout; `
++      + `set ${DESKTOP_BUILD_COMMIT_ENV} and ${DESKTOP_BUILD_DIRTY_ENV} to package it`,
++    )
++  }
+   const git = (args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim()
+   return {
+     commit: git(['rev-parse', 'HEAD']),
 diff --git a/apps/desktop/scripts/desktop-build-paths.d.mts b/apps/desktop/scripts/desktop-build-paths.d.mts
-index 910f303..da063eb 100644
+index 910f3032..da063eb5 100644
 --- a/apps/desktop/scripts/desktop-build-paths.d.mts
 +++ b/apps/desktop/scripts/desktop-build-paths.d.mts
 @@ -46,10 +46,17 @@ export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, environ
@@ -67,7 +149,7 @@ index 910f303..da063eb 100644
   * Resolve the paths owned by the target selected in a packaging environment.
   * @param env - Packaging environment.
 diff --git a/apps/desktop/scripts/desktop-build-paths.mjs b/apps/desktop/scripts/desktop-build-paths.mjs
-index edfd9cd..f6ba9cb 100644
+index edfd9cdf..f6ba9cb0 100644
 --- a/apps/desktop/scripts/desktop-build-paths.mjs
 +++ b/apps/desktop/scripts/desktop-build-paths.mjs
 @@ -4,14 +4,14 @@ import { isAbsolute, join, resolve } from 'node:path'
@@ -141,196 +223,123 @@ index edfd9cd..f6ba9cb 100644
  /**
   * Resolve the paths owned by the target selected in a packaging environment.
   * @param {NodeJS.ProcessEnv} env - Packaging environment.
-diff --git a/apps/desktop/scripts/desktop-release-store.ts b/apps/desktop/scripts/desktop-release-store.ts
-index c080272..83ec26c 100644
---- a/apps/desktop/scripts/desktop-release-store.ts
-+++ b/apps/desktop/scripts/desktop-release-store.ts
-@@ -17,7 +17,7 @@ const sourceSchema = z.strictObject({
-   channel: z.enum(['nightly', 'latest']),
-   runnerName: z.string().min(1),
-   // Storage accepts every Desktop target; CI routing separately limits currently provisioned platforms.
--  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64']),
-+  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64']),
-   preset: z.enum(['test', 'production']),
-   productVersion: z.string().min(1),
-   version: z.string().min(1),
-diff --git a/apps/desktop/scripts/desktop-upload-plan.ts b/apps/desktop/scripts/desktop-upload-plan.ts
-index 1461444..1adda3f 100644
---- a/apps/desktop/scripts/desktop-upload-plan.ts
-+++ b/apps/desktop/scripts/desktop-upload-plan.ts
-@@ -21,6 +21,7 @@ const TARGETS = {
-   'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
-   'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
-   'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
-+  'linux-x64': { platform: 'linux', arch: 'x64', os: 'linux' },
- } as const satisfies Record<DesktopPackageTargetName, {
-   readonly platform: NodeJS.Platform
-   readonly arch: string
-diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
-index b6bc6ef..20da969 100644
---- a/apps/desktop/scripts/package-target.ts
-+++ b/apps/desktop/scripts/package-target.ts
-@@ -48,14 +48,14 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
- const AUTOMATIC_BUILD_VERSION = 'auto'
- 
- /** Fixed platform and architecture identifiers exposed by package scripts. */
--export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64'
-+export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64'
- 
- /** One supported release target and its electron-builder selectors. */
- export interface DesktopPackageTarget {
-   readonly name: DesktopPackageTargetName
--  readonly platform: 'darwin' | 'win32'
-+  readonly platform: 'darwin' | 'win32' | 'linux'
-   readonly arch: 'arm64' | 'x64'
--  readonly builderPlatform: '--mac' | '--win'
-+  readonly builderPlatform: '--mac' | '--win' | '--linux'
-   readonly builderArch: '--arm64' | '--x64'
- }
- 
-@@ -81,6 +81,13 @@ const TARGETS: Record<DesktopPackageTargetName, DesktopPackageTarget> = {
-     builderPlatform: '--win',
-     builderArch: '--x64',
-   },
-+  'linux-x64': {
-+    name: 'linux-x64',
-+    platform: 'linux',
-+    arch: 'x64',
-+    builderPlatform: '--linux',
-+    builderArch: '--x64',
-+  },
- }
- 
- /**
-@@ -190,6 +197,12 @@ export function resolveDesktopPackageTarget(
-   if (name === 'mac-x64' && hostArch !== 'arm64' && hostArch !== 'x64') {
-     throw new Error('desktop package: mac-x64 requires an Intel Mac or Apple Silicon with Rosetta')
-   }
-+  if (target.platform === 'linux' && hostPlatform !== 'linux') {
-+    throw new Error(`desktop package: ${name} requires a Linux build host`)
+diff --git a/apps/desktop/scripts/desktop-linux-packages.d.mts b/apps/desktop/scripts/desktop-linux-packages.d.mts
+new file mode 100644
+index 00000000..96c6e2df
+--- /dev/null
++++ b/apps/desktop/scripts/desktop-linux-packages.d.mts
+@@ -0,0 +1,34 @@
++/** Linux package formats and the control metadata the Debian and RPM formats carry. */
++
++/** Environment variable that selects the Linux package formats one packaging run emits. */
++export const LINUX_FORMATS_ENV: string
++
++/** Environment variable that supplies the maintainer recorded in the Debian and RPM control files. */
++export const LINUX_MAINTAINER_ENV: string
++
++/** Environment variable that supplies the project URL recorded in the Debian and RPM control files. */
++export const LINUX_HOMEPAGE_ENV: string
++
++/** Maintainer and project URL recorded in a Debian or RPM control file. */
++export interface DesktopLinuxPackageMetadata {
++  maintainer: string
++  homepage: string
++}
++
++/**
++ * Resolve the Linux package formats this run emits.
++ * @param environment Packaging environment.
++ * @returns Format names in build order, without duplicates; AppImage unless configured.
++ */
++export function resolveDesktopLinuxFormats(environment?: NodeJS.ProcessEnv): string[]
++
++/**
++ * Resolve the control metadata the selected formats carry.
++ * @param environment File-owned release settings.
++ * @param formats Formats this run emits; defaults to the resolved selection.
++ * @returns Metadata, or undefined when no selected format carries any.
++ */
++export function resolveDesktopLinuxPackageMetadata(
++  environment?: NodeJS.ProcessEnv,
++  formats?: string[],
++): DesktopLinuxPackageMetadata | undefined
+diff --git a/apps/desktop/scripts/desktop-linux-packages.mjs b/apps/desktop/scripts/desktop-linux-packages.mjs
+new file mode 100644
+index 00000000..fd4e5886
+--- /dev/null
++++ b/apps/desktop/scripts/desktop-linux-packages.mjs
+@@ -0,0 +1,69 @@
++/** Select the Linux package formats one run emits and resolve the control metadata they carry. */
++
++/** Environment variable that selects the Linux package formats one packaging run emits. */
++export const LINUX_FORMATS_ENV = 'DSH_DESKTOP_TARGET_FORMATS'
++
++/** Environment variable that supplies the maintainer recorded in the Debian and RPM control files. */
++export const LINUX_MAINTAINER_ENV = 'DSH_DESKTOP_LINUX_MAINTAINER'
++
++/** Environment variable that supplies the project URL recorded in the Debian and RPM control files. */
++export const LINUX_HOMEPAGE_ENV = 'DSH_DESKTOP_LINUX_HOMEPAGE'
++
++const DEFAULT_FORMATS = ['AppImage']
++
++// fpm builds these from a control file that names a maintainer and a project URL, and refuses to
++// build either format without them.
++const METADATA_FORMATS = new Set(['deb', 'rpm'])
++
++const MAINTAINER = /^[^<>]+<[^<>\s]+@[^<>\s]+>$/u
++
++/**
++ * Resolve the Linux package formats this run emits.
++ * @param {NodeJS.ProcessEnv} environment Packaging environment.
++ * @returns {string[]} Format names in build order, without duplicates; AppImage unless configured.
++ */
++export function resolveDesktopLinuxFormats(environment = process.env) {
++  const configured = environment[LINUX_FORMATS_ENV]
++  if (configured === undefined || configured.trim() === '') return DEFAULT_FORMATS
++  const formats = configured.split(',').map(format => format.trim())
++  if (formats.some(format => format === '')) {
++    throw new Error(`desktop package: ${LINUX_FORMATS_ENV} must be a comma-separated list of target names without empty entries`)
 +  }
-+  if (target.platform === 'linux' && hostArch !== 'x64') {
-+    throw new Error(`desktop package: ${name} requires an x64 build host`)
++  return [...new Set(formats)]
++}
++
++/**
++ * Resolve the control metadata the selected formats carry.
++ * @param {NodeJS.ProcessEnv} environment File-owned release settings.
++ * @param {string[]} formats Formats this run emits; defaults to the resolved selection.
++ * @returns {{ maintainer: string, homepage: string } | undefined} Metadata, or undefined when no selected format carries any.
++ */
++export function resolveDesktopLinuxPackageMetadata(environment = process.env, formats = resolveDesktopLinuxFormats(environment)) {
++  const requiring = formats.filter(format => METADATA_FORMATS.has(format))
++  if (requiring.length === 0) return undefined
++  const maintainer = environment[LINUX_MAINTAINER_ENV]?.trim() ?? ''
++  const homepage = environment[LINUX_HOMEPAGE_ENV]?.trim() ?? ''
++  const problems = []
++  if (!MAINTAINER.test(maintainer)) {
++    problems.push(`${LINUX_MAINTAINER_ENV} must be "Name <email>", the maintainer of this package rather than the upstream author`)
 +  }
-   return target
- }
- 
-diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
-index a069888..1ea25ce 100644
---- a/apps/desktop/scripts/prepare-dsh.ts
-+++ b/apps/desktop/scripts/prepare-dsh.ts
-@@ -32,7 +32,7 @@ import {
- import {
-   signMacOSRuntime,
- } from './macos-runtime.ts'
--import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
-+import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
- import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
- import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
- 
-@@ -44,7 +44,8 @@ const STORE_ROOT = BUILD_PATHS.pnpmStore
- const RUNTIME_ROOT = BUILD_PATHS.runtime
- const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
- const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
--const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
-+const TARGET = resolveDesktopBuildTarget()
-+const NODE = join(BUILD_PATHS.electron, desktopElectronExecutablePath(TARGET))
- const PNPM = join(RUNTIME_ROOT, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs')
- 
- function manifestVersion(path: string, subject: string): string {
-diff --git a/apps/desktop/scripts/prepare-runtime.ts b/apps/desktop/scripts/prepare-runtime.ts
-index 4e33853..abccdf5 100644
---- a/apps/desktop/scripts/prepare-runtime.ts
-+++ b/apps/desktop/scripts/prepare-runtime.ts
-@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
- import { downloadArtifact } from '@electron/get'
- import extractZip from 'extract-zip'
- import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
--import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
-+import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
- import { packagingStep } from './packaging-step.mjs'
- import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
- import { prepareDesktopCli } from './prepare-cli.ts'
-@@ -17,23 +17,24 @@ import { prepareCommandLink } from './prepare-command-link.ts'
- const BUILD_PATHS = resolveDesktopTargetBuildPaths()
- const RUNTIME_ROOT = BUILD_PATHS.runtime
- 
--type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
-+type DesktopBuildTarget = ReturnType<typeof resolveDesktopBuildTarget>
- 
- /** Extract the target Electron distribution and return its embedded Node version. */
--async function prepareElectron({ platform, arch }: DesktopTarget): Promise<string> {
-+async function prepareElectron(target: DesktopBuildTarget): Promise<string> {
-   const require = createRequire(import.meta.url)
-   const { version } = require('electron/package.json') as { version: string }
-+  const { platform, arch } = desktopTargetPlatform(target)
-   const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',
-     () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
-   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
-   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
--  const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
-+  const executable = join(BUILD_PATHS.electron, desktopElectronExecutablePath(target))
-   return execFileSync(executable, ['-p', 'process.versions.node'], {
-     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-   }).trim()
- }
- 
--function prepareCli({ platform, arch }: DesktopTarget): void {
-+function prepareCli({ platform, arch }: { platform: 'darwin' | 'win32'; arch: 'arm64' | 'x64' }): void {
-   cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
-   chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
-   const cli = join(RUNTIME_ROOT, 'cli')
-@@ -50,24 +51,32 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
- 
- async function main(): Promise<void> {
-   const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
--  const target = desktopTargetPlatform(resolveDesktopBuildTarget())
-+  const targetName = resolveDesktopBuildTarget()
-+  const target = desktopTargetPlatform(targetName)
-   rmSync(RUNTIME_ROOT, { recursive: true, force: true })
-   mkdirSync(RUNTIME_ROOT, { recursive: true })
-   const preparePrimary = () => packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
-     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
-   let nodeVersion: string
-   if (target.platform === 'win32') {
--    const [electron, primary] = await Promise.allSettled([prepareElectron(target), preparePrimary()])
-+    const [electron, primary] = await Promise.allSettled([prepareElectron(targetName), preparePrimary()])
-     if (electron.status === 'rejected') throw electron.reason
-     if (primary.status === 'rejected') throw primary.reason
-     nodeVersion = electron.value
-   } else {
--    nodeVersion = await prepareElectron(target)
-+    nodeVersion = await prepareElectron(targetName)
-     await preparePrimary()
-   }
-   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
-   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
--  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })
-+  // The node shell launcher serves package scripts on every target; the terminal launcher is macOS and
-+  // Windows only, because the shipped `cli/dsh` execs the macOS bundle through `../MacOS/`.
-+  cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
-+  chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
-+  if (target.platform !== 'linux') {
-+    const { platform, arch } = target
-+    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli({ platform, arch }) })
++  if (!isAbsoluteHttpUrl(homepage)) {
++    problems.push(`${LINUX_HOMEPAGE_ENV} must be an absolute http or https URL`)
 +  }
-   writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
-     schemaVersion: 1,
-     node: nodeVersion,
-diff --git a/.gitignore b/.gitignore
-index 3cb86ce..58b44e9 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -2,6 +2,7 @@ CLAUDE.local.md
- .env
- apps/desktop/.env.windows
- apps/desktop/.env.macos
-+apps/desktop/.env.linux
- apps/desktop/*.p12
- node_modules/
- lib/
++  if (problems.length > 0) {
++    const listed = requiring.join(' and ')
++    throw new Error(`desktop package: ${listed} ${requiring.length === 1 ? 'carries' : 'carry'} a maintainer and a project URL:\n${
++      problems.map(problem => `  ${problem}`).join('\n')}`)
++  }
++  return { maintainer, homepage }
++}
++
++function isAbsoluteHttpUrl(value) {
++  let url
++  try { url = new URL(value) }
++  catch {
++    // The URL parser rejects every relative or malformed value, which is what this predicate reports.
++    return false
++  }
++  return url.protocol === 'https:' || url.protocol === 'http:'
++}
 diff --git a/apps/desktop/scripts/desktop-package-environment.d.mts b/apps/desktop/scripts/desktop-package-environment.d.mts
-index ec9da72..76c07e5 100644
+index ec9da721..76c07e5e 100644
 --- a/apps/desktop/scripts/desktop-package-environment.d.mts
 +++ b/apps/desktop/scripts/desktop-package-environment.d.mts
 @@ -20,7 +20,7 @@ export function localMacOSPackageEnvironment(environment?: NodeJS.ProcessEnv): N
@@ -351,7 +360,7 @@ index ec9da72..76c07e5 100644
    options?: { unsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean },
  ): void
 diff --git a/apps/desktop/scripts/desktop-package-environment.mjs b/apps/desktop/scripts/desktop-package-environment.mjs
-index 27a7f92..23a0c37 100644
+index 27a7f92c..23a0c37e 100644
 --- a/apps/desktop/scripts/desktop-package-environment.mjs
 +++ b/apps/desktop/scripts/desktop-package-environment.mjs
 @@ -7,7 +7,8 @@ import { parseEnv } from 'node:util'
@@ -447,8 +456,61 @@ index 27a7f92..23a0c37 100644
      if (environment.DSH_DESKTOP_MACOS_SIGNATURE_CACHE_DIR !== undefined) validateMacOSSignatureCacheDirectory(environment.DSH_DESKTOP_MACOS_SIGNATURE_CACHE_DIR)
      resolveMacOSSigningEnvironment(environment)
      if (!options.skipNotarization) {
+diff --git a/apps/desktop/scripts/desktop-policy-environment.d.mts b/apps/desktop/scripts/desktop-policy-environment.d.mts
+index 7b2230a2..18878cd6 100644
+--- a/apps/desktop/scripts/desktop-policy-environment.d.mts
++++ b/apps/desktop/scripts/desktop-policy-environment.d.mts
+@@ -7,6 +7,13 @@ export interface DesktopPolicyEnvironment {
+   [key: string]: unknown
+ }
+ 
++/**
++ * Report whether one release target embeds and polls the mandatory-update policy.
++ * @param platform Target platform.
++ * @returns True when the target embeds the policy.
++ */
++export function desktopPlatformEmbedsPolicy(platform: NodeJS.Platform): boolean
++
+ /**
+  * Resolve policy settings before artifact preparation or signing.
+  * @param environment File-owned release settings; only the selected origin is required.
+diff --git a/apps/desktop/scripts/desktop-policy-environment.mjs b/apps/desktop/scripts/desktop-policy-environment.mjs
+index 59114757..5df4e464 100644
+--- a/apps/desktop/scripts/desktop-policy-environment.mjs
++++ b/apps/desktop/scripts/desktop-policy-environment.mjs
+@@ -10,6 +10,17 @@ function origin(value, name) {
+   return url.origin
+ }
+ 
++/**
++ * Report whether one release target embeds and polls the mandatory-update policy.
++ * The policy service identifies its Desktop clients as desktop-win or desktop-mac and has no Linux
++ * identity, and a Linux release carries no update channel, so no policy decision could drive an action.
++ * @param {NodeJS.Platform} platform Target platform.
++ * @returns {boolean} True when the target embeds the policy.
++ */
++export function desktopPlatformEmbedsPolicy(platform) {
++  return platform !== 'linux'
++}
++
+ /**
+  * Resolve mandatory policy metadata before preparing artifacts or accessing signing hardware.
+  * @param {NodeJS.ProcessEnv} environment File-owned release settings; the unselected origin is not required.
+diff --git a/apps/desktop/scripts/desktop-release-store.ts b/apps/desktop/scripts/desktop-release-store.ts
+index c080272e..83ec26c4 100644
+--- a/apps/desktop/scripts/desktop-release-store.ts
++++ b/apps/desktop/scripts/desktop-release-store.ts
+@@ -17,7 +17,7 @@ const sourceSchema = z.strictObject({
+   channel: z.enum(['nightly', 'latest']),
+   runnerName: z.string().min(1),
+   // Storage accepts every Desktop target; CI routing separately limits currently provisioned platforms.
+-  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64']),
++  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64']),
+   preset: z.enum(['test', 'production']),
+   productVersion: z.string().min(1),
+   version: z.string().min(1),
 diff --git a/apps/desktop/scripts/desktop-toolchain-preflight.ts b/apps/desktop/scripts/desktop-toolchain-preflight.ts
-index ff855cf..a568c80 100644
+index ff855cfd..a568c806 100644
 --- a/apps/desktop/scripts/desktop-toolchain-preflight.ts
 +++ b/apps/desktop/scripts/desktop-toolchain-preflight.ts
 @@ -13,6 +13,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -511,83 +573,252 @@ index ff855cf..a568c80 100644
    environment: NodeJS.ProcessEnv = process.env,
  ): Promise<void> {
    const failures = await probeDesktopToolchain(platform, environment)
-diff --git a/apps/desktop/tests/desktop-package-environment.spec.ts b/apps/desktop/tests/desktop-package-environment.spec.ts
-index a8d79a2..59d64e6 100644
---- a/apps/desktop/tests/desktop-package-environment.spec.ts
-+++ b/apps/desktop/tests/desktop-package-environment.spec.ts
-@@ -7,6 +7,11 @@ import { resolveWindowsPackageSettings } from '../scripts/windows-package-settin
+diff --git a/apps/desktop/scripts/desktop-upload-plan.ts b/apps/desktop/scripts/desktop-upload-plan.ts
+index 1461444f..1adda3f1 100644
+--- a/apps/desktop/scripts/desktop-upload-plan.ts
++++ b/apps/desktop/scripts/desktop-upload-plan.ts
+@@ -21,6 +21,7 @@ const TARGETS = {
+   'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
+   'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
+   'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
++  'linux-x64': { platform: 'linux', arch: 'x64', os: 'linux' },
+ } as const satisfies Record<DesktopPackageTargetName, {
+   readonly platform: NodeJS.Platform
+   readonly arch: string
+diff --git a/apps/desktop/scripts/pack-local-packages.ts b/apps/desktop/scripts/pack-local-packages.ts
+index 79136479..1f0358d4 100644
+--- a/apps/desktop/scripts/pack-local-packages.ts
++++ b/apps/desktop/scripts/pack-local-packages.ts
+@@ -12,13 +12,14 @@ import { packFamilyMembers, parsePackConcurrency } from '../../../scripts/releas
  
- const WINDOWS = { platform: 'win32', arch: 'x64' } as const
- const MACOS = { platform: 'darwin', arch: 'arm64' } as const
-+const LINUX = { platform: 'linux', arch: 'x64' } as const
-+const LINUX_METADATA = {
-+  DSH_DESKTOP_LINUX_MAINTAINER: 'ffyfox <299493445+ffyfox@users.noreply.github.com>',
-+  DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/deepseek-ai/deepseek-harness',
-+}
- const POLICY = { DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
-   DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }) }
- const RELEASE = { ...POLICY, DSH_DESKTOP_APP_ID: 'com.example.desktop', DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com',
-@@ -276,6 +281,45 @@ describe('Desktop local packaging configuration', () => {
-     }
+ async function main(): Promise<void> {
+   const { values } = parseArgs({
+-    options: { out: { type: 'string' }, concurrency: { type: 'string' } },
++    options: { out: { type: 'string' }, concurrency: { type: 'string' }, 'client-profile': { type: 'string' } },
+     allowPositionals: false,
    })
+   if (values.out === undefined) throw new Error('desktop local pack: --out must name the package staging directory')
+   const concurrency = parsePackConcurrency(values.concurrency)
+   const root = process.cwd()
+-  const environment = resolveClientBuildEnvironment(repositoryClientBuildEnvironment(root), 'local')
++  const environment = resolveClientBuildEnvironment(repositoryClientBuildEnvironment(root),
++    values['client-profile'] === 'official' ? 'official' : 'local')
+   readClientBuildRecord(root, environment)
+   const destination = resolve(root, values.out)
+   const packed = await packFamilyMembers(root, releaseFamily('dsh'), destination, concurrency)
+diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
+index b6bc6efb..c282dfd3 100644
+--- a/apps/desktop/scripts/package-target.ts
++++ b/apps/desktop/scripts/package-target.ts
+@@ -48,14 +48,14 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
+ const AUTOMATIC_BUILD_VERSION = 'auto'
  
-+  it('owns the Linux package metadata in the Linux file and keeps ambient values out', async () => {
-+    await withDirectory(async (directory) => {
-+      const parent = { ...LINUX_METADATA, DSH_DESKTOP_LINUX_MAINTAINER: 'stale <stale@example.com>' }
-+      await writeFile(join(directory, '.env.linux'), `DSH_DESKTOP_APP_ID=com.example.linux\nDSH_DESKTOP_LINUX_MAINTAINER="${LINUX_METADATA.DSH_DESKTOP_LINUX_MAINTAINER}"\nDSH_DESKTOP_LINUX_HOMEPAGE=https://github.com/example/project\n`)
-+      expect(loadDesktopPackageEnvironment('linux', parent, directory)).toEqual({
-+        DSH_DESKTOP_APP_ID: 'com.example.linux',
-+        DSH_DESKTOP_LINUX_MAINTAINER: LINUX_METADATA.DSH_DESKTOP_LINUX_MAINTAINER,
-+        DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/example/project',
-+      })
-+      expect(parent.DSH_DESKTOP_LINUX_MAINTAINER).toBe('stale <stale@example.com>')
-+      // The format selection is a per-invocation build selector, so the file must not own it.
-+      await writeFile(join(directory, '.env.linux'), 'DSH_DESKTOP_TARGET_FORMATS=deb\n')
-+      expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).toThrow(/unsupported setting DSH_DESKTOP_TARGET_FORMATS/u)
-+      await writeFile(join(directory, '.env.linux'), 'APPLE_APP_SPECIFIC_PASSWORD=secret-sentinel\n')
-+      expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).toThrow(/unsupported setting APPLE_APP_SPECIFIC_PASSWORD/u)
-+    })
-+  })
-+
-+  it('requires the Linux package metadata only for the formats that carry a control file', () => {
-+    const release = { DSH_DESKTOP_APP_ID: RELEASE.DSH_DESKTOP_APP_ID }
-+    expect(() => {
-+      validateDesktopPackageEnvironment(release, LINUX, { unsigned: true })
-+    }).not.toThrow()
-+    for (const formats of ['deb', 'rpm', 'AppImage,rpm']) {
-+      expect(() => {
-+        validateDesktopPackageEnvironment({ ...release, DSH_DESKTOP_TARGET_FORMATS: formats }, LINUX, { unsigned: true })
-+      }).toThrow(/DSH_DESKTOP_LINUX_MAINTAINER/u)
+ /** Fixed platform and architecture identifiers exposed by package scripts. */
+-export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64'
++export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64'
+ 
+ /** One supported release target and its electron-builder selectors. */
+ export interface DesktopPackageTarget {
+   readonly name: DesktopPackageTargetName
+-  readonly platform: 'darwin' | 'win32'
++  readonly platform: 'darwin' | 'win32' | 'linux'
+   readonly arch: 'arm64' | 'x64'
+-  readonly builderPlatform: '--mac' | '--win'
++  readonly builderPlatform: '--mac' | '--win' | '--linux'
+   readonly builderArch: '--arm64' | '--x64'
+ }
+ 
+@@ -81,6 +81,13 @@ const TARGETS: Record<DesktopPackageTargetName, DesktopPackageTarget> = {
+     builderPlatform: '--win',
+     builderArch: '--x64',
+   },
++  'linux-x64': {
++    name: 'linux-x64',
++    platform: 'linux',
++    arch: 'x64',
++    builderPlatform: '--linux',
++    builderArch: '--x64',
++  },
+ }
+ 
+ /**
+@@ -190,6 +197,12 @@ export function resolveDesktopPackageTarget(
+   if (name === 'mac-x64' && hostArch !== 'arm64' && hostArch !== 'x64') {
+     throw new Error('desktop package: mac-x64 requires an Intel Mac or Apple Silicon with Rosetta')
+   }
++  if (target.platform === 'linux' && hostPlatform !== 'linux') {
++    throw new Error(`desktop package: ${name} requires a Linux build host`)
++  }
++  if (target.platform === 'linux' && hostArch !== 'x64') {
++    throw new Error(`desktop package: ${name} requires an x64 build host`)
++  }
+   return target
+ }
+ 
+@@ -478,7 +491,12 @@ export async function packageTarget(
+         { cwd: APP_ROOT, env: electronBuilderEnv, timeoutMs: 60_000 })
+     })
+   }
+-  await execute(invocation.unsigned ? ['run', 'build', '--profile', 'local'] : ['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
++  // The unofficial Linux build still ships the official client identity: the
++  // vendor reserves `build:official` for signed artifacts, so an unsigned
++  // build would otherwise render the local-build fallback (sidebar mark,
++  // window title) instead of the product's own.
++  const officialClientProfile = !invocation.unsigned || target.platform === 'linux'
++  await execute(officialClientProfile ? ['run', 'build:official'] : ['run', 'build', '--profile', 'local'], buildEnv, REPOSITORY_ROOT)
+   let preparationFailure: { error: unknown } | undefined
+   const executePreparation = async (args: readonly string[], env: NodeJS.ProcessEnv, cwd?: string): Promise<void> => {
+     if (preparationFailure !== undefined) throw preparationFailure.error
+@@ -488,7 +506,8 @@ export async function packageTarget(
+   const pack = async (): Promise<void> => {
+     await executePreparation([
+       ...(invocation.unsigned
+-        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts']
++        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts',
++            ...(target.platform === 'linux' ? ['--client-profile', 'official'] : [])]
+         : ['run', 'release:pack', '--family', 'dsh']),
+       '--out', buildPaths.packedDsh, ...packArguments,
+     ], buildEnv, REPOSITORY_ROOT)
+diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
+index a0698880..582bab42 100644
+--- a/apps/desktop/scripts/prepare-dsh.ts
++++ b/apps/desktop/scripts/prepare-dsh.ts
+@@ -32,9 +32,10 @@ import {
+ import {
+   signMacOSRuntime,
+ } from './macos-runtime.ts'
+-import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
++import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
+ import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
+ import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
++import { fixLibreOfficeEngineFallback } from './linux-hotfix-libreoffice-kit.ts'
+ 
+ const APP_ROOT = resolve(import.meta.dirname, '..')
+ const BUILD_PATHS = resolveDesktopTargetBuildPaths()
+@@ -44,7 +45,8 @@ const STORE_ROOT = BUILD_PATHS.pnpmStore
+ const RUNTIME_ROOT = BUILD_PATHS.runtime
+ const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
+ const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
+-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
++const TARGET = resolveDesktopBuildTarget()
++const NODE = join(BUILD_PATHS.electron, desktopElectronExecutablePath(TARGET))
+ const PNPM = join(RUNTIME_ROOT, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs')
+ 
+ function manifestVersion(path: string, subject: string): string {
+@@ -155,6 +157,12 @@ async function main(): Promise<void> {
+       name: '@deepseek-ai/dsh-desktop-runtime', private: true, version: release.version, type: 'module',
+       dependencies: Object.fromEntries(packageSet.packages.map(entry => [entry.name, entry.version])),
+     }, undefined, 2)}\n`)
++    // Electron 的 ASAR 文件系统让 lstatSync 对缺失项返回 null 而不是 undefined；不修就会把
++    // 未安装的原生 LibreOfficeKit 引擎当成已安装，Linux 永远退不到随包携带的 WASM 引擎。
++    if (target.platform === 'linux') {
++      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:linux-adjustments',
++        async () => { fixLibreOfficeEngineFallback(DSH_OUTPUT_ROOT) })
 +    }
-+    expect(() => {
-+      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA, DSH_DESKTOP_TARGET_FORMATS: 'AppImage,deb,rpm' }, LINUX, { unsigned: true })
-+    }).not.toThrow()
-+    expect(() => {
-+      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA, DSH_DESKTOP_TARGET_FORMATS: 'rpm', DSH_DESKTOP_LINUX_HOMEPAGE: 'not-a-url' }, LINUX, { unsigned: true })
-+    }).toThrow(/DSH_DESKTOP_LINUX_HOMEPAGE/u)
-+    expect(() => {
-+      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA }, LINUX)
-+    }).toThrow(/unsigned/u)
-+  })
-+
-   it('rejects incomplete macOS identity and credentials and checks referenced files without contacting Apple', async () => {
-     expect(() => {
-       validateDesktopPackageEnvironment(RELEASE, MACOS)
-diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 081a90e..faeba5b 100644
---- a/apps/desktop/package.json
-+++ b/apps/desktop/package.json
-@@ -38,6 +38,8 @@
-     "package:win:x64": "tsx scripts/package-target.ts win-x64",
-     "package:win:x64:unsigned": "tsx scripts/package-target.ts win-x64 --unsigned",
-     "package:win:x64:dir": "tsx scripts/package-target.ts win-x64 --dir",
-+    "package:linux:x64": "tsx scripts/package-target.ts linux-x64 --unsigned",
-+    "package:linux:x64:dir": "tsx scripts/package-target.ts linux-x64 --unsigned --dir",
-     "upload:mac:arm64": "tsx scripts/upload-target.ts mac-arm64",
-     "upload:mac:x64": "tsx scripts/upload-target.ts mac-x64",
-     "upload:win:x64": "tsx scripts/upload-target.ts win-x64",
+     for (const file of DESKTOP_HOST_RUNTIME_FILES) {
+       if (!existsSync(join(DSH_OUTPUT_ROOT, 'node_modules', DESKTOP_HOST_PACKAGE, file))) {
+         throw new Error(`desktop runtime: missing private Host file ${file}`)
+diff --git a/apps/desktop/scripts/prepare-runtime.ts b/apps/desktop/scripts/prepare-runtime.ts
+index 4e338532..abccdf5f 100644
+--- a/apps/desktop/scripts/prepare-runtime.ts
++++ b/apps/desktop/scripts/prepare-runtime.ts
+@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
+ import { downloadArtifact } from '@electron/get'
+ import extractZip from 'extract-zip'
+ import { readPrimaryRuntime } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
+-import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
++import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
+ import { packagingStep } from './packaging-step.mjs'
+ import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
+ import { prepareDesktopCli } from './prepare-cli.ts'
+@@ -17,23 +17,24 @@ import { prepareCommandLink } from './prepare-command-link.ts'
+ const BUILD_PATHS = resolveDesktopTargetBuildPaths()
+ const RUNTIME_ROOT = BUILD_PATHS.runtime
+ 
+-type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
++type DesktopBuildTarget = ReturnType<typeof resolveDesktopBuildTarget>
+ 
+ /** Extract the target Electron distribution and return its embedded Node version. */
+-async function prepareElectron({ platform, arch }: DesktopTarget): Promise<string> {
++async function prepareElectron(target: DesktopBuildTarget): Promise<string> {
+   const require = createRequire(import.meta.url)
+   const { version } = require('electron/package.json') as { version: string }
++  const { platform, arch } = desktopTargetPlatform(target)
+   const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',
+     () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
+   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
+   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
+-  const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
++  const executable = join(BUILD_PATHS.electron, desktopElectronExecutablePath(target))
+   return execFileSync(executable, ['-p', 'process.versions.node'], {
+     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   }).trim()
+ }
+ 
+-function prepareCli({ platform, arch }: DesktopTarget): void {
++function prepareCli({ platform, arch }: { platform: 'darwin' | 'win32'; arch: 'arm64' | 'x64' }): void {
+   cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
+   chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
+   const cli = join(RUNTIME_ROOT, 'cli')
+@@ -50,24 +51,32 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
+ 
+ async function main(): Promise<void> {
+   const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
+-  const target = desktopTargetPlatform(resolveDesktopBuildTarget())
++  const targetName = resolveDesktopBuildTarget()
++  const target = desktopTargetPlatform(targetName)
+   rmSync(RUNTIME_ROOT, { recursive: true, force: true })
+   mkdirSync(RUNTIME_ROOT, { recursive: true })
+   const preparePrimary = () => packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
+     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
+   let nodeVersion: string
+   if (target.platform === 'win32') {
+-    const [electron, primary] = await Promise.allSettled([prepareElectron(target), preparePrimary()])
++    const [electron, primary] = await Promise.allSettled([prepareElectron(targetName), preparePrimary()])
+     if (electron.status === 'rejected') throw electron.reason
+     if (primary.status === 'rejected') throw primary.reason
+     nodeVersion = electron.value
+   } else {
+-    nodeVersion = await prepareElectron(target)
++    nodeVersion = await prepareElectron(targetName)
+     await preparePrimary()
+   }
+   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
+   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
+-  await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })
++  // The node shell launcher serves package scripts on every target; the terminal launcher is macOS and
++  // Windows only, because the shipped `cli/dsh` execs the macOS bundle through `../MacOS/`.
++  cpSync(join(import.meta.dirname, 'node-bin'), join(RUNTIME_ROOT, 'bin'), { recursive: true })
++  chmodSync(join(RUNTIME_ROOT, 'bin', 'node'), 0o755)
++  if (target.platform !== 'linux') {
++    const { platform, arch } = target
++    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli({ platform, arch }) })
++  }
+   writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
+     schemaVersion: 1,
+     node: nodeVersion,
+diff --git a/apps/desktop/scripts/smoke-packaged-runtime.ts b/apps/desktop/scripts/smoke-packaged-runtime.ts
+index 6c3c12c8..0ae20f99 100644
+--- a/apps/desktop/scripts/smoke-packaged-runtime.ts
++++ b/apps/desktop/scripts/smoke-packaged-runtime.ts
+@@ -13,9 +13,12 @@ const target = resolveDesktopBuildTarget()
+ const windows = target === 'win-x64'
+ const artifacts = desktopArtifactOutput(paths, { unsigned: values.unsigned, skipNotarization: values['skip-notarization'] }).directory
+ const application = windows ? join(artifacts, 'win-unpacked')
+-  : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
+-const resources = join(application, windows ? 'resources' : 'Resources')
+-const executable = windows ? join(application, 'DeepSeek Harness.exe') : join(application, 'MacOS', 'DeepSeek Harness')
++  : target === 'linux-x64' ? join(artifacts, 'linux-unpacked')
++    : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
++const resources = join(application, windows || target === 'linux-x64' ? 'resources' : 'Resources')
++const executable = windows ? join(application, 'DeepSeek Harness.exe')
++  : target === 'linux-x64' ? join(application, 'deepseek-harness')
++    : join(application, 'MacOS', 'DeepSeek Harness')
+ const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(paths.dsh).release.version,
+   resolveDesktopPackageTarget(target))
+ if (windows && !values.unsigned) await verifyWindowsCode(application)
 diff --git a/apps/desktop/tests/desktop-auto-update-environment.spec.ts b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-index 9fbe629..5077021 100644
+index 9fbe629c..50770217 100644
 --- a/apps/desktop/tests/desktop-auto-update-environment.spec.ts
 +++ b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
 @@ -107,8 +107,9 @@ describe('desktop auto-update environment', () => {
@@ -602,8 +833,65 @@ index 9fbe629..5077021 100644
    })
  
    it('uses Nightly metadata for stable and prerelease Desktop versions', () => {
+diff --git a/apps/desktop/tests/desktop-build-commit.spec.ts b/apps/desktop/tests/desktop-build-commit.spec.ts
+index 57016a5e..2c7dd460 100644
+--- a/apps/desktop/tests/desktop-build-commit.spec.ts
++++ b/apps/desktop/tests/desktop-build-commit.spec.ts
+@@ -1,7 +1,7 @@
+ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+ import { tmpdir } from 'node:os'
+ import { join } from 'node:path'
+-import { afterEach, describe, expect, it } from 'vitest'
++import { afterEach, describe, expect, it, vi } from 'vitest'
+ import {
+   DESKTOP_BUILD_COMMIT_ENV,
+   DESKTOP_BUILD_DIRTY_ENV,
+@@ -45,6 +45,43 @@ describe('desktop build commit', () => {
+     expect(packaged.commit).toMatch(/^[0-9a-f]{40}$/u)
+     expect(typeof packaged.dirty).toBe('boolean')
+   })
++
++  it('prefers the recorded commit over the checkout the directory sits in', () => {
++    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, COMMIT)
++    vi.stubEnv(DESKTOP_BUILD_DIRTY_ENV, '0')
++    try {
++      expect(readDesktopBuildCommit(join(import.meta.dirname, '..', '..', '..')))
++        .toEqual({ commit: COMMIT, dirty: false })
++    }
++    finally {
++      vi.unstubAllEnvs()
++    }
++  })
++
++  it('reads the recorded commit where the directory is not a checkout', async () => {
++    const directory = await mkdtemp(join(tmpdir(), 'dsh-release-archive-'))
++    directories.push(directory)
++    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, COMMIT)
++    vi.stubEnv(DESKTOP_BUILD_DIRTY_ENV, '1')
++    try {
++      expect(readDesktopBuildCommit(directory)).toEqual({ commit: COMMIT, dirty: true })
++    }
++    finally {
++      vi.unstubAllEnvs()
++    }
++  })
++
++  it('rejects a directory that is neither a checkout nor carries a recorded commit', async () => {
++    const directory = await mkdtemp(join(tmpdir(), 'dsh-release-archive-'))
++    directories.push(directory)
++    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, '')
++    try {
++      expect(() => readDesktopBuildCommit(directory)).toThrow(/is not a Git checkout/u)
++    }
++    finally {
++      vi.unstubAllEnvs()
++    }
++  })
+ })
+ 
+ describe('desktop toolchain preflight', () => {
 diff --git a/apps/desktop/tests/desktop-build-paths.spec.ts b/apps/desktop/tests/desktop-build-paths.spec.ts
-index f9891eb..1e9cadd 100644
+index f9891ebb..1e9caddf 100644
 --- a/apps/desktop/tests/desktop-build-paths.spec.ts
 +++ b/apps/desktop/tests/desktop-build-paths.spec.ts
 @@ -1,6 +1,7 @@
@@ -641,213 +929,9 @@ index f9891eb..1e9cadd 100644
 +    expect(desktopElectronExecutablePath('linux-x64')).toBe('electron')
    })
  })
-diff --git a/apps/desktop/tests/package-target.spec.ts b/apps/desktop/tests/package-target.spec.ts
-index ba647d7..e4f74d0 100644
---- a/apps/desktop/tests/package-target.spec.ts
-+++ b/apps/desktop/tests/package-target.spec.ts
-@@ -26,7 +26,11 @@ describe('desktop package target', () => {
-   })
- 
-   it('rejects unsupported targets and hosts before building', () => {
--    expect(() => resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toThrow(/unsupported target/u)
-+    expect(resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toMatchObject({
-+      platform: 'linux', arch: 'x64', builderPlatform: '--linux', builderArch: '--x64',
-+    })
-+    expect(() => resolveDesktopPackageTarget('freebsd-x64', 'linux', 'x64')).toThrow(/unsupported target/u)
-+    expect(() => resolveDesktopPackageTarget('linux-x64', 'darwin', 'x64')).toThrow(/Linux build host/u)
-     expect(() => resolveDesktopPackageTarget('win-x64', 'darwin', 'arm64')).toThrow(/Windows x64/u)
-     expect(() => resolveDesktopPackageTarget('mac-arm64', 'darwin', 'x64')).toThrow(/Apple Silicon/u)
-     expect(() => resolveDesktopPackageTarget('mac-arm64', 'linux', 'arm64')).toThrow(/macOS/u)
-diff --git a/apps/desktop/scripts/desktop-policy-environment.d.mts b/apps/desktop/scripts/desktop-policy-environment.d.mts
-index 7b2230a..18878cd 100644
---- a/apps/desktop/scripts/desktop-policy-environment.d.mts
-+++ b/apps/desktop/scripts/desktop-policy-environment.d.mts
-@@ -7,6 +7,13 @@ export interface DesktopPolicyEnvironment {
-   [key: string]: unknown
- }
- 
-+/**
-+ * Report whether one release target embeds and polls the mandatory-update policy.
-+ * @param platform Target platform.
-+ * @returns True when the target embeds the policy.
-+ */
-+export function desktopPlatformEmbedsPolicy(platform: NodeJS.Platform): boolean
-+
- /**
-  * Resolve policy settings before artifact preparation or signing.
-  * @param environment File-owned release settings; only the selected origin is required.
-diff --git a/apps/desktop/scripts/desktop-policy-environment.mjs b/apps/desktop/scripts/desktop-policy-environment.mjs
-index 5911475..5df4e46 100644
---- a/apps/desktop/scripts/desktop-policy-environment.mjs
-+++ b/apps/desktop/scripts/desktop-policy-environment.mjs
-@@ -10,6 +10,17 @@ function origin(value, name) {
-   return url.origin
- }
- 
-+/**
-+ * Report whether one release target embeds and polls the mandatory-update policy.
-+ * The policy service identifies its Desktop clients as desktop-win or desktop-mac and has no Linux
-+ * identity, and a Linux release carries no update channel, so no policy decision could drive an action.
-+ * @param {NodeJS.Platform} platform Target platform.
-+ * @returns {boolean} True when the target embeds the policy.
-+ */
-+export function desktopPlatformEmbedsPolicy(platform) {
-+  return platform !== 'linux'
-+}
-+
- /**
-  * Resolve mandatory policy metadata before preparing artifacts or accessing signing hardware.
-  * @param {NodeJS.ProcessEnv} environment File-owned release settings; the unselected origin is not required.
-diff --git a/apps/desktop/tests/desktop-policy-environment.spec.ts b/apps/desktop/tests/desktop-policy-environment.spec.ts
-index be5b4ed..114abca 100644
---- a/apps/desktop/tests/desktop-policy-environment.spec.ts
-+++ b/apps/desktop/tests/desktop-policy-environment.spec.ts
-@@ -1,5 +1,5 @@
- import { expect, it } from 'vitest'
--import { resolveDesktopPolicyEnvironment } from '../scripts/desktop-policy-environment.mjs'
-+import { desktopPlatformEmbedsPolicy, resolveDesktopPolicyEnvironment } from '../scripts/desktop-policy-environment.mjs'
- import { validateDesktopPackageEnvironment } from '../scripts/desktop-package-environment.mjs'
- import { resolveDesktopPolicyConfig } from '../src/mandatory-update-policy.ts'
- 
-@@ -58,3 +58,20 @@ it.each([{ unsigned: true }, { prepareOnly: true }, {}])('requires policy outsid
-       .toThrow('DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN')
-   }
- })
-+
-+it('embeds the policy on the targets the policy service identifies and none on Linux', () => {
-+  expect(['win32', 'darwin'].map(platform => desktopPlatformEmbedsPolicy(platform as NodeJS.Platform))).toEqual([true, true])
-+  expect(desktopPlatformEmbedsPolicy('linux')).toBe(false)
-+})
-+
-+it('requires no policy origin on Linux, which embeds no policy', () => {
-+  for (const options of [{ unsigned: true }, { unsigned: true, prepareOnly: true }]) {
-+    expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform: 'linux', arch: 'x64' }, options) })
-+      .not.toThrow()
-+  }
-+})
-+
-+it('refuses a signed Linux build, which has no signature or update channel to configure', () => {
-+  expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform: 'linux', arch: 'x64' }, {}) })
-+    .toThrow('Linux artifacts are unsigned')
-+})
-diff --git a/apps/desktop/scripts/desktop-linux-packages.d.mts b/apps/desktop/scripts/desktop-linux-packages.d.mts
-new file mode 100644
-index 0000000..96c6e2d
---- /dev/null
-+++ b/apps/desktop/scripts/desktop-linux-packages.d.mts
-@@ -0,0 +1,34 @@
-+/** Linux package formats and the control metadata the Debian and RPM formats carry. */
-+
-+/** Environment variable that selects the Linux package formats one packaging run emits. */
-+export const LINUX_FORMATS_ENV: string
-+
-+/** Environment variable that supplies the maintainer recorded in the Debian and RPM control files. */
-+export const LINUX_MAINTAINER_ENV: string
-+
-+/** Environment variable that supplies the project URL recorded in the Debian and RPM control files. */
-+export const LINUX_HOMEPAGE_ENV: string
-+
-+/** Maintainer and project URL recorded in a Debian or RPM control file. */
-+export interface DesktopLinuxPackageMetadata {
-+  maintainer: string
-+  homepage: string
-+}
-+
-+/**
-+ * Resolve the Linux package formats this run emits.
-+ * @param environment Packaging environment.
-+ * @returns Format names in build order, without duplicates; AppImage unless configured.
-+ */
-+export function resolveDesktopLinuxFormats(environment?: NodeJS.ProcessEnv): string[]
-+
-+/**
-+ * Resolve the control metadata the selected formats carry.
-+ * @param environment File-owned release settings.
-+ * @param formats Formats this run emits; defaults to the resolved selection.
-+ * @returns Metadata, or undefined when no selected format carries any.
-+ */
-+export function resolveDesktopLinuxPackageMetadata(
-+  environment?: NodeJS.ProcessEnv,
-+  formats?: string[],
-+): DesktopLinuxPackageMetadata | undefined
-diff --git a/apps/desktop/scripts/desktop-linux-packages.mjs b/apps/desktop/scripts/desktop-linux-packages.mjs
-new file mode 100644
-index 0000000..fd4e588
---- /dev/null
-+++ b/apps/desktop/scripts/desktop-linux-packages.mjs
-@@ -0,0 +1,69 @@
-+/** Select the Linux package formats one run emits and resolve the control metadata they carry. */
-+
-+/** Environment variable that selects the Linux package formats one packaging run emits. */
-+export const LINUX_FORMATS_ENV = 'DSH_DESKTOP_TARGET_FORMATS'
-+
-+/** Environment variable that supplies the maintainer recorded in the Debian and RPM control files. */
-+export const LINUX_MAINTAINER_ENV = 'DSH_DESKTOP_LINUX_MAINTAINER'
-+
-+/** Environment variable that supplies the project URL recorded in the Debian and RPM control files. */
-+export const LINUX_HOMEPAGE_ENV = 'DSH_DESKTOP_LINUX_HOMEPAGE'
-+
-+const DEFAULT_FORMATS = ['AppImage']
-+
-+// fpm builds these from a control file that names a maintainer and a project URL, and refuses to
-+// build either format without them.
-+const METADATA_FORMATS = new Set(['deb', 'rpm'])
-+
-+const MAINTAINER = /^[^<>]+<[^<>\s]+@[^<>\s]+>$/u
-+
-+/**
-+ * Resolve the Linux package formats this run emits.
-+ * @param {NodeJS.ProcessEnv} environment Packaging environment.
-+ * @returns {string[]} Format names in build order, without duplicates; AppImage unless configured.
-+ */
-+export function resolveDesktopLinuxFormats(environment = process.env) {
-+  const configured = environment[LINUX_FORMATS_ENV]
-+  if (configured === undefined || configured.trim() === '') return DEFAULT_FORMATS
-+  const formats = configured.split(',').map(format => format.trim())
-+  if (formats.some(format => format === '')) {
-+    throw new Error(`desktop package: ${LINUX_FORMATS_ENV} must be a comma-separated list of target names without empty entries`)
-+  }
-+  return [...new Set(formats)]
-+}
-+
-+/**
-+ * Resolve the control metadata the selected formats carry.
-+ * @param {NodeJS.ProcessEnv} environment File-owned release settings.
-+ * @param {string[]} formats Formats this run emits; defaults to the resolved selection.
-+ * @returns {{ maintainer: string, homepage: string } | undefined} Metadata, or undefined when no selected format carries any.
-+ */
-+export function resolveDesktopLinuxPackageMetadata(environment = process.env, formats = resolveDesktopLinuxFormats(environment)) {
-+  const requiring = formats.filter(format => METADATA_FORMATS.has(format))
-+  if (requiring.length === 0) return undefined
-+  const maintainer = environment[LINUX_MAINTAINER_ENV]?.trim() ?? ''
-+  const homepage = environment[LINUX_HOMEPAGE_ENV]?.trim() ?? ''
-+  const problems = []
-+  if (!MAINTAINER.test(maintainer)) {
-+    problems.push(`${LINUX_MAINTAINER_ENV} must be "Name <email>", the maintainer of this package rather than the upstream author`)
-+  }
-+  if (!isAbsoluteHttpUrl(homepage)) {
-+    problems.push(`${LINUX_HOMEPAGE_ENV} must be an absolute http or https URL`)
-+  }
-+  if (problems.length > 0) {
-+    const listed = requiring.join(' and ')
-+    throw new Error(`desktop package: ${listed} ${requiring.length === 1 ? 'carries' : 'carry'} a maintainer and a project URL:\n${
-+      problems.map(problem => `  ${problem}`).join('\n')}`)
-+  }
-+  return { maintainer, homepage }
-+}
-+
-+function isAbsoluteHttpUrl(value) {
-+  let url
-+  try { url = new URL(value) }
-+  catch {
-+    // The URL parser rejects every relative or malformed value, which is what this predicate reports.
-+    return false
-+  }
-+  return url.protocol === 'https:' || url.protocol === 'http:'
-+}
 diff --git a/apps/desktop/tests/desktop-linux-packages.spec.ts b/apps/desktop/tests/desktop-linux-packages.spec.ts
 new file mode 100644
-index 0000000..1e0a341
+index 00000000..1e0a341f
 --- /dev/null
 +++ b/apps/desktop/tests/desktop-linux-packages.spec.ts
 @@ -0,0 +1,75 @@
@@ -926,211 +1010,114 @@ index 0000000..1e0a341
 +      .toThrow(/^desktop package: rpm carries a maintainer and a project URL:/u)
 +  })
 +})
-diff --git a/apps/desktop/scripts/desktop-build-commit.d.mts b/apps/desktop/scripts/desktop-build-commit.d.mts
-index 82118e2..57a792c 100644
---- a/apps/desktop/scripts/desktop-build-commit.d.mts
-+++ b/apps/desktop/scripts/desktop-build-commit.d.mts
-@@ -11,7 +11,7 @@ export const DESKTOP_BUILD_COMMIT_ENV: 'DSH_DESKTOP_BUILD_COMMIT'
- export const DESKTOP_BUILD_DIRTY_ENV: 'DSH_DESKTOP_BUILD_DIRTY'
+diff --git a/apps/desktop/tests/desktop-package-environment.spec.ts b/apps/desktop/tests/desktop-package-environment.spec.ts
+index a8d79a2c..59d64e65 100644
+--- a/apps/desktop/tests/desktop-package-environment.spec.ts
++++ b/apps/desktop/tests/desktop-package-environment.spec.ts
+@@ -7,6 +7,11 @@ import { resolveWindowsPackageSettings } from '../scripts/windows-package-settin
  
- /**
-- * Read the checkout's current commit and whether it carries uncommitted changes.
-+ * Read the commit being packaged and whether its tree carried uncommitted changes.
-  * @param repositoryRoot - Directory to inspect.
-  * @returns The commit being packaged and whether its tree was modified.
-  */
-diff --git a/apps/desktop/scripts/desktop-build-commit.mjs b/apps/desktop/scripts/desktop-build-commit.mjs
-index 28d7cda..3cb1964 100644
---- a/apps/desktop/scripts/desktop-build-commit.mjs
-+++ b/apps/desktop/scripts/desktop-build-commit.mjs
-@@ -7,7 +7,7 @@
-  * child process, which run against a build tree rather than a checkout.
-  */
- 
--import { execFileSync } from 'node:child_process'
-+import { execFileSync, spawnSync } from 'node:child_process'
- 
- /** Environment variable that carries the packaged commit. */
- export const DESKTOP_BUILD_COMMIT_ENV = 'DSH_DESKTOP_BUILD_COMMIT'
-@@ -16,11 +16,29 @@ export const DESKTOP_BUILD_COMMIT_ENV = 'DSH_DESKTOP_BUILD_COMMIT'
- export const DESKTOP_BUILD_DIRTY_ENV = 'DSH_DESKTOP_BUILD_DIRTY'
- 
- /**
-- * Read the checkout's current commit and whether it carries uncommitted changes.
-+ * Read the commit being packaged and whether its tree carried uncommitted changes.
-+ *
-+ * A packaging run records the pair once and passes it to every child process, which run against a
-+ * build tree rather than a checkout — a build tree that happens to sit inside an unrelated checkout
-+ * would otherwise be mistaken for the sources being packaged. With no recording, read the checkout;
-+ * a directory that is neither refuses the build.
-  * @param {string} repositoryRoot - Directory to inspect.
-  * @returns {{ commit: string, dirty: boolean }} The commit being packaged and whether its tree was modified.
-  */
- export function readDesktopBuildCommit(repositoryRoot) {
-+  const recorded = resolveDesktopBuildCommit(process.env)
-+  if (recorded !== undefined) return recorded
-+  const probe = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
-+    cwd: repositoryRoot,
-+    encoding: 'utf8',
-+    stdio: ['ignore', 'pipe', 'ignore'],
-+  })
-+  if (probe.error !== undefined || probe.status !== 0 || probe.stdout.trim() !== 'true') {
-+    throw new Error(
-+      `desktop build commit: ${repositoryRoot} is not a Git checkout; `
-+      + `set ${DESKTOP_BUILD_COMMIT_ENV} and ${DESKTOP_BUILD_DIRTY_ENV} to package it`,
-+    )
-+  }
-   const git = (args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim()
-   return {
-     commit: git(['rev-parse', 'HEAD']),
-diff --git a/apps/desktop/tests/desktop-build-commit.spec.ts b/apps/desktop/tests/desktop-build-commit.spec.ts
-index 57016a5..2c7dd46 100644
---- a/apps/desktop/tests/desktop-build-commit.spec.ts
-+++ b/apps/desktop/tests/desktop-build-commit.spec.ts
-@@ -1,7 +1,7 @@
- import { mkdtemp, rm, writeFile } from 'node:fs/promises'
- import { tmpdir } from 'node:os'
- import { join } from 'node:path'
--import { afterEach, describe, expect, it } from 'vitest'
-+import { afterEach, describe, expect, it, vi } from 'vitest'
- import {
-   DESKTOP_BUILD_COMMIT_ENV,
-   DESKTOP_BUILD_DIRTY_ENV,
-@@ -45,6 +45,43 @@ describe('desktop build commit', () => {
-     expect(packaged.commit).toMatch(/^[0-9a-f]{40}$/u)
-     expect(typeof packaged.dirty).toBe('boolean')
+ const WINDOWS = { platform: 'win32', arch: 'x64' } as const
+ const MACOS = { platform: 'darwin', arch: 'arm64' } as const
++const LINUX = { platform: 'linux', arch: 'x64' } as const
++const LINUX_METADATA = {
++  DSH_DESKTOP_LINUX_MAINTAINER: 'ffyfox <299493445+ffyfox@users.noreply.github.com>',
++  DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/deepseek-ai/deepseek-harness',
++}
+ const POLICY = { DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
+   DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }) }
+ const RELEASE = { ...POLICY, DSH_DESKTOP_APP_ID: 'com.example.desktop', DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com',
+@@ -276,6 +281,45 @@ describe('Desktop local packaging configuration', () => {
+     }
    })
-+
-+  it('prefers the recorded commit over the checkout the directory sits in', () => {
-+    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, COMMIT)
-+    vi.stubEnv(DESKTOP_BUILD_DIRTY_ENV, '0')
-+    try {
-+      expect(readDesktopBuildCommit(join(import.meta.dirname, '..', '..', '..')))
-+        .toEqual({ commit: COMMIT, dirty: false })
-+    }
-+    finally {
-+      vi.unstubAllEnvs()
-+    }
+ 
++  it('owns the Linux package metadata in the Linux file and keeps ambient values out', async () => {
++    await withDirectory(async (directory) => {
++      const parent = { ...LINUX_METADATA, DSH_DESKTOP_LINUX_MAINTAINER: 'stale <stale@example.com>' }
++      await writeFile(join(directory, '.env.linux'), `DSH_DESKTOP_APP_ID=com.example.linux\nDSH_DESKTOP_LINUX_MAINTAINER="${LINUX_METADATA.DSH_DESKTOP_LINUX_MAINTAINER}"\nDSH_DESKTOP_LINUX_HOMEPAGE=https://github.com/example/project\n`)
++      expect(loadDesktopPackageEnvironment('linux', parent, directory)).toEqual({
++        DSH_DESKTOP_APP_ID: 'com.example.linux',
++        DSH_DESKTOP_LINUX_MAINTAINER: LINUX_METADATA.DSH_DESKTOP_LINUX_MAINTAINER,
++        DSH_DESKTOP_LINUX_HOMEPAGE: 'https://github.com/example/project',
++      })
++      expect(parent.DSH_DESKTOP_LINUX_MAINTAINER).toBe('stale <stale@example.com>')
++      // The format selection is a per-invocation build selector, so the file must not own it.
++      await writeFile(join(directory, '.env.linux'), 'DSH_DESKTOP_TARGET_FORMATS=deb\n')
++      expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).toThrow(/unsupported setting DSH_DESKTOP_TARGET_FORMATS/u)
++      await writeFile(join(directory, '.env.linux'), 'APPLE_APP_SPECIFIC_PASSWORD=secret-sentinel\n')
++      expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).toThrow(/unsupported setting APPLE_APP_SPECIFIC_PASSWORD/u)
++    })
 +  })
 +
-+  it('reads the recorded commit where the directory is not a checkout', async () => {
-+    const directory = await mkdtemp(join(tmpdir(), 'dsh-release-archive-'))
-+    directories.push(directory)
-+    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, COMMIT)
-+    vi.stubEnv(DESKTOP_BUILD_DIRTY_ENV, '1')
-+    try {
-+      expect(readDesktopBuildCommit(directory)).toEqual({ commit: COMMIT, dirty: true })
++  it('requires the Linux package metadata only for the formats that carry a control file', () => {
++    const release = { DSH_DESKTOP_APP_ID: RELEASE.DSH_DESKTOP_APP_ID }
++    expect(() => {
++      validateDesktopPackageEnvironment(release, LINUX, { unsigned: true })
++    }).not.toThrow()
++    for (const formats of ['deb', 'rpm', 'AppImage,rpm']) {
++      expect(() => {
++        validateDesktopPackageEnvironment({ ...release, DSH_DESKTOP_TARGET_FORMATS: formats }, LINUX, { unsigned: true })
++      }).toThrow(/DSH_DESKTOP_LINUX_MAINTAINER/u)
 +    }
-+    finally {
-+      vi.unstubAllEnvs()
-+    }
++    expect(() => {
++      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA, DSH_DESKTOP_TARGET_FORMATS: 'AppImage,deb,rpm' }, LINUX, { unsigned: true })
++    }).not.toThrow()
++    expect(() => {
++      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA, DSH_DESKTOP_TARGET_FORMATS: 'rpm', DSH_DESKTOP_LINUX_HOMEPAGE: 'not-a-url' }, LINUX, { unsigned: true })
++    }).toThrow(/DSH_DESKTOP_LINUX_HOMEPAGE/u)
++    expect(() => {
++      validateDesktopPackageEnvironment({ ...release, ...LINUX_METADATA }, LINUX)
++    }).toThrow(/unsigned/u)
 +  })
 +
-+  it('rejects a directory that is neither a checkout nor carries a recorded commit', async () => {
-+    const directory = await mkdtemp(join(tmpdir(), 'dsh-release-archive-'))
-+    directories.push(directory)
-+    vi.stubEnv(DESKTOP_BUILD_COMMIT_ENV, '')
-+    try {
-+      expect(() => readDesktopBuildCommit(directory)).toThrow(/is not a Git checkout/u)
-+    }
-+    finally {
-+      vi.unstubAllEnvs()
-+    }
-+  })
- })
+   it('rejects incomplete macOS identity and credentials and checks referenced files without contacting Apple', async () => {
+     expect(() => {
+       validateDesktopPackageEnvironment(RELEASE, MACOS)
+diff --git a/apps/desktop/tests/desktop-policy-environment.spec.ts b/apps/desktop/tests/desktop-policy-environment.spec.ts
+index be5b4ede..114abcaf 100644
+--- a/apps/desktop/tests/desktop-policy-environment.spec.ts
++++ b/apps/desktop/tests/desktop-policy-environment.spec.ts
+@@ -1,5 +1,5 @@
+ import { expect, it } from 'vitest'
+-import { resolveDesktopPolicyEnvironment } from '../scripts/desktop-policy-environment.mjs'
++import { desktopPlatformEmbedsPolicy, resolveDesktopPolicyEnvironment } from '../scripts/desktop-policy-environment.mjs'
+ import { validateDesktopPackageEnvironment } from '../scripts/desktop-package-environment.mjs'
+ import { resolveDesktopPolicyConfig } from '../src/mandatory-update-policy.ts'
  
- describe('desktop toolchain preflight', () => {
-diff --git a/apps/desktop/scripts/smoke-packaged-runtime.ts b/apps/desktop/scripts/smoke-packaged-runtime.ts
-index 6c3c12c8..0ae20f99 100644
---- a/apps/desktop/scripts/smoke-packaged-runtime.ts
-+++ b/apps/desktop/scripts/smoke-packaged-runtime.ts
-@@ -13,9 +13,12 @@ const target = resolveDesktopBuildTarget()
- const windows = target === 'win-x64'
- const artifacts = desktopArtifactOutput(paths, { unsigned: values.unsigned, skipNotarization: values['skip-notarization'] }).directory
- const application = windows ? join(artifacts, 'win-unpacked')
--  : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
--const resources = join(application, windows ? 'resources' : 'Resources')
--const executable = windows ? join(application, 'DeepSeek Harness.exe') : join(application, 'MacOS', 'DeepSeek Harness')
-+  : target === 'linux-x64' ? join(artifacts, 'linux-unpacked')
-+    : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
-+const resources = join(application, windows || target === 'linux-x64' ? 'resources' : 'Resources')
-+const executable = windows ? join(application, 'DeepSeek Harness.exe')
-+  : target === 'linux-x64' ? join(application, 'deepseek-harness')
-+    : join(application, 'MacOS', 'DeepSeek Harness')
- const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(paths.dsh).release.version,
-   resolveDesktopPackageTarget(target))
- if (windows && !values.unsigned) await verifyWindowsCode(application)
-diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
-index 1ea25ced..582bab42 100644
---- a/apps/desktop/scripts/prepare-dsh.ts
-+++ b/apps/desktop/scripts/prepare-dsh.ts
-@@ -35,6 +35,7 @@ import {
- import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
- import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
- import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
-+import { fixLibreOfficeEngineFallback } from './linux-hotfix-libreoffice-kit.ts'
- 
- const APP_ROOT = resolve(import.meta.dirname, '..')
- const BUILD_PATHS = resolveDesktopTargetBuildPaths()
-@@ -156,6 +157,12 @@ async function main(): Promise<void> {
-       name: '@deepseek-ai/dsh-desktop-runtime', private: true, version: release.version, type: 'module',
-       dependencies: Object.fromEntries(packageSet.packages.map(entry => [entry.name, entry.version])),
-     }, undefined, 2)}\n`)
-+    // Electron 的 ASAR 文件系统让 lstatSync 对缺失项返回 null 而不是 undefined；不修就会把
-+    // 未安装的原生 LibreOfficeKit 引擎当成已安装，Linux 永远退不到随包携带的 WASM 引擎。
-+    if (target.platform === 'linux') {
-+      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:linux-adjustments',
-+        async () => { fixLibreOfficeEngineFallback(DSH_OUTPUT_ROOT) })
-+    }
-     for (const file of DESKTOP_HOST_RUNTIME_FILES) {
-       if (!existsSync(join(DSH_OUTPUT_ROOT, 'node_modules', DESKTOP_HOST_PACKAGE, file))) {
-         throw new Error(`desktop runtime: missing private Host file ${file}`)
-diff --git a/apps/desktop/scripts/pack-local-packages.ts b/apps/desktop/scripts/pack-local-packages.ts
-index 79136479..1f0358d4 100644
---- a/apps/desktop/scripts/pack-local-packages.ts
-+++ b/apps/desktop/scripts/pack-local-packages.ts
-@@ -12,13 +12,14 @@ import { packFamilyMembers, parsePackConcurrency } from '../../../scripts/releas
- 
- async function main(): Promise<void> {
-   const { values } = parseArgs({
--    options: { out: { type: 'string' }, concurrency: { type: 'string' } },
-+    options: { out: { type: 'string' }, concurrency: { type: 'string' }, 'client-profile': { type: 'string' } },
-     allowPositionals: false,
-   })
-   if (values.out === undefined) throw new Error('desktop local pack: --out must name the package staging directory')
-   const concurrency = parsePackConcurrency(values.concurrency)
-   const root = process.cwd()
--  const environment = resolveClientBuildEnvironment(repositoryClientBuildEnvironment(root), 'local')
-+  const environment = resolveClientBuildEnvironment(repositoryClientBuildEnvironment(root),
-+    values['client-profile'] === 'official' ? 'official' : 'local')
-   readClientBuildRecord(root, environment)
-   const destination = resolve(root, values.out)
-   const packed = await packFamilyMembers(root, releaseFamily('dsh'), destination, concurrency)
-diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
-index 20da969a..c282dfd3 100644
---- a/apps/desktop/scripts/package-target.ts
-+++ b/apps/desktop/scripts/package-target.ts
-@@ -491,7 +491,12 @@ export async function packageTarget(
-         { cwd: APP_ROOT, env: electronBuilderEnv, timeoutMs: 60_000 })
-     })
+@@ -58,3 +58,20 @@ it.each([{ unsigned: true }, { prepareOnly: true }, {}])('requires policy outsid
+       .toThrow('DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN')
    }
--  await execute(invocation.unsigned ? ['run', 'build', '--profile', 'local'] : ['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
-+  // The unofficial Linux build still ships the official client identity: the
-+  // vendor reserves `build:official` for signed artifacts, so an unsigned
-+  // build would otherwise render the local-build fallback (sidebar mark,
-+  // window title) instead of the product's own.
-+  const officialClientProfile = !invocation.unsigned || target.platform === 'linux'
-+  await execute(officialClientProfile ? ['run', 'build:official'] : ['run', 'build', '--profile', 'local'], buildEnv, REPOSITORY_ROOT)
-   let preparationFailure: { error: unknown } | undefined
-   const executePreparation = async (args: readonly string[], env: NodeJS.ProcessEnv, cwd?: string): Promise<void> => {
-     if (preparationFailure !== undefined) throw preparationFailure.error
-@@ -501,7 +506,8 @@ export async function packageTarget(
-   const pack = async (): Promise<void> => {
-     await executePreparation([
-       ...(invocation.unsigned
--        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts']
-+        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts',
-+            ...(target.platform === 'linux' ? ['--client-profile', 'official'] : [])]
-         : ['run', 'release:pack', '--family', 'dsh']),
-       '--out', buildPaths.packedDsh, ...packArguments,
-     ], buildEnv, REPOSITORY_ROOT)
+ })
++
++it('embeds the policy on the targets the policy service identifies and none on Linux', () => {
++  expect(['win32', 'darwin'].map(platform => desktopPlatformEmbedsPolicy(platform as NodeJS.Platform))).toEqual([true, true])
++  expect(desktopPlatformEmbedsPolicy('linux')).toBe(false)
++})
++
++it('requires no policy origin on Linux, which embeds no policy', () => {
++  for (const options of [{ unsigned: true }, { unsigned: true, prepareOnly: true }]) {
++    expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform: 'linux', arch: 'x64' }, options) })
++      .not.toThrow()
++  }
++})
++
++it('refuses a signed Linux build, which has no signature or update channel to configure', () => {
++  expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform: 'linux', arch: 'x64' }, {}) })
++    .toThrow('Linux artifacts are unsigned')
++})
+diff --git a/apps/desktop/tests/package-target.spec.ts b/apps/desktop/tests/package-target.spec.ts
+index ba647d76..e4f74d02 100644
+--- a/apps/desktop/tests/package-target.spec.ts
++++ b/apps/desktop/tests/package-target.spec.ts
+@@ -26,7 +26,11 @@ describe('desktop package target', () => {
+   })
+ 
+   it('rejects unsupported targets and hosts before building', () => {
+-    expect(() => resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toThrow(/unsupported target/u)
++    expect(resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toMatchObject({
++      platform: 'linux', arch: 'x64', builderPlatform: '--linux', builderArch: '--x64',
++    })
++    expect(() => resolveDesktopPackageTarget('freebsd-x64', 'linux', 'x64')).toThrow(/unsupported target/u)
++    expect(() => resolveDesktopPackageTarget('linux-x64', 'darwin', 'x64')).toThrow(/Linux build host/u)
+     expect(() => resolveDesktopPackageTarget('win-x64', 'darwin', 'arm64')).toThrow(/Windows x64/u)
+     expect(() => resolveDesktopPackageTarget('mac-arm64', 'darwin', 'x64')).toThrow(/Apple Silicon/u)
+     expect(() => resolveDesktopPackageTarget('mac-arm64', 'linux', 'arm64')).toThrow(/macOS/u)

@@ -1,6 +1,6 @@
 变化理由：Linux 托盘：图标、菜单、关于与检查更新入口，随语言重建。
 diff --git a/apps/desktop/scripts/render-tray-icon.ts b/apps/desktop/scripts/render-tray-icon.ts
-index 01bacde..b857c54 100644
+index 01bacdea..b857c541 100644
 --- a/apps/desktop/scripts/render-tray-icon.ts
 +++ b/apps/desktop/scripts/render-tray-icon.ts
 @@ -1,11 +1,14 @@
@@ -87,7 +87,7 @@ index 01bacde..b857c54 100644
  
  if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) await main()
 diff --git a/apps/desktop/src/background-notice.ts b/apps/desktop/src/background-notice.ts
-index c2a0007..64053e4 100644
+index c2a0007d..64053e43 100644
 --- a/apps/desktop/src/background-notice.ts
 +++ b/apps/desktop/src/background-notice.ts
 @@ -1,4 +1,4 @@
@@ -96,119 +96,59 @@ index c2a0007..64053e4 100644
  
  import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
  import { dirname } from 'node:path'
-diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index b2ce416..1764a25 100644
---- a/apps/desktop/src/tray.ts
-+++ b/apps/desktop/src/tray.ts
-@@ -1,11 +1,12 @@
--/** Windows system tray: the always-present way back to a hidden window and the explicit quit entry. */
-+/** Windows and Linux system tray: the always-present way back to a hidden window and the explicit quit entry. */
- 
- import { Menu, nativeImage, Tray } from 'electron'
- import type { DesktopLocale } from './locale.ts'
- 
- /** Main-process actions the tray triggers; both run the same paths as the window and application menu. */
- export interface DesktopTrayOptions {
--  /** Multi-size ICO rendered by `scripts/render-tray-icon.ts`; Windows picks the bitmap for the display scale. */
-+  /** Multi-size ICO or single PNG rendered by `scripts/render-tray-icon.ts`; Windows picks the bitmap for
-+   * the display scale while the Linux tray host scales the one PNG itself. */
-   readonly iconPath: string
-   readonly locale: () => DesktopLocale
-   /** Show and focus the primary window. */
+diff --git a/apps/desktop/src/linux-tray.ts b/apps/desktop/src/linux-tray.ts
+new file mode 100644
+index 00000000..0720ef9c
+--- /dev/null
++++ b/apps/desktop/src/linux-tray.ts
+@@ -0,0 +1,45 @@
++import { app } from 'electron'
++import { join } from 'node:path'
++import { DesktopTray } from './tray.ts'
++import type { DesktopLocale } from './locale.ts'
++
++export interface LinuxTrayOptions {
++  development: boolean
++  locale: () => DesktopLocale
++  open: () => void
++  checkUpdate: () => void
++  restart: () => void
++  quit: () => void
++  about: () => void
++}
++
++/**
++ * Tray path: Windows picks a bitmap out of the multi-size ICO by display scale, while Linux's
++ * StatusNotifierItem host scales the single PNG to the panel's icon size instead.
++ * @param development - unpackaged runs read the icon from the checkout.
++ */
++export function trayIconPath(development: boolean): string {
++  return development
++    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'tray-windows.ico' : 'tray-linux.png')
++    : join(process.resourcesPath, process.platform === 'win32' ? 'tray.ico' : 'tray-linux.png')
++}
++
++/**
++ * The tray is the way back to a hidden window. On Linux the context menu is the entry that
++ * always works: a StatusNotifierItem host is free to show the menu on a left click instead of
++ * forwarding one, so the menu carries open, update, restart, quit and about.
++ * @param options - shell callbacks and icon source.
++ */
++export function createLinuxTray(options: LinuxTrayOptions): DesktopTray {
++  return new DesktopTray({
++    iconPath: trayIconPath(options.development),
++    locale: options.locale,
++    open: options.open,
++    // Same entry point as the application menu; a manual check reports "already current" when there is nothing newer.
++    checkUpdate: options.checkUpdate,
++    // Restart keeps the same argv and skips the quit confirmation the user just answered by choosing it.
++    restart: options.restart,
++    quit: options.quit,
++    about: options.about,
++  })
++}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 74a1f199..7cb338b6 100644
---- a/apps/desktop/src/locale.ts
-+++ b/apps/desktop/src/locale.ts
-@@ -37,8 +37,8 @@ export const en = {
-   hideApplication: 'Hide DeepSeek Harness',
-   hideOtherApplications: 'Hide Others',
-   showAllApplications: 'Show All',
--  quitApplication: 'Quit DeepSeek Harness',
--  openApplication: 'Open DeepSeek Harness',
-+  quitApplication: 'Quit',
-+  openApplication: 'Show Main Window',
-   quit: 'Quit',
-   cancel: 'Cancel',
-   quitTitle: 'Quit DeepSeek Harness?',
-@@ -216,8 +216,8 @@ export const zh = {
-   hideApplication: '隐藏 DeepSeek Harness',
-   hideOtherApplications: '隐藏其他',
-   showAllApplications: '显示全部',
--  quitApplication: '退出 DeepSeek Harness',
--  openApplication: '打开 DeepSeek Harness',
-+  quitApplication: '退出',
-+  openApplication: '显示主窗',
-   quit: '退出',
-   cancel: '取消',
-   quitTitle: '退出 DeepSeek Harness？',
-@@ -393,8 +393,8 @@ export const ja = {
-   hideApplication: 'DeepSeek Harness を隠す',
-   hideOtherApplications: 'ほかを隠す',
-   showAllApplications: 'すべて表示',
--  quitApplication: 'DeepSeek Harness を終了',
--  openApplication: 'DeepSeek Harness を開く',
-+  quitApplication: '終了',
-+  openApplication: 'メインウィンドウを表示',
-   quit: '終了',
-   cancel: 'キャンセル',
-   quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -570,8 +570,8 @@ export const es = {
-   hideApplication: 'Ocultar DeepSeek Harness',
-   hideOtherApplications: 'Ocultar otros',
-   showAllApplications: 'Mostrar todo',
--  quitApplication: 'Salir de DeepSeek Harness',
--  openApplication: 'Abrir DeepSeek Harness',
-+  quitApplication: 'Salir',
-+  openApplication: 'Mostrar ventana principal',
-   quit: 'Salir',
-   cancel: 'Cancelar',
-   quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -747,8 +747,8 @@ export const fr = {
-   hideApplication: 'Masquer DeepSeek Harness',
-   hideOtherApplications: 'Masquer les autres',
-   showAllApplications: 'Afficher tout',
--  quitApplication: 'Quitter DeepSeek Harness',
--  openApplication: 'Ouvrir DeepSeek Harness',
-+  quitApplication: 'Quitter',
-+  openApplication: 'Afficher la fenêtre principale',
-   quit: 'Quitter',
-   cancel: 'Annuler',
-   quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -924,8 +924,8 @@ export const de = {
-   hideApplication: 'DeepSeek Harness ausblenden',
-   hideOtherApplications: 'Andere ausblenden',
-   showAllApplications: 'Alle einblenden',
--  quitApplication: 'DeepSeek Harness beenden',
--  openApplication: 'DeepSeek Harness öffnen',
-+  quitApplication: 'Beenden',
-+  openApplication: 'Hauptfenster anzeigen',
-   quit: 'Beenden',
-   cancel: 'Abbrechen',
-   quitTitle: 'DeepSeek Harness beenden?',
-@@ -1101,8 +1101,8 @@ export const ru = {
-   hideApplication: 'Скрыть DeepSeek Harness',
-   hideOtherApplications: 'Скрыть других',
-   showAllApplications: 'Показать все',
--  quitApplication: 'Выйти из DeepSeek Harness',
--  openApplication: 'Открыть DeepSeek Harness',
-+  quitApplication: 'Выход',
-+  openApplication: 'Показать главное окно',
-   quit: 'Выйти',
-   cancel: 'Отмена',
-   quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1278,8 +1278,8 @@ export const pt = {
-   hideApplication: 'Ocultar DeepSeek Harness',
-   hideOtherApplications: 'Ocultar outros',
-   showAllApplications: 'Mostrar tudo',
--  quitApplication: 'Sair de DeepSeek Harness',
--  openApplication: 'Abra DeepSeek Harness',
-+  quitApplication: 'Sair',
-+  openApplication: 'Mostrar janela principal',
-   quit: 'Sair',
-   cancel: 'Cancelar',
-   quitTitle: 'Sair de DeepSeek Harness?',
-diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 7cb338b..5cefecb 100644
+index 74a1f199..5cefecbb 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
 @@ -31,14 +31,16 @@ export const en = {
@@ -224,8 +164,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'Hide DeepSeek Harness',
    hideOtherApplications: 'Hide Others',
    showAllApplications: 'Show All',
-   quitApplication: 'Quit',
-   openApplication: 'Show Main Window',
+-  quitApplication: 'Quit DeepSeek Harness',
+-  openApplication: 'Open DeepSeek Harness',
++  quitApplication: 'Quit',
++  openApplication: 'Show Main Window',
 +  checkForUpdates: 'Check for Updates',
    quit: 'Quit',
    cancel: 'Cancel',
@@ -243,8 +185,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: '隐藏 DeepSeek Harness',
    hideOtherApplications: '隐藏其他',
    showAllApplications: '显示全部',
-   quitApplication: '退出',
-   openApplication: '显示主窗',
+-  quitApplication: '退出 DeepSeek Harness',
+-  openApplication: '打开 DeepSeek Harness',
++  quitApplication: '退出',
++  openApplication: '显示主窗',
 +  checkForUpdates: '检查更新',
    quit: '退出',
    cancel: '取消',
@@ -262,8 +206,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'DeepSeek Harness を隠す',
    hideOtherApplications: 'ほかを隠す',
    showAllApplications: 'すべて表示',
-   quitApplication: '終了',
-   openApplication: 'メインウィンドウを表示',
+-  quitApplication: 'DeepSeek Harness を終了',
+-  openApplication: 'DeepSeek Harness を開く',
++  quitApplication: '終了',
++  openApplication: 'メインウィンドウを表示',
 +  checkForUpdates: 'アップデートを確認',
    quit: '終了',
    cancel: 'キャンセル',
@@ -281,8 +227,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar otros',
    showAllApplications: 'Mostrar todo',
-   quitApplication: 'Salir',
-   openApplication: 'Mostrar ventana principal',
+-  quitApplication: 'Salir de DeepSeek Harness',
+-  openApplication: 'Abrir DeepSeek Harness',
++  quitApplication: 'Salir',
++  openApplication: 'Mostrar ventana principal',
 +  checkForUpdates: 'Buscar actualizaciones',
    quit: 'Salir',
    cancel: 'Cancelar',
@@ -300,8 +248,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'Masquer DeepSeek Harness',
    hideOtherApplications: 'Masquer les autres',
    showAllApplications: 'Afficher tout',
-   quitApplication: 'Quitter',
-   openApplication: 'Afficher la fenêtre principale',
+-  quitApplication: 'Quitter DeepSeek Harness',
+-  openApplication: 'Ouvrir DeepSeek Harness',
++  quitApplication: 'Quitter',
++  openApplication: 'Afficher la fenêtre principale',
 +  checkForUpdates: 'Rechercher des mises à jour',
    quit: 'Quitter',
    cancel: 'Annuler',
@@ -319,8 +269,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'DeepSeek Harness ausblenden',
    hideOtherApplications: 'Andere ausblenden',
    showAllApplications: 'Alle einblenden',
-   quitApplication: 'Beenden',
-   openApplication: 'Hauptfenster anzeigen',
+-  quitApplication: 'DeepSeek Harness beenden',
+-  openApplication: 'DeepSeek Harness öffnen',
++  quitApplication: 'Beenden',
++  openApplication: 'Hauptfenster anzeigen',
 +  checkForUpdates: 'Nach Updates suchen',
    quit: 'Beenden',
    cancel: 'Abbrechen',
@@ -338,8 +290,10 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'Скрыть DeepSeek Harness',
    hideOtherApplications: 'Скрыть других',
    showAllApplications: 'Показать все',
-   quitApplication: 'Выход',
-   openApplication: 'Показать главное окно',
+-  quitApplication: 'Выйти из DeepSeek Harness',
+-  openApplication: 'Открыть DeepSeek Harness',
++  quitApplication: 'Выход',
++  openApplication: 'Показать главное окно',
 +  checkForUpdates: 'Проверить обновления',
    quit: 'Выйти',
    cancel: 'Отмена',
@@ -357,17 +311,31 @@ index 7cb338b..5cefecb 100644
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar outros',
    showAllApplications: 'Mostrar tudo',
-   quitApplication: 'Sair',
-   openApplication: 'Mostrar janela principal',
+-  quitApplication: 'Sair de DeepSeek Harness',
+-  openApplication: 'Abra DeepSeek Harness',
++  quitApplication: 'Sair',
++  openApplication: 'Mostrar janela principal',
 +  checkForUpdates: 'Verificar atualizações',
    quit: 'Sair',
    cancel: 'Cancelar',
    quitTitle: 'Sair de DeepSeek Harness?',
 diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index 1764a25..a2a986a 100644
+index b2ce416b..a2a986a0 100644
 --- a/apps/desktop/src/tray.ts
 +++ b/apps/desktop/src/tray.ts
-@@ -11,8 +11,14 @@ export interface DesktopTrayOptions {
+@@ -1,17 +1,24 @@
+-/** Windows system tray: the always-present way back to a hidden window and the explicit quit entry. */
++/** Windows and Linux system tray: the always-present way back to a hidden window and the explicit quit entry. */
+ 
+ import { Menu, nativeImage, Tray } from 'electron'
+ import type { DesktopLocale } from './locale.ts'
+ 
+ /** Main-process actions the tray triggers; both run the same paths as the window and application menu. */
+ export interface DesktopTrayOptions {
+-  /** Multi-size ICO rendered by `scripts/render-tray-icon.ts`; Windows picks the bitmap for the display scale. */
++  /** Multi-size ICO or single PNG rendered by `scripts/render-tray-icon.ts`; Windows picks the bitmap for
++   * the display scale while the Linux tray host scales the one PNG itself. */
+   readonly iconPath: string
    readonly locale: () => DesktopLocale
    /** Show and focus the primary window. */
    readonly open: () => void
@@ -382,7 +350,7 @@ index 1764a25..a2a986a 100644
  }
  
  /** Tray icon present for the whole run, not only while the window is hidden. */
-@@ -33,11 +39,18 @@ export class DesktopTray {
+@@ -32,11 +39,18 @@ export class DesktopTray {
      if (tray === undefined) return
      const { messages } = this.options.locale()
      tray.setToolTip(messages.aboutProduct)
@@ -404,7 +372,7 @@ index 1764a25..a2a986a 100644
  
    /** Remove the icon; called once the quit is confirmed so no dead icon outlives the process. */
 diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a48..42e2706 100644
+index 11c3a488..42e27064 100644
 --- a/apps/desktop/tests/tray.spec.ts
 +++ b/apps/desktop/tests/tray.spec.ts
 @@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM

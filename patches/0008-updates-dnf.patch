@@ -1,7 +1,48 @@
 变化理由：应用内更新：读 version.json、下载并验签 rpm、经 pkexec helper 升级。
+diff --git a/apps/desktop/src/linux-updates.ts b/apps/desktop/src/linux-updates.ts
+new file mode 100644
+index 00000000..00c888c1
+--- /dev/null
++++ b/apps/desktop/src/linux-updates.ts
+@@ -0,0 +1,35 @@
++import { app } from 'electron'
++import { existsSync } from 'node:fs'
++import { join } from 'node:path'
++import { LINUX_UPDATE_FEED_URL } from './update-feed.ts'
++import { LinuxPackageUpdater, defaultCacheDir, installedRpmReleaseSync } from './update-linux.ts'
++
++export interface LinuxUpdateRuntime {
++  updater?: LinuxPackageUpdater
++  enabled?: () => boolean
++  currentVersion?: () => string
++}
++
++/**
++ * Linux installs through the package manager, so the coordinator talks to a release-manifest
++ * updater whose install step is a polkit-authorized helper; the embedded updater is never used.
++ * The installed rpm release is part of the compared version, otherwise every start would offer
++ * the build that is already installed.
++ * @returns updater plus the coordinator hooks; empty off Linux.
++ */
++export function linuxUpdateRuntime(): LinuxUpdateRuntime {
++  if (process.platform !== 'linux') return {}
++  const updater = new LinuxPackageUpdater({
++    feedUrl: LINUX_UPDATE_FEED_URL,
++    cacheDir: defaultCacheDir(),
++    // Tests and development runs have no resourcesPath; an update is then simply unavailable.
++    ...process.resourcesPath === undefined ? {} : { keyPath: join(process.resourcesPath, 'RPM-GPG-KEY-dsh-desktop') },
++    ...existsSync('/usr/libexec/dsh-update-helper') ? { helperPath: '/usr/libexec/dsh-update-helper' } : {},
++  })
++  const release = installedRpmReleaseSync()
++  return {
++    updater,
++    enabled: () => updater.available(),
++    ...release === undefined ? {} : { currentVersion: () => `${app.getVersion()}.${release}` },
++  }
++}
 diff --git a/apps/desktop/src/update-download.ts b/apps/desktop/src/update-download.ts
 new file mode 100644
-index 0000000..ee6396c
+index 00000000..ee6396cb
 --- /dev/null
 +++ b/apps/desktop/src/update-download.ts
 @@ -0,0 +1,101 @@
@@ -108,7 +149,7 @@ index 0000000..ee6396c
 +}
 diff --git a/apps/desktop/src/update-feed.ts b/apps/desktop/src/update-feed.ts
 new file mode 100644
-index 0000000..340c4a1
+index 00000000..340c4a13
 --- /dev/null
 +++ b/apps/desktop/src/update-feed.ts
 @@ -0,0 +1,89 @@
@@ -203,7 +244,7 @@ index 0000000..340c4a1
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 0000000..271f31d
+index 00000000..271f31d5
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
 @@ -0,0 +1,159 @@
@@ -367,7 +408,7 @@ index 0000000..271f31d
 +  }
 +}
 diff --git a/apps/desktop/src/update-schedule.ts b/apps/desktop/src/update-schedule.ts
-index 7c08e56..d6a0561 100644
+index 7c08e569..d6a0561a 100644
 --- a/apps/desktop/src/update-schedule.ts
 +++ b/apps/desktop/src/update-schedule.ts
 @@ -17,7 +17,7 @@ export interface DesktopUpdateScheduleConfig {
@@ -381,7 +422,7 @@ index 7c08e56..d6a0561 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-download.spec.ts b/apps/desktop/tests/update-download.spec.ts
 new file mode 100644
-index 0000000..1c0da5a
+index 00000000..1c0da5a0
 --- /dev/null
 +++ b/apps/desktop/tests/update-download.spec.ts
 @@ -0,0 +1,79 @@
@@ -466,7 +507,7 @@ index 0000000..1c0da5a
 +})
 diff --git a/apps/desktop/tests/update-feed.spec.ts b/apps/desktop/tests/update-feed.spec.ts
 new file mode 100644
-index 0000000..2fc99dc
+index 00000000..2fc99dca
 --- /dev/null
 +++ b/apps/desktop/tests/update-feed.spec.ts
 @@ -0,0 +1,43 @@
@@ -514,7 +555,7 @@ index 0000000..2fc99dc
 +  expect(() => parseReleaseFeed(null)).toThrow(/不是对象/)
 +})
 diff --git a/apps/desktop/tests/update-schedule.spec.ts b/apps/desktop/tests/update-schedule.spec.ts
-index 9d481f2..cd5a2b3 100644
+index 9d481f21..cd5a2b39 100644
 --- a/apps/desktop/tests/update-schedule.spec.ts
 +++ b/apps/desktop/tests/update-schedule.spec.ts
 @@ -171,7 +171,7 @@ describe('ordinary update polling disposal', () => {
