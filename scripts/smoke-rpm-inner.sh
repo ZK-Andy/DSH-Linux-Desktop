@@ -138,6 +138,13 @@ unexpected="$(rpm -V dsh-desktop | grep -v 'chrome-sandbox' || true)"
   || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
 grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
 rpm -q dsh-desktop >/dev/null || { log "helper 跑完后 dsh-desktop 不在 rpmdb"; exit 1; }
+# helper 会把容器里的包换成仓库里的发布版，那一版的 /usr/bin 链接与本分支构建的包不一定一致。
+# 后续要测的是本次构建的二进制，所以这里降级回 /pkg 里的包。
+{ dnf5 downgrade -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm >/dev/null 2>&1 \
+    || dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm >/dev/null 2>&1; } \
+  || { log "helper 之后装回本次构建失败"; exit 1; }
+log "装回本次构建：$(rpm -q --qf '%{VERSION}-%{RELEASE}' dsh-desktop)"
+command -v "$APP" >/dev/null || { log "装回后没有 $APP"; exit 1; }
 log "更新链 helper 安装 OK"
 
 export DSH_HOME=/tmp/dsh-home
