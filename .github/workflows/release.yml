@@ -85,3 +85,61 @@ jobs:
             dist/RPM-GPG-KEY-dsh-desktop
             dist/version.json
             dist/SHA256SUMS.txt
+
+  # 每次发版刷新 dnf 仓库：repodata 推到 gh-pages，rpm 本体留在本版本的 Release 里
+  # （<location xml:base> 指向 releases/download/<tag>/）。不跑这步，dnf5 就会一直停在旧版本。
+  repo:
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 下载产物（同 run）
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-rpm
+          path: dist
+
+      - name: 导入仓库签名密钥
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          [ -n "${GPG_PRIVATE_KEY:-}" ] || { echo "::error::secrets.GPG_PRIVATE_KEY 未配置，拒绝产出未签名的 repodata"; exit 1; }
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          printf '%s' "$GPG_PASSPHRASE" > "$RUNNER_TEMP/pass"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "GPG_PASSPHRASE_FILE=$RUNNER_TEMP/pass" >> "$GITHUB_ENV"
+
+      - name: 重生成并签名 repodata
+        run: bash scripts/publish-repo.sh dist/*.rpm "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/repo"
+
+      - name: 推送 repodata 到 gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/site"
+          git clone --branch gh-pages --depth 1 \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$site"
+          rsync -a --delete "$RUNNER_TEMP/repo/repodata/" "$site/repodata/"
+          cp "$RUNNER_TEMP/repo/dsh-desktop.repo" "$site/dsh-desktop.repo"
+          cd "$site"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "repodata 无变化，跳过提交"
+          else
+            git commit -m "repo: ${GITHUB_REF_NAME}"
+            git push origin gh-pages
+          fi
