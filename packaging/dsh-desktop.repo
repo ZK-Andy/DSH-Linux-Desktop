@@ -1,0 +1,8 @@
+[dsh-desktop]
+name=DSH Linux Desktop
+baseurl=https://zk-andy.github.io/DSH-Linux-Desktop/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop
+metadata_expire=6h

@@ -32,16 +32,20 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 安装
 
-> 包尚未发布；以下是目标形态。
-
-rpm 用仓库的 GPG 密钥签名，首装前先把公钥导入 rpmdb（升级由更新链自动处理）：
+rpm 用仓库的 GPG 密钥签名。两种方式，推荐第一种（之后 `dnf5 upgrade` 能跟着系统一起升级）：
 
 ```bash
+# 方式一：从 dnf 仓库安装
+sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop
+sudo curl -fsSL https://zk-andy.github.io/DSH-Linux-Desktop/dsh-desktop.repo -o /etc/yum.repos.d/dsh-desktop.repo
+sudo dnf5 install dsh-desktop
+
+# 方式二：直接装 Release 里的 rpm
 sudo rpm --import ./RPM-GPG-KEY-dsh-desktop
 sudo dnf5 install ./dsh-desktop-*.rpm
 ```
 
-`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，同时随每个 Release 提供（与 rpm、`version.json`、`SHA256SUMS.txt` 一起）。
+`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，同时随每个 Release 提供（与 rpm、`version.json`、`SHA256SUMS.txt` 一起）。仓库的 repodata 托管在 GitHub Pages（`gh-pages` 分支），rpm 本体仍在版本 Release 里——repodata 的 `<location xml:base>` 指向对应版本的 Release 目录，所以 Pages 上只有索引，不放大文件。
 
 GNOME 默认不显示托盘图标，需要安装并启用扩展：
 
@@ -59,7 +63,7 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 - 下载到 `~/.cache/dsh-desktop/`，边下边算 sha256，长度或摘要不符即删除；落盘后再用随包公钥在临时 rpmdb 里 `rpm -Kv` 验签，不通过就不交给安装器。
 - 安装经 `pkexec` 调用 `/usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，`allow_active=auth_admin_keep`，授权一次）。helper 只接受缓存目录里的 `dsh-desktop-*.rpm`，先 `rpm --import` 公钥，再 `dnf5 install -y --setopt=localpkg_gpgcheck=1`，日志写 `/var/log/dsh-desktop/update.log`；成功后应用自动重启。
 - helper 与 polkit 策略由 rpm `%post` 从 `/opt/deepseek-harness-desktop/resources/` 装到 `/usr/libexec` 与 `/usr/share/polkit-1/actions`，卸载（`%postun` 参数为 0）时移除；应用自身不写 `/usr`。
-- 暂不维护 dnf 仓库；`dnf5 upgrade` 的自动感知留作后续增量（PLAN.md §3.3 B）。
+- dnf 仓库已维护：repodata 在 `gh-pages`（GitHub Pages），rpm 在版本 Release；每次发版用 `scripts/publish-repo.sh` 重生 repodata 并推上去，否则 `dnf5 check-update` 只看到旧版本。
 
 ## 构建
 
