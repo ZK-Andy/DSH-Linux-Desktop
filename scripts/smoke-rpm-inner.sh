@@ -113,7 +113,10 @@ log "验证更新链 helper 与 dnf 仓库"
 [ -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy ]   || { log "缺少 polkit 策略"; exit 1; }
 [ -f /etc/yum.repos.d/dsh-desktop.repo ] || { log "缺少 /etc/yum.repos.d/dsh-desktop.repo"; exit 1; }
 [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop ] || { log "缺少随包公钥"; exit 1; }
-rpm -qa 'gpg-pubkey-c85f90ee*' | grep -q . || { log "公钥没有导入 rpmdb"; exit 1; }
+# 公钥在 rpmdb 里是 NAME=gpg-pubkey、VERSION=指纹，按指纹尾 8 位判定是否已导入。
+rpm -qa --qf '%{NAME} %{VERSION}\n' \
+  | awk '$1 == "gpg-pubkey" && substr($2, length($2) - 7) == "c85f90ee"' | grep -q . \
+  || { log "公钥没有导入 rpmdb"; exit 1; }
 /usr/libexec/dsh-update-helper \
   || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
 grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
