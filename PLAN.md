@@ -54,7 +54,7 @@
 - 每个 Release 附 rpm、`SHA256SUMS.txt`、公钥 `RPM-GPG-KEY-dsh-desktop`；repodata 由 `release.yml` 的 `repo` 作业刷新到 `gh-pages`。
 - GPG：私钥进 Actions secrets，`rpm --addsign`；公钥随包安装到 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`，并在 Release 里单列一份。
 - **首装公钥**：`dnf5` 校验签名需要 rpmdb 里有公钥，因此 README 的首装命令是两步——先 `sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop`，再 `dnf5 install ./dsh-desktop-*.rpm`。这是第三方签名 rpm 的标准做法，不是临时绕行；更新链由 helper 自动 import，不再需要用户手动做。
-- 先做 A：只发 Releases，应用内更新（见 §3.4）。B（dnf 仓库 + `.repo` + `gh-pages` 孤儿分支）作为后续增量，不阻塞 R1–R5。
+- 分发面：Releases 出 rpm 与公钥，dnf 仓库（`.repo` + `gh-pages` 上的 repodata）是更新发现与安装的唯一通道；应用自身不下载、不落盘安装包（见 §3.4）。
 
 ### 3.4 更新
 

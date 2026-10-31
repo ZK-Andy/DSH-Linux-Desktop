@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # 由 pkexec 以 root 调用的唯一入口：把 dsh-desktop 升到仓库里的最新版。
 #
 # 不接受任何参数：仓库地址、签名公钥与 gpgcheck 全部由 /etc/yum.repos.d/dsh-desktop.repo
 # 与随包公钥定义，helper 只负责触发一次 `dnf5 upgrade`。日志写在 /var/log/dsh-desktop/。
-set -eu
+set -euo pipefail
 
 LOG_DIR=/var/log/dsh-desktop
 LOG="$LOG_DIR/update.log"
@@ -30,10 +30,11 @@ rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
   exit 70
 }
 
-if dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop >>"$LOG" 2>&1; then
+# dnf5 的输出用 tee 同时进日志与 stdout：pkexec 客户端按行读取，安装期间显示最新一行。
+if dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop 2>&1 | tee -a "$LOG"; then
   log "升级成功"
   exit 0
 fi
 
-log "升级失败，见上方 dnf5 输出"
+log "升级失败，见上方 dnf5 输出（退出码 $?）"
 exit 1

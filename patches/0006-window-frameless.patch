@@ -331,7 +331,7 @@ index 00000000..97ddbcaa
 +  })
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4770fe83..91f33e8c 100644
+index 4770fe83..d6e2a3f4 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -1,5 +1,4 @@
@@ -522,7 +522,17 @@ index 4770fe83..91f33e8c 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1084,15 +998,26 @@ async function main(): Promise<void> {
+@@ -900,6 +814,9 @@ async function main(): Promise<void> {
+       policyAuth?.focus(); updateDialog.focus()
+     }
+     let failedOperation: 'check' | 'download' | 'install' = 'check'
++    // A manual check is the authoritative answer: ask dnf to refresh metadata instead of trusting
++    // the repository's one-hour cache, otherwise a version published minutes ago looks absent.
++    if (manual) linuxUpdates.updater?.markManualCheck()
+     promptOperation ??= Promise.resolve().then(async () => {
+       if (manual) updateJournal?.action('check-requested')
+       const joinedPolicyAuthentication = authenticationOperation !== undefined
+@@ -1084,15 +1001,26 @@ async function main(): Promise<void> {
      tray?.relabel()
    }
    refreshApplicationMenu()
@@ -554,7 +564,7 @@ index 4770fe83..91f33e8c 100644
      ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
        locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
      : undefined
-@@ -1106,10 +1031,11 @@ async function main(): Promise<void> {
+@@ -1106,10 +1034,11 @@ async function main(): Promise<void> {
      focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
      // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
      // size directly, where the 1024 px PNG would be scaled down by GDI.
@@ -568,7 +578,7 @@ index 4770fe83..91f33e8c 100644
      ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
        assertDesktopSender(event, ['app'])
        if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1150,10 +1076,16 @@ async function main(): Promise<void> {
+@@ -1150,10 +1079,16 @@ async function main(): Promise<void> {
        // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
        const validColor = (value: unknown): value is string => typeof value === 'string'
          && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
@@ -586,7 +596,7 @@ index 4770fe83..91f33e8c 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1164,11 +1096,13 @@ async function main(): Promise<void> {
+@@ -1164,11 +1099,13 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -602,6 +612,18 @@ index 4770fe83..91f33e8c 100644
      // Closing hides: the page and the Host keep running, and the next show resumes the same document.
      window.on('close', (event) => {
        if (quitting || shellInstallerOwnsQuit || sessionEnding) return
+@@ -1422,7 +1359,10 @@ async function main(): Promise<void> {
+       preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
+       allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
+       policy: () => policy.state, update: () => updates.state,
+-      refresh: async () => { await Promise.all([checkPolicyManually(), updateSchedule.check(true)]) },
++      refresh: async () => {
++        linuxUpdates.updater?.markManualCheck()
++        await Promise.all([checkPolicyManually(), updateSchedule.check(true)])
++      },
+       download: downloadUpdate, install: version => updates.install(version),
+     })
+     void mandatoryPolicy.check('launch').then((state) => {
 diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
 index c9937a30..5e5b629f 100644
 --- a/apps/desktop/src/preload-app.ts

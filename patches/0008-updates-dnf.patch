@@ -37,10 +37,10 @@ index 00000000..03f987b8
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..6c17f1fa
+index 00000000..88512125
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,236 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -48,12 +48,10 @@ index 00000000..6c17f1fa
 + * helper. The only things this file owns are version encoding and the two dnf queries.
 + */
 +import { EventEmitter } from 'node:events'
-+import { execFile, execFileSync } from 'node:child_process'
++import { execFileSync, spawn } from 'node:child_process'
 +import { existsSync } from 'node:fs'
-+import { promisify } from 'node:util'
 +import { app } from 'electron'
 +
-+const run = promisify(execFile)
 +
 +/** Package name in the rpm database; also the repository's only package. */
 +export const LINUX_PACKAGE_NAME = 'dsh-desktop'
@@ -63,6 +61,18 @@ index 00000000..6c17f1fa
 +
 +/** Repository defines this so a missing repository never blocks unrelated dnf transactions. */
 +const REPO_SKIP_OPTION = '--setopt=dsh-desktop.skip_if_unavailable=0'
++
++
++/** How many helper output lines survive for the failure dialog. */
++export const INSTALL_LOG_LINES = 10
++
++/** Strips ANSI control sequences and the carriage-return progress tail dnf redraws in place. */
++export function stripProgress(line: string): string {
++  return line
++    .replace(/\u001b\[[0-9;?]*[A-Za-z]/gu, '')
++    .replace(/\r/g, '')
++    .trim()
++}
 +
 +/** Shape returned by checkForUpdates; mirrors the fields the coordinator reads. */
 +interface LinuxCheckResult {
@@ -77,8 +87,8 @@ index 00000000..6c17f1fa
 +  readonly currentVersion?: () => string
 +  /** Relaunch after a successful install; overridable for tests. */
 +  readonly relaunch?: () => void
-+  /** dnf runner; overridable for tests. */
-+  readonly queryUpgrades?: () => Promise<string>
++  /** dnf runner; overridable for tests. Receives whether the query must bypass the cache. */
++  readonly queryUpgrades?: (refresh: boolean) => Promise<string>
 +}
 +
 +/**
@@ -145,11 +155,21 @@ index 00000000..6c17f1fa
 +
 +  private candidate: string | undefined
 +
++  private manual = false
++
 +  private readonly options: LinuxUpdaterOptions
 +
 +  constructor(options: LinuxUpdaterOptions = {}) {
 +    super()
 +    this.options = options
++  }
++
++  /**
++   * Marks the next check as user-triggered. Manual checks ask dnf with `--refresh`, because the
++   * repository caches metadata for an hour and a version published minutes ago must still show up.
++   */
++  markManualCheck(): void {
++    this.manual = true
 +  }
 +
 +  /** @returns Whether the helper this stack depends on is installed. */
@@ -164,7 +184,9 @@ index 00000000..6c17f1fa
 +   * @throws When dnf cannot be queried; the coordinator surfaces the message as-is.
 +   */
 +  async checkForUpdates(): Promise<LinuxCheckResult> {
-+    const evr = parseUpgrade(await this.queryUpgrades())
++    const refresh = this.manual
++    this.manual = false
++    const evr = parseUpgrade(await this.queryUpgrades(refresh))
 +    if (evr === undefined) {
 +      this.candidate = undefined
 +      return { updateInfo: { version: this.current() }, isUpdateAvailable: false }
@@ -196,19 +218,40 @@ index 00000000..6c17f1fa
 +      this.emit('error', new Error('desktop update: 没有 polkit helper'))
 +      return
 +    }
-+    const child = execFile('pkexec', [helper], { env: { ...process.env, LC_ALL: 'C' } }, (error) => {
-+      if (error !== null) {
-+        this.emit('error', new Error(`desktop update: 安装失败：${error.message}`))
++    const lines: string[] = []
++    let latest = ''
++    const consume = (chunk: Buffer): void => {
++      for (const raw of chunk.toString('utf8').split('\n')) {
++        const line = stripProgress(raw)
++        if (line.length === 0) continue
++        latest = line
++        lines.push(line)
++        if (lines.length > INSTALL_LOG_LINES) lines.shift()
++        this.emit('install-progress', { line: latest })
++      }
++    }
++    const child = spawn('pkexec', [helper], { env: { ...process.env, LC_ALL: 'C' } })
++    child.stdout.on('data', consume)
++    child.stderr.on('data', consume)
++    child.on('error', (error) => { this.fail(error, lines, null) })
++    child.on('close', (code) => {
++      if (code === 0) {
++        this.emit('installed', { version: this.candidate })
++        if (this.options.relaunch !== undefined) this.options.relaunch()
++        else {
++          app.relaunch()
++          app.exit(0)
++        }
 +        return
 +      }
-+      this.emit('installed', { version: this.candidate })
-+      if (this.options.relaunch !== undefined) this.options.relaunch()
-+      else {
-+        app.relaunch()
-+        app.exit(0)
-+      }
++      this.fail(new Error(`desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`), lines, code)
 +    })
-+    child.on('error', (error) => { this.emit('error', error) })
++  }
++
++  private fail(error: Error, lines: readonly string[], code: number | null): void {
++    const details = [code === null ? '' : `退出码：${code}`, ...lines].filter((l) => l.length > 0).join('\n')
++    const failure = Object.assign(error, { technicalDetails: details })
++    this.emit('error', failure)
 +  }
 +
 +  private current(): string {
@@ -216,14 +259,22 @@ index 00000000..6c17f1fa
 +    return provider === undefined ? app.getVersion() : provider()
 +  }
 +
-+  private async queryUpgrades(): Promise<string> {
-+    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades()
-+    const { stdout } = await run(
-+      'dnf5',
-+      ['repoquery', '--upgrades', '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME],
-+      { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } },
-+    )
-+    return stdout
++  private queryUpgrades(refresh: boolean): Promise<string> {
++    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades(refresh)
++    return new Promise((resolve, reject) => {
++      const args = ['repoquery', '--upgrades', ...refresh ? ['--refresh'] : [],
++        '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME]
++      const child = spawn('dnf5', args, { env: { ...process.env, LC_ALL: 'C' } })
++      let stdout = ''
++      let stderr = ''
++      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
++      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
++      child.on('error', reject)
++      child.on('close', (code) => {
++        if (code === 0) resolve(stdout)
++        else reject(new Error(stderr.trim().length > 0 ? stderr.trim() : `dnf5 repoquery 退出码 ${code ?? 'unknown'}`))
++      })
++    })
 +  }
 +}
 diff --git a/apps/desktop/src/update-schedule.ts b/apps/desktop/src/update-schedule.ts
@@ -241,19 +292,47 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..c9f6d2c7
+index 00000000..c6bf7309
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,162 @@
 +import { gt } from 'semver'
 +import { describe, expect, it, vi } from 'vitest'
 +import {
-+  LinuxPackageUpdater, currentLinuxVersion, encodeVersion, parseUpgrade,
++  LinuxPackageUpdater, currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
 +} from '../src/update-linux.ts'
 +
 +vi.mock('electron', () => ({
 +  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn() },
 +}))
++
++const spawned = await vi.hoisted(async () => {
++  const { EventEmitter } = await import('node:events')
++  return { calls: [] as string[][], child: undefined as undefined | {
++    stdout: EventEmitter, stderr: EventEmitter, on: (event: string, cb: (code: number) => void) => void,
++  } }
++})
++vi.mock('node:child_process', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:child_process')>()
++  const { EventEmitter } = await import('node:events')
++  return {
++    ...actual,
++    spawn: vi.fn((program: string, args: string[]) => {
++      spawned.calls.push([program, ...args])
++      const stdout = new EventEmitter()
++      const stderr = new EventEmitter()
++      const listeners = new Map<string, ((code: number) => void)[]>()
++      spawned.child = {
++        stdout, stderr,
++        on: (event, cb) => { listeners.set(event, [...listeners.get(event) ?? [], cb]) },
++      }
++      Object.assign(spawned.child, {
++        emitClose: (code: number) => { for (const cb of listeners.get('close') ?? []) cb(code) },
++      })
++      return spawned.child
++    }),
++  }
++})
 +
 +function updater(overrides: Partial<ConstructorParameters<typeof LinuxPackageUpdater>[0]> = {}) {
 +  return new LinuxPackageUpdater({
@@ -285,6 +364,14 @@ index 00000000..c9f6d2c7
 +  })
 +})
 +
++describe('stripProgress', () => {
++  it('drops ANSI sequences and carriage-return redraws so only the readable line survives', () => {
++    expect(stripProgress('\u001b[1mdsh-desktop\u001b[0m  0.2.2~alpha.2-5')).toBe('dsh-desktop  0.2.2~alpha.2-5')
++    expect(stripProgress('下载中 12%\r下载中 48%\r下载中 96%')).toBe('下载中 12%下载中 48%下载中 96%')
++    expect(stripProgress('   ')).toBe('')
++  })
++})
++
 +describe('parseUpgrade', () => {
 +  it('returns the first reported EVR and ignores blank lines', () => {
 +    expect(parseUpgrade('0.2.2~alpha.2-6\n\n')).toBe('0.2.2~alpha.2-6')
@@ -299,6 +386,15 @@ index 00000000..c9f6d2c7
 +    await expect(u.checkForUpdates()).resolves.toEqual({
 +      updateInfo: { version: '0.2.2-alpha.2.6' }, isUpdateAvailable: true,
 +    })
++  })
++
++  it('refreshes repository metadata only for a manual check', async () => {
++    const calls: boolean[] = []
++    const u = updater({ queryUpgrades: async (refresh) => { calls.push(refresh); return '' } })
++    await u.checkForUpdates()
++    u.markManualCheck()
++    await u.checkForUpdates()
++    expect(calls).toEqual([false, true])
 +  })
 +
 +  it('reports the current version when dnf sees no upgrade', async () => {
@@ -326,6 +422,31 @@ index 00000000..c9f6d2c7
 +    const u = updater({ helperPath: '/nonexistent/dsh-update-helper', queryUpgrades: async () => '0.2.2~alpha.2-6\n' })
 +    await u.checkForUpdates()
 +    await expect(u.downloadUpdate()).rejects.toThrow('没有 polkit helper')
++  })
++
++  it('streams helper lines and reports the exit code with the last ten lines', async () => {
++    const u = updater()
++    const errors: (Error & { technicalDetails?: string })[] = []
++    u.on('error', (error) => errors.push(error as Error & { technicalDetails?: string }))
++    const seen: string[] = []
++    u.on('install-progress', ({ line }) => { seen.push(line) })
++    u.quitAndInstall()
++    expect(spawned.calls[0]).toEqual(['pkexec', '/bin/sh'])
++    const child = spawned.child as unknown as {
++      stdout: { emit: (event: string, chunk: Buffer) => void }, stderr: { emit: (event: string, chunk: Buffer) => void },
++      emitClose: (code: number) => void,
++    }
++    child.stdout.emit('data', Buffer.from('第一条\n\u001b[1m第二条\u001b[0m\n'))
++    child.stderr.emit('data', Buffer.from('第三条\r\r\n'))
++    expect(seen).toEqual(['第一条', '第二条', '第三条'])
++    for (let index = 0; index < 15; index += 1) child.stdout.emit('data', Buffer.from(`第${index}行\n`))
++    child.emitClose(1)
++    expect(errors).toHaveLength(1)
++    const details = errors[0]?.technicalDetails ?? ''
++    expect(details.startsWith('退出码：1\n')).toBe(true)
++    expect(details.split('\n')).toHaveLength(11)
++    expect(details).toContain('第14行')
++    expect(details).not.toContain('第一条')
 +  })
 +
 +  it('is unavailable without the helper', () => {

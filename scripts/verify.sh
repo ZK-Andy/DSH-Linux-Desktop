@@ -157,6 +157,7 @@ helper="$(rpm_cat /usr/libexec/dsh-update-helper 2>/dev/null)"
 check "helper 不接受参数" grep -q '不接受参数' <<<"$helper"
 check "helper 只跑 dnf5 upgrade dsh-desktop" grep -q 'dnf5 upgrade -y --refresh.*dsh-desktop' <<<"$helper"
 check_not "helper 不再接收 rpm 路径参数" grep -q '\$1' <<<"$helper"
+check "helper 用 tee 同时写日志与 stdout" grep -q '2>&1 | tee -a "\$LOG"' <<<"$helper"
 repo="$(rpm_cat /etc/yum.repos.d/dsh-desktop.repo 2>/dev/null)"
 check ".repo 的 gpgkey 指向随包公钥" \
   grep -qx 'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$repo"
