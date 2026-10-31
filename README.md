@@ -10,7 +10,7 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 状态
 
-早期。补丁序列 `0001–0008`（每个补丁一个模块）已在干净的上游 tag 树上重放验证（应用后与改编树逐字节一致），CI 曾成功产出 `dsh-desktop-0.2.2-alpha.2-x86_64.rpm`。托盘在本地 dev 下验证过（SNI + DBusMenu），sharp 桥接也单独验证过，但两者都还没在**装出来的 rpm** 里验收；CI 曾卡在打包冒烟：office 引擎的 Linux 原生包上游未发布，LibreOfficeKit 在 ASAR 下的存在性探测又把缺失包误判为已安装；`0022` 修好探测、让 Linux 回退到随包 WASM 引擎。里程碑见 PLAN.md §5。
+早期。补丁序列 `0001–0008`（每个补丁一个模块）已在干净的上游 tag 树上重放验证（应用后与改编树逐字节一致），CI 曾成功产出 `dsh-desktop-0.2.2-alpha.2-x86_64.rpm`。托盘在本地 dev 下验证过（SNI + DBusMenu），sharp 桥接也单独验证过，但两者都还没在**装出来的 rpm** 里验收；CI 曾卡在打包冒烟：office 引擎的 Linux 原生包上游未发布，LibreOfficeKit 在 ASAR 下的存在性探测又把缺失包误判为已安装；`0004-libreoffice-engine` 修好探测、让 Linux 回退到随包 WASM 引擎。里程碑见 PLAN.md §5。
 
 ## 需求（验收口径）
 

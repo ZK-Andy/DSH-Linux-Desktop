@@ -28,17 +28,17 @@
 - fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
 - 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
 - 补丁序列 `0001–0008`，每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
-  - `0001` 目标模型称认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）；`0002` `package-target` 接受 `linux-x64`；`0003` electron-builder 的 Linux 配置（图标、`desktopName`、target、asar 开关）；
-  - `0004` prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，并跳过 macOS 专属的 `prepare:cli`）；`0005` 发布设置（`.env.linux`）；`0006` `package:linux:x64` 脚本；`0007` 测试；`0010` Linux 不嵌强制更新策略；`0011` 包元数据（maintainer/homepage 校验、默认格式）；
-  - `0012` 非 git 构建的 commit 标记；`0013` 托盘；`0016` 标题栏（仅 Windows）；
-  - `0019` 打包冒烟脚本的 Linux 路径；`0020` 本项目的包身份与 rpm 硬化；`0021` sharp 隔离（§3.6）；`0022` LibreOfficeKit 在 ASAR 下的引擎探测回退。
+  - `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径；
+  - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
+  - `0003-sharp-isolation`：sharp 隔离（§3.6）；`0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退；
+  - `0005-tray`：托盘（图标、菜单、关于、检查更新）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮；`0007-window-size-memory`：窗口尺寸与最大化记忆；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级）。
 - **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
 - 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
 ### 3.2 构建
 
 - electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
-- 构建配置分布在 `0003`/`0020`/`0021`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
+- 构建配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
 - `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
 - 预发布版本映射：`dsh-v0.2.2-alpha.2` → rpm `0.2.2~alpha.2`。M2 用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 实测钉死，`version.json` 与 rpm 用同一套映射。
 - GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。

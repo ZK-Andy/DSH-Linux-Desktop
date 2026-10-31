@@ -1,5 +1,5 @@
 变化理由：Linux 无边框窗口：自绘标题栏与窗口按钮、窗口状态 IPC、尺寸持久化接线，以及相关 main.ts 挂钩。
-例外：规则 4 main.ts 的净增暂时超过 15 行；M1 第二步把实现搬进模块后删掉这一行。
+例外：规则 4，main.ts 净增 154 行；待迁移：M1 第二步。
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
 index 583bf74..76ef3b4 100644
 --- a/apps/desktop/src/main.ts
