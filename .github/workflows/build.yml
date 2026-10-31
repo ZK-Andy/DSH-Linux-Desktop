@@ -1,0 +1,24 @@
+name: build-rpm
+
+# 周更/手动触发只出包（签名、静态验收、容器冒烟），不创建 Release。
+# 要发布：给 main 打 tag 后 push tag，走 release.yml。
+on:
+  schedule:
+    # Weekly canary: follow a new upstream tag even when nobody asks.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: Upstream tag to build (defaults to the pinned tag in upstream-tag)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rpm:
+    uses: ./.github/workflows/package.yml
+    with:
+      upstream_tag: ${{ inputs.upstream_tag || '' }}
+    secrets: inherit

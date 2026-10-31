@@ -1,0 +1,87 @@
+name: release
+
+# 统一发布：push tag（v*）触发 → package.yml 出包 → 本文件聚合并创建单个 Release。
+# 发布作业以 `needs: package` 为放行门：出包腿（含签名、静态验收、容器冒烟）任一失败都不发布。
+# 手动 dispatch 分支 ref 只出包不发布（发布作业的 if 只认 tag）。
+#
+# Release 段与 tag 绑定：tag v0.2.2-alpha.2-2 → rpm Release 2（package.yml 解析后传给 electron-builder）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    uses: ./.github/workflows/package.yml
+    secrets: inherit
+
+  release:
+    needs: package
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 全量历史 + tags，供 release-notes.sh 生成 compare
+          persist-credentials: false
+
+      - name: Install rpm tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+
+      - name: 下载产物（同 run，经 download-artifact）
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-rpm
+          path: dist
+
+      - name: 生成 version.json（更新链读取）
+        run: bash scripts/make-version-json.sh dist/*.rpm > dist/version.json && cat dist/version.json
+
+      - name: 生成合并 SHA256SUMS
+        run: |
+          set -euo pipefail
+          (cd dist && find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z \
+            | xargs -0 sha256sum | sed 's#  \./#  #') > dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+
+      - name: 发布 preflight（资产矩阵 + 验签 + 校验和复核，任一失败终止发布）
+        run: bash scripts/release-preflight.sh dist
+
+      - name: 生成 Release 正文
+        id: notes
+        run: |
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --abbrev=0 "HEAD^" 2>/dev/null || true)"
+          bash scripts/release-notes.sh "$PREV_TAG" "$GITHUB_REF_NAME" > release-body.md
+          { echo "body<<BODY"; cat release-body.md; echo "BODY"; } >> "$GITHUB_OUTPUT"
+
+      # 一律正式发布：本项目的版本号直接跟上游（当前上游只有 alpha），若按 tag 里的
+      # alpha 自动标 prerelease，GitHub 就不会把它设为 Latest，仓库首页与 /releases/latest
+      # 都会显示「没有 Release」。release 的 prerelease/latest 语义与上游版本措辞无关。
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: false
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            dist/*.rpm
+            dist/RPM-GPG-KEY-dsh-desktop
+            dist/version.json
+            dist/SHA256SUMS.txt

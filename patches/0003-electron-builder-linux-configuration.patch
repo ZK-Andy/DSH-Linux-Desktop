@@ -1,0 +1,92 @@
+diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
+index cf0c19e..47460ad 100644
+--- a/apps/desktop/scripts/electron-builder-config.mjs
++++ b/apps/desktop/scripts/electron-builder-config.mjs
+@@ -23,7 +23,8 @@ import {
+ import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
+ import { resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
+ import { resolveDesktopBuildVersion } from './desktop-build-version.mjs'
+-import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
++import { desktopPlatformEmbedsPolicy, resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
++import { resolveDesktopLinuxFormats, resolveDesktopLinuxPackageMetadata } from './desktop-linux-packages.mjs'
+ import { desktopArtifactOutput, desktopTargetBuildPaths, resolveDesktopBuildTarget } from './desktop-build-paths.mjs'
+ import { installWindowsDirectoryInstaller } from './windows-directory-installer.mjs'
+ import { preserveWindowsRuntimeSignature, signWindowsCode } from './windows-runtime-signature.mjs'
+@@ -66,7 +67,13 @@ export function createElectronBuilderConfig(
+   if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
+   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
+   const packagesWindows = resolvedPlatform === 'win32'
+-  const policy = packagesMacOS && unsigned ? undefined : resolveDesktopPolicyEnvironment(env)
++  // Linux carries no policy identity at all, and upstream suppresses the policy for local unsigned
++  // macOS builds; every remaining target embeds and polls it.
++  const policy = desktopPlatformEmbedsPolicy(resolvedPlatform) && !(packagesMacOS && unsigned)
++    ? resolveDesktopPolicyEnvironment(env)
++    : undefined
++  const linuxFormats = resolvedPlatform === 'linux' ? resolveDesktopLinuxFormats(env) : undefined
++  const linuxPackages = linuxFormats === undefined ? undefined : resolveDesktopLinuxPackageMetadata(env, linuxFormats)
+   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
+   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
+   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
+@@ -111,6 +118,10 @@ export function createElectronBuilderConfig(
+       dshDesktopAppId: appId,
+       dshDesktopUpdateChannel: update?.channel ?? 'nightly',
+       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
++      // Read by Electron as the window app_id and by the Linux target as the .desktop filename.
++      ...(resolvedPlatform === 'linux' ? { desktopName: 'deepseek-harness' } : {}),
++      // fpm takes the project URL from the packaged manifest when it builds a Debian or RPM control file.
++      ...(linuxPackages === undefined ? {} : { homepage: linuxPackages.homepage }),
+       ...buildVersion === productVersion ? {} : { version: buildVersion },
+       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
+     },
+@@ -120,7 +131,10 @@ export function createElectronBuilderConfig(
+     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
+     artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
+     directories: { output: output.directory },
+-    asar: true,
++    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
++    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
++    // subprocesses load readable outside Electron.
++    asar: resolvedPlatform !== 'linux',
+     electronDist: buildPaths.electron,
+     electronFuses: { runAsNode: true },
+     beforeBuild: async () => {
+@@ -253,9 +267,38 @@ export function createElectronBuilderConfig(
+       target: ['nsis'],
+     },
+     linux: {
++      // Linux shares macOS's artwork. The SVG rather than the PNG: a single PNG file is installed
++      // as-is at its own pixel size, which put the icon at hicolor/1024x1024/apps — a directory
++      // several distributions' hicolor index.theme does not declare, leaving it unresolvable. SVG
++      // installs to hicolor/scalable/apps, which every hicolor index.theme declares.
++      icon: fileURLToPath(new URL('../resources/icon-macos.svg', import.meta.url)),
+       category: 'Development',
+-      target: ['AppImage'],
++      // electron-builder otherwise derives the command from the scoped package name.
++      executableName: 'deepseek-harness',
++      // Electron derives the window app_id from desktopName, and StartupWMClass has to match it for a
++      // desktop environment to associate the running window with this entry.
++      syncDesktopName: true,
++      // fpm writes the synopsis as the Debian Description's first line and as the RPM Summary. Debian
++      // policy requires a nonempty synopsis there, and an unset one leaves that line blank.
++      synopsis: 'DeepSeek Harness desktop application',
++      // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
++      ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
++      target: linuxFormats ?? ['AppImage'],
+     },
++    // The legacy AppImage toolset otherwise writes "Exec=AppRun --no-sandbox %U", which turns off the
++    // Chromium sandbox for every launch from the desktop menu. An explicitly empty argument list keeps
++    // that flag out of the entry and leaves AppRun's own "unshare -Ur true" probe in charge: it adds the
++    // flag only where user namespaces are unavailable. Scoped to this target because the fpm targets
++    // take executableArgs from the linux options, where an empty array would leave a double space in
++    // their Exec line.
++    appImage: { executableArgs: [] },
++    // fpm derives the package name from the scoped package.json name and otherwise falls back to the
++    // product name, which contains a space. The Debian backend silently rewrites that, but rpmbuild
++    // rejects it with "Tag takes single token only", so both formats name the package explicitly.
++    // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
++    // Group as "default", which names neither a Debian section nor an RPM group.
++    deb: { packageName: 'deepseek-harness', packageCategory: 'devel' },
++    rpm: { packageName: 'deepseek-harness', packageCategory: 'Development/Tools' },
+     nsis: {
+       uninstallDisplayName: '${productName}',
+       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),

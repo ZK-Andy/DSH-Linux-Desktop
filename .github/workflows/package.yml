@@ -1,0 +1,195 @@
+name: package-rpm
+
+# 可复用的出包腿：release.yml（tag）与 build.yml（周更/手动触发）都调用它。
+# 它只负责「产出签名过、静态验收过、容器冒烟过的 rpm」，不碰任何 Release 状态。
+on:
+  workflow_call:
+    inputs:
+      upstream_tag:
+        description: Upstream tag to build (defaults to the pinned tag in upstream-tag)
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: build-rpm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_TAG: ${{ inputs.upstream_tag || '' }}
+
+jobs:
+  rpm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Electron payload plus the unpacked build tree needs more room than the runner image leaves.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm xz-utils cpio
+          rpmbuild --version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+          run_install: false
+
+      # 缓存放在 fetch 之后：key 要用上游的 pnpm-lock.yaml，而它只有克隆完才存在。
+      # 之前在 fetch 之前算 hashFiles 得到空串，key 退化成常量，缓存永远不更新。
+      - name: Fetch upstream
+        run: |
+          if [ -n "${UPSTREAM_TAG}" ]; then
+            echo "${UPSTREAM_TAG}" > upstream-tag
+          fi
+          scripts/fetch-upstream.sh
+          echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-store-${{ hashFiles('upstream/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
+
+      # electronDist() downloads the Electron zip on every clean runner; electron-builder also caches
+      # the fpm/appimage toolchains it unpacks. Both are content-addressed by version, so keying on the
+      # lockfile is enough and a stale entry only costs one miss.
+      - name: Cache Electron and builder toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ hashFiles('upstream/pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-
+
+      # Release 段从 tag 推：v0.2.2-alpha.2-2 → 2；分支/定时触发的包沿用默认 2。
+      - name: Resolve rpm release
+        run: |
+          release=$(printf '%s' "${GITHUB_REF_NAME:-}" | sed -n 's/^v.*-\([0-9][0-9]*\)$/\1/p')
+          echo "DSH_RPM_BUILD_NUMBER=${release:-2}" >> "$GITHUB_ENV"
+
+      - name: Apply patches
+        run: scripts/apply-patches.sh
+
+      - name: Install workspace dependencies
+        working-directory: upstream
+        run: |
+          pnpm config set store-dir ~/.local/share/pnpm/store
+          pnpm install --frozen-lockfile
+
+      - name: Build rpm
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          DSH_DESKTOP_BUILD_COMMIT: ${{ env.UPSTREAM_COMMIT }}
+          DSH_DESKTOP_BUILD_DIRTY: '0'
+        run: scripts/build.sh --rpm
+
+      # electron-builder 的产物名带 -unsigned（构建阶段确实没签）；签名在下一步发生，所以这里
+      # 先把发布名去掉后缀，保证 dist/ 与 Release 上的文件名和「已签名」事实一致。
+      - name: Collect rpm
+        run: |
+          set -euo pipefail
+          rpm=$(find upstream/apps/desktop/.desktop-build/targets/linux-x64 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          mkdir -p dist
+          name=$(basename "$rpm")
+          cp "$rpm" "dist/${name%-unsigned.rpm}.rpm"
+
+      # 签名是发布的前提：没有私钥就失败，不发未签名包。公钥进 rpmdb 后才能验自家签名。
+      - name: Sign rpm
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo '::error::secrets.GPG_PRIVATE_KEY 未配置，拒绝产出未签名 rpm'
+            exit 1
+          fi
+          command -v rpmsign >/dev/null || { echo '::error::rpmsign 不存在（apt rpm 未提供签名工具）'; exit 1; }
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          keydb="$(mktemp -d)"
+          trap 'rm -rf "$GNUPGHOME" "$keydb" "${pass:-}"' EXIT
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          pass=$(mktemp)
+          printf '%s' "$GPG_PASSPHRASE" > "$pass"
+          rpm=$(find dist -maxdepth 1 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          rpmsign --define "_gpg_name ${GPG_KEY_ID}" \
+            --define "__gpg_sign_cmd %{__gpg} gpg --batch --no-armor --pinentry-mode loopback --passphrase-file ${pass} --no-secmem-warning -u %{_gpg_name} -sbo %{__signature_filename} %{__plaintext_filename}" \
+            --addsign "$rpm"
+          rpm --dbpath "$keydb" --import packaging/RPM-GPG-KEY-dsh-desktop
+          rpm --dbpath "$keydb" -Kv "$rpm"
+          cp packaging/RPM-GPG-KEY-dsh-desktop dist/
+          rm -f "$pass"
+
+      # 先传产物再验收：验收脚本自己出问题时，失败的那次 run 里也拿得到 rpm 复现。
+      - name: Upload rpm
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-rpm
+          path: |
+            dist/*.rpm
+            dist/RPM-GPG-KEY-dsh-desktop
+          if-no-files-found: warn
+
+      - name: Verify rpm (static)
+        run: |
+          set -euo pipefail
+          rpm=$(find dist -maxdepth 1 -name '*.rpm' | head -1)
+          test -n "$rpm"
+          bash scripts/verify.sh "$rpm"
+          rpm -qip "$rpm"
+          # 留痕（不判门）：Requires 全量给人和 dnf 对照，前 60 行足够看。
+          echo "== rpm Requires =="
+          rpm -qp --requires "$rpm" 2>&1 | head -60 || true
+
+      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器；
+      # 截图与日志落宿主目录，按「跑过且失败=error、其余=warn」分档上传（warn 恒定的上传步
+      # 等于永不失败的门）。
+      - name: Smoke install rpm
+        id: smoke
+        env:
+          SMOKE_SHOT_DIR: ${{ github.workspace }}/shots
+          SMOKE_LOG_DIR: ${{ github.workspace }}/smoke-logs
+        run: bash scripts/smoke-install-rpm.sh dist
+
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-shot-linux-x64
+          path: shots/
+          if-no-files-found: ${{ steps.smoke.outcome == 'failure' && 'error' || 'warn' }}
+          retention-days: 7
+
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log-linux-x64
+          path: smoke-logs/
+          if-no-files-found: ${{ steps.smoke.outcome == 'failure' && 'error' || 'warn' }}
+          retention-days: 7

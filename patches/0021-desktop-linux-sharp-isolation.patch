@@ -1,0 +1,310 @@
+diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
+new file mode 100644
+index 0000000..9198621
+--- /dev/null
++++ b/apps/desktop/resources/sharp-worker.cjs
+@@ -0,0 +1,57 @@
++'use strict'
++
++/**
++ * Isolated Sharp runner. Electron's Linux process links its own glib, which
++ * aborts libvips (electron/electron#46323); this child runs plain Node instead.
++ */
++
++const { createRequire } = require('node:module')
++const { join } = require('node:path')
++const { createInterface } = require('node:readline')
++
++const moduleDirectory = process.env.DSH_SHARP_MODULE_DIR
++if (moduleDirectory === undefined || moduleDirectory === '') {
++  process.stderr.write('sharp worker: DSH_SHARP_MODULE_DIR is required\n')
++  process.exit(2)
++}
++const sharp = createRequire(join(moduleDirectory, 'sharp-worker.cjs'))('sharp')
++
++/**
++ * Run one recorded Sharp pipeline and reply with the terminal result.
++ * @param {object} request - Recorded input, pipeline operations, and terminal call.
++ * @returns {Promise<object>} Serialized result for the desktop process.
++ */
++async function execute(request) {
++  let pipeline = sharp(Buffer.from(request.input, 'base64'), request.options ?? {})
++  for (const op of request.ops) pipeline = pipeline[op.name](...(op.args ?? []))
++  const value = await pipeline[request.terminal](...(request.args ?? []))
++  if (Buffer.isBuffer(value)) return { kind: 'buffer', base64: value.toString('base64') }
++  if (value !== null && typeof value === 'object' && Buffer.isBuffer(value.data)) {
++    return { kind: 'object', value: { ...value, data: value.data.toString('base64') } }
++  }
++  return { kind: 'value', value }
++}
++
++const lines = createInterface({ input: process.stdin })
++lines.on('line', (line) => {
++  let request
++  try {
++    request = JSON.parse(line)
++  } catch (error) {
++    process.stderr.write(`sharp worker: malformed request: ${String(error)}\n`)
++    return
++  }
++  execute(request).then(
++    (result) => { process.stdout.write(`${JSON.stringify({ id: request.id, ok: true, result })}\n`) },
++    (error) => {
++      process.stdout.write(`${JSON.stringify({
++        id: request.id,
++        ok: false,
++        error: {
++          message: error instanceof Error ? error.message : String(error),
++          code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
++        },
++      })}\n`)
++    },
++  )
++})
+diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
+index 969e104..19e5f15 100644
+--- a/apps/desktop/scripts/electron-builder-config.mjs
++++ b/apps/desktop/scripts/electron-builder-config.mjs
+@@ -83,7 +83,13 @@ export function createElectronBuilderConfig(
+   let dshDestination
+   let windowsCode = []
+   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
+-    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
++    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
++    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
++    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
++    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
++    // dependencies left inside the archive, so they are unpacked alongside the package.
++    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
++    '**/node_modules/semver/**']
+   const windowsSigner = packagesWindows && !unsigned
+     ? createWindowsTokenSigner({
+         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
+@@ -131,10 +137,10 @@ export function createElectronBuilderConfig(
+     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
+     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
+     directories: { output: output.directory },
+-    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
+-    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
+-    // subprocesses load readable outside Electron.
+-    asar: resolvedPlatform !== 'linux',
++    // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
++    // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
++    // cannot read inside the archive (see the asarUnpack patterns below).
++    asar: true,
+     electronDist: buildPaths.electron,
+     electronFuses: { runAsNode: true },
+     beforeBuild: async () => {
+@@ -176,6 +182,8 @@ export function createElectronBuilderConfig(
+       // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
+       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
+       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
++      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
+     ],
+     mac: {
+       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
+diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
+new file mode 100644
+index 0000000..96c249d
+--- /dev/null
++++ b/packages/attachment/attachment-local/src/sharp-worker-client.ts
+@@ -0,0 +1,176 @@
++/** Remote Sharp runner: keeps libvips out of Electron's process (electron/electron#46323). */
++
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
++import { existsSync } from 'node:fs'
++import { join } from 'node:path'
++import { createInterface } from 'node:readline'
++import type sharp from 'sharp'
++
++type SharpFactory = typeof sharp
++type SharpInstance = ReturnType<SharpFactory>
++
++/** One recorded builder call replayed by the worker. */
++interface RecordedCall {
++  readonly name: string
++  readonly args: readonly unknown[]
++}
++
++/** Calls that end a pipeline and cross the process boundary. */
++const TERMINAL_CALLS = new Set(['toBuffer', 'toFile', 'metadata', 'stats'])
++
++/** Resources directory reported by Electron; absent under plain Node. */
++const resourcesDirectory: string | undefined = Reflect.get(process, 'resourcesPath') as string | undefined
++
++/** Places a packaged build can keep the hoisted sharp module, relative to the resources directory. */
++const PACKAGED_MODULE_DIRECTORIES = [
++  join('app.asar.unpacked', 'dsh', 'node_modules'),
++  join('app.asar.unpacked', 'node_modules'),
++  join('app.asar.unpacked', 'dsh', 'packages', 'attachment', 'attachment-local', 'node_modules'),
++]
++
++/**
++ * Locate the unpacked sharp module inside a packaged application.
++ * @returns The first candidate directory that actually contains sharp, or undefined outside a package.
++ */
++function packagedModuleDirectory(): string | undefined {
++  if (resourcesDirectory === undefined) return undefined
++  return PACKAGED_MODULE_DIRECTORIES
++    .map((relative) => join(resourcesDirectory, relative))
++    .find((candidate) => existsSync(join(candidate, 'sharp', 'package.json')))
++}
++
++function configured(name: string, fallback: string): string | undefined {
++  const explicit = process.env[name]
++  if (explicit !== undefined && explicit !== '') return explicit
++  return resourcesDirectory === undefined ? undefined : join(resourcesDirectory, fallback)
++}
++
++interface WorkerReply {
++  readonly id: number
++  readonly ok: boolean
++  readonly result?: { readonly kind: 'buffer'; readonly base64: string }
++    | { readonly kind: 'object'; readonly value: Record<string, unknown> }
++    | { readonly kind: 'value'; readonly value: unknown }
++  readonly error?: { readonly message: string; readonly code?: string }
++}
++
++/** Serializes pipelines over one long-lived worker process. */
++class SharpWorkerClient {
++  private child: ChildProcessWithoutNullStreams | undefined
++  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
++  private sequence = 0
++
++  constructor(
++    private readonly nodeBinary: string,
++    private readonly workerScript: string,
++    private readonly moduleDirectory: string,
++  ) {}
++
++  private start(): ChildProcessWithoutNullStreams {
++    const child = spawn(this.nodeBinary, [this.workerScript], {
++      stdio: ['pipe', 'pipe', 'pipe'],
++      env: { ...process.env, DSH_SHARP_MODULE_DIR: this.moduleDirectory },
++    })
++    createInterface({ input: child.stdout }).on('line', (line) => { this.settle(line) })
++    child.stderr.on('data', (chunk: Buffer) => { process.stderr.write(chunk) })
++    // The worker must not keep its parent alive once the Host shuts down.
++    child.unref()
++    for (const stream of [child.stdin, child.stdout, child.stderr]) {
++      const unref = Reflect.get(stream, 'unref')
++      if (typeof unref === 'function') unref.call(stream)
++    }
++    child.once('exit', (code) => { this.rejectAll(new Error(`sharp worker exited with ${String(code ?? 'signal')}`)) })
++    child.once('error', (error) => { this.rejectAll(error) })
++    return child
++  }
++
++  private settle(line: string): void {
++    const reply = JSON.parse(line) as WorkerReply
++    const waiter = this.pending.get(reply.id)
++    if (waiter === undefined) return
++    this.pending.delete(reply.id)
++    if (!reply.ok) {
++      const error = new Error(reply.error?.message ?? 'sharp worker failed')
++      if (reply.error?.code !== undefined) Reflect.set(error, 'code', reply.error.code)
++      waiter.reject(error)
++      return
++    }
++    const result = reply.result
++    if (result === undefined) { waiter.resolve(undefined); return }
++    if (result.kind === 'buffer') { waiter.resolve(Buffer.from(result.base64, 'base64')); return }
++    if (result.kind === 'object') {
++      const { data, ...rest } = result.value
++      waiter.resolve(typeof data === 'string' ? { ...rest, data: Buffer.from(data, 'base64') } : result.value)
++      return
++    }
++    waiter.resolve(result.value)
++  }
++
++  private rejectAll(error: Error): void {
++    this.child = undefined
++    for (const waiter of this.pending.values()) waiter.reject(error)
++    this.pending.clear()
++  }
++
++  call(input: Buffer, options: unknown, calls: readonly RecordedCall[], terminal: string,
++    args: readonly unknown[]): Promise<unknown> {
++    this.child ??= this.start()
++    const id = ++this.sequence
++    return new Promise((resolve, reject) => {
++      this.pending.set(id, { resolve, reject })
++      this.child?.stdin.write(`${JSON.stringify({
++        id,
++        input: input.toString('base64'),
++        options,
++        ops: calls,
++        terminal,
++        args,
++      })}\n`)
++    })
++  }
++}
++
++/**
++ * Build a fluent Sharp stand-in whose pipeline executes in the worker process.
++ * @param client - Worker connection shared by every pipeline.
++ * @param input - Encoded source bytes.
++ * @param options - Constructor options forwarded to the worker.
++ * @param calls - Recorded builder calls, replayed in order.
++ * @returns A Sharp instance that records calls until a terminal operation runs.
++ */
++function builder(client: SharpWorkerClient, input: Buffer, options: unknown, calls: readonly RecordedCall[]): SharpInstance {
++  const target = function recordedPipeline(): void {}
++  const handler: ProxyHandler<typeof target> = {
++    get(_target, property) {
++      if (typeof property !== 'string' || property === 'then') return undefined
++      if (property === 'clone') return () => builder(client, input, options, calls)
++      return (...args: unknown[]): unknown => {
++        if (TERMINAL_CALLS.has(property)) return client.call(input, options, calls, property, args)
++        return builder(client, input, options, [...calls, { name: property, args }])
++      }
++    },
++  }
++  return new Proxy(target, handler) as unknown as SharpInstance
++}
++
++/**
++ * Create the Sharp factory used by attachment decoding.
++ * @returns A factory that forwards every pipeline to the isolated worker.
++ */
++export function createSharpRunner(): SharpFactory {
++  // Packaged: everything is resolved under the packaged resources directory, so no environment setup.
++  // Development and tests: the worker and module directory cannot be inferred from a packager layout,
++  // and the plugin entry point has nowhere else to read them from, so they must be set explicitly.
++  const nodeBinary = configured('DSH_SHARP_NODE_BIN', join('runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node')) ?? 'node'
++  const workerScript = configured('DSH_SHARP_WORKER', 'sharp-worker.cjs')
++  const explicitModuleDirectory = process.env.DSH_SHARP_MODULE_DIR
++  const moduleDirectory = explicitModuleDirectory !== undefined && explicitModuleDirectory !== ''
++    ? explicitModuleDirectory
++    : packagedModuleDirectory()
++  if (workerScript === undefined || moduleDirectory === undefined) {
++    throw new Error('sharp runner: cannot locate sharp; set DSH_SHARP_WORKER and DSH_SHARP_MODULE_DIR outside a packaged application')
++  }
++  const client = new SharpWorkerClient(nodeBinary, workerScript, moduleDirectory)
++  return ((input: Buffer | Uint8Array, options?: unknown) =>
++    builder(client, Buffer.from(input), options, [])) as unknown as SharpFactory
++}
+diff --git a/packages/attachment/attachment-local/src/sharp.ts b/packages/attachment/attachment-local/src/sharp.ts
+index 798b21a..d4972f4 100644
+--- a/packages/attachment/attachment-local/src/sharp.ts
++++ b/packages/attachment/attachment-local/src/sharp.ts
+@@ -1,7 +1,13 @@
+-/** Process-realm lazy access to Sharp's CommonJS-compatible entry. */
++/** Process-realm access to Sharp through an isolated Node child. */
+ 
+ import type sharp from 'sharp'
+-import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
++import { createSharpRunner } from './sharp-worker-client.ts'
+ 
+-/** Load Sharp on the first raster operation and retain its callable export. */
+-export const requireSharp = createLazyRequire<typeof sharp>('sharp', import.meta.url)
++/**
++ * The Sharp factory backed by the worker; see sharp-worker-client.ts.
++ * The runner owns one child process, so it must be created once per process:
++ * every decode goes through the same worker. Creating one per call leaked a
++ * Node child and its libvips heap per image operation.
++ */
++let runner: typeof sharp | undefined
++export const requireSharp = (): typeof sharp => (runner ??= createSharpRunner())
