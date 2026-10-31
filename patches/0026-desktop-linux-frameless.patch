@@ -154,7 +154,7 @@ index 0000000..34a32a8
 +
 +exit 0
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 19e5f15..df3668e 100644
+index 19e5f15..589e1be 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -136,6 +136,10 @@ export function createElectronBuilderConfig(
@@ -163,8 +163,8 @@ index 19e5f15..df3668e 100644
      artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
 +    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
 +    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
-+    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 2.
-+    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '3',
++    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 4.
++    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '4',
      directories: { output: output.directory },
      // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
      // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
