@@ -154,7 +154,7 @@ index 0000000..34a32a8
 +
 +exit 0
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 19e5f15..589e1be 100644
+index 19e5f15..82999f4 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -136,6 +136,10 @@ export function createElectronBuilderConfig(
@@ -163,8 +163,8 @@ index 19e5f15..589e1be 100644
      artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
 +    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
 +    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
-+    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 4.
-+    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '4',
++    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 5.
++    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '5',
      directories: { output: output.directory },
      // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
      // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
@@ -922,10 +922,10 @@ index 1764a25..a2a986a 100644
    /** Remove the icon; called once the quit is confirmed so no dead icon outlives the process. */
 diff --git a/apps/desktop/src/update-download.ts b/apps/desktop/src/update-download.ts
 new file mode 100644
-index 0000000..b4625a0
+index 0000000..ee6396c
 --- /dev/null
 +++ b/apps/desktop/src/update-download.ts
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,101 @@
 +/**
 + * Linux update download: fetch the signed rpm named by the release manifest, hash it while it
 + * streams, and verify the OpenPGP signature before the helper is ever allowed to install it.
@@ -1017,7 +1017,9 @@ index 0000000..b4625a0
 +  const db = await mkdtemp(join(tmpdir(), 'dsh-update-keys-'))
 +  try {
 +    await run('rpm', ['--dbpath', db, '--import', keyPath], { encoding: 'utf8' })
-+    const { stdout } = await run('rpm', ['--dbpath', db, '-Kv', rpmPath], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
++    // Non-verbose on purpose: `-Kv` prints one line per digest and never emits
++    // "digests signatures OK", which made every signed package look unverified.
++    const { stdout } = await run('rpm', ['--dbpath', db, '-K', rpmPath], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
 +    return /digests signatures OK/.test(stdout)
 +  } catch {
 +    return false
