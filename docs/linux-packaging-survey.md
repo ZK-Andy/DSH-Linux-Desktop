@@ -151,7 +151,7 @@
   - macOS-Terminal 的 `__os_install_post %{nil}` + 手写 Requires 是 Electron 包的标准解法（别让 rpmbuild strip 那堆 .so）。
 - **布局选 `/opt/deepseek-harness-desktop` + `/usr/bin` 符号链接**，与 1、2 一致；不采纳 TommyFang 的 HOME 引导包——它让 dnf 失去文件所有权，R5 的「一次授权」就没意义了。
 - **R3 自启**：`%post` 写 `/etc/xdg/autostart` 更可控，且能配 `--hidden`；不要用 westanke 的 `setLoginItemSettings`（Electron API 在 Linux 的落地文件名未核实）。
-- **R5 坚决不嵌 feed**：照 2 的 PKGBUILD，只写 `DSH_DESKTOP_APP_ID`、不设 `DSH_DESKTOP_LINUX_UPDATE_ORIGIN`；检查更新只读 `version.json`，安装只走 `pkexec` + `dnf5`。
+- **R5 坚决不嵌 feed**：照 2 的 PKGBUILD，只写 `DSH_DESKTOP_APP_ID`、不设 `DSH_DESKTOP_LINUX_UPDATE_ORIGIN`；检查更新只走 `dnf5 repoquery --upgrades`，安装只走 `pkexec` + `dnf5 upgrade`。
 - **降级策略**：若哪天决定「上游不值得跟」，`upstream-ceiling.txt` + 每天探测 tag、超限自动开 issue 可直接拿来当 CI 策略。
 
 ## 5. 附录：不是官方客户端、但值得看一眼

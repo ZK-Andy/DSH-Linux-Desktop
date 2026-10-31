@@ -40,7 +40,7 @@
 - electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
 - 构建配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
 - `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
-- 预发布版本映射：`dsh-v0.2.2-alpha.2` → rpm `0.2.2~alpha.2`。M2 用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 实测钉死，`version.json` 与 rpm 用同一套映射。
+- 预发布版本映射：`dsh-v0.2.2-alpha.2` → rpm `0.2.2~alpha.2`。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。
 - GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
@@ -51,7 +51,7 @@
 ### 3.3 分发
 
 - 产物上传公开仓库 `DSH-Linux-Desktop` 的 GitHub Releases（单文件上限 2GB）。
-- 每个 Release 附 rpm、`version.json`（版本、rpm URL、sha256）、公钥 `RPM-GPG-KEY-dsh-desktop`。
+- 每个 Release 附 rpm、`SHA256SUMS.txt`、公钥 `RPM-GPG-KEY-dsh-desktop`；repodata 由 `release.yml` 的 `repo` 作业刷新到 `gh-pages`。
 - GPG：私钥进 Actions secrets，`rpm --addsign`；公钥随包安装到 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`，并在 Release 里单列一份。
 - **首装公钥**：`dnf5` 校验签名需要 rpmdb 里有公钥，因此 README 的首装命令是两步——先 `sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop`，再 `dnf5 install ./dsh-desktop-*.rpm`。这是第三方签名 rpm 的标准做法，不是临时绕行；更新链由 helper 自动 import，不再需要用户手动做。
 - 先做 A：只发 Releases，应用内更新（见 §3.4）。B（dnf 仓库 + `.repo` + `gh-pages` 孤儿分支）作为后续增量，不阻塞 R1–R5。
@@ -60,10 +60,11 @@
 
 - 唯一真源是包管理器；应用内不写 `/usr`，不做自更新。
 - **复用官方更新 UI**：改 `apps/desktop/src/update-coordinator.ts` 的状态机（:54 目前直接 `new autoUpdater`，:55 依赖 `app-update.yml`），保留 `update-dialog` / `update-presentation` 的渲染层契约，不另做原生 dialog，不搞两套更新界面。
-- 检查源：`https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/version.json`（走重定向，不碰 API 限流）；`version.json` 含版本号、rpm 地址、sha256。
-- 检查时机：启动后延迟一次 + 托盘/应用菜单「检查更新」；不静默下载。
-- 流程：检查版本 → 提示 → 下载 rpm 到 `~/.cache/dsh-desktop/` → 校验 sha256 → `rpmkeys --checksig` → `pkexec /usr/libexec/dsh-update-helper` → helper 先 `rpm --import` 随包公钥 → `dnf5 upgrade dsh-desktop` → `app.relaunch()` + `app.exit()`。
-- helper、polkit 策略与 `/etc/yum.repos.d/dsh-desktop.repo` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`），`%post` 不复制、`%postun` 不删除；`allow_active` 直接放行一次授权；helper 写日志到 `/var/log/dsh-desktop/update.log`。
+- 检查源：随包安装的 dnf 仓库，一条命令——`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（手动检查加 `--refresh`）。有输出 = 有更新，空 = 已是最新，非 0 退出 = 原样展示错误；不解析人类可读输出。
+- 检查时机：启动后延迟一次 + 托盘「检查更新」+ 设置页；不静默下载。
+- 流程：检查 → 提示 → `pkexec /usr/libexec/dsh-update-helper`（无参）→ helper `dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop` → `app.relaunch()` + `app.exit()`。应用内没有下载缓存、没有 sha256/`rpm -K` 校验，签名与完整性由 dnf 的 `gpgcheck`/`repo_gpgcheck` 负责。
+- 版本比较：把 rpm `EVR` 编码成 semver——预发布 `X.Y.Z~<pre>-R` → `X.Y.Z-<pre>.R`，正式版 `X.Y.Z-R` → `X.Y.Z-z.R`，去掉 `0:` epoch，按最后一个 `-` 切分；`currentVersion` 用同一函数编码安装中的版本。
+- helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与 `/var/log/dsh-desktop` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`）；`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载时删掉随包公钥；polkit `allow_active` 放行一次；helper 只接受零参数，日志写 `/var/log/dsh-desktop/update.log`。`.repo` 用 `metadata_expire=1h`、`skip_if_unavailable=1`、`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`。
 - electron-updater 的下载/安装路径在补丁里整体替换（不是「禁用后另开一路」），避免两套状态机并存。
 
 ### 3.5 桌面集成
@@ -127,18 +128,18 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 - **M1 本地跑通（dev）**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘、关窗隐藏后能召回，并验证 sharp 隔离后 `read_image`/图片附件不再崩 Host（只验行为，不出包）。
 - **M2 CI 出包**：CI 构建 rpm（含冒烟截图与 SNI 检查），`dnf5 install` 产物后可启动；实测并钉死版本映射、`/opt` 路径、`WM_CLASS` 与依赖。
 - **M3 CI + 自动跟版**：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
-- **M4 更新链**：`version.json` 检查 → 官方更新 UI → 下载 → helper → 授权 → 安装 → 重启。
+- **M4 更新链**：`dnf5 repoquery --upgrades` 检查 → 官方更新 UI → helper（无参）→ 授权 → `dnf5 upgrade` → 重启。
 - **M5 收尾**：单实例复核、GPG 校验、README 前置条件、docs 成文。
 - dnf 仓库（B）不进里程碑，M1–M5 完成后再评估。
 
 ## 6. 明确不做
 
 - 不做新桌面壳，不内嵌 WebView/CEF；Chromium 由官方 Electron 应用提供。
-- 不做应用内自更新。
+- 不做应用内自更新：不下载、不校验、不安装 rpm，安装只经 `pkexec` + 系统包管理器。
 - 不做开机自启（2026-10-30 取消）。
 - 不出 AppImage / deb / zip；AppImage 的自更新路径与 RPM 冲突，不保留。
 - 不做「原生 dialog 版更新入口」的过渡实现，也不做两套更新界面。
-- 暂不建 dnf 仓库（`.repo` + repodata），先以 Releases 为分发面。
+- dnf 仓库已建（`.repo` + repodata 在 `gh-pages`），Releases 仍提供 rpm 与公钥；应用只通过 dnf 发现与安装更新。
 - 不追非 Linux 平台；换发行版只换 `linux.target` 与更新适配器。
 - 不维护 .NET 客户端，不在本项目里保留旧壳代码。
 - 不替换 Host 运行时（不引入独立 Node、不因此关 ASAR）。
@@ -204,22 +205,6 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
 
 执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M2、M3、M4、M6、M7 已完成，条目已删除；对应断言（每文件单补丁、Linux 文案与 builder 配置的归属）已转为 `patch-surface.sh` 的常规检查。
-
-### M5 更新收敛为 dnf-only
-
-- 现状：应用内仍有自行下载、校验 rpm 的链路（`update-feed.ts`、`update-download.ts`，由 `0008-updates-dnf.patch` 拥有）；Releases 侧仍生成 `version.json`。
-- 目标：按 AGENTS.md 2.6 删除应用内下载/校验实现，`update-linux.ts` 收敛为 `dnf5 check-upgrade` + 无参 helper。删除：
-  - `apps/desktop/src/update-feed.ts`；
-  - `apps/desktop/src/update-download.ts` 的下载/校验，及对应测试；
-  - `scripts/make-version-json.sh` 与 `release.yml` 中对应步骤；
-  - `scripts/release-preflight.sh` 对 `version.json` 的核对。
-  `.repo`：`metadata_expire=1h`、`skip_if_unavailable=1`、`gpgcheck=1`、`repo_gpgcheck=1`；应用内检查加 `--setopt=dsh-desktop.skip_if_unavailable=0`。
-- 验收：
-  1. `grep -r 'version.json\|update-feed\|update-download' patches scripts .github` 无结果；
-  2. 检查命令退出码 `100` → 有更新，`0` → 无更新，其他 → 原样展示错误；
-  3. helper 不接受参数，只执行 `dnf5 upgrade -y --refresh dsh-desktop`；
-  4. 文档同步：README（version.json、应用内下载、sha256、`rpm -Kv` 相关段落）与 PLAN.md R4、§3.4、§6（「不做应用内自更新」「暂不建 dnf 仓库」）按 dnf-only 改写；`grep -n 'version.json' README.md PLAN.md` 只命中本节。
-- 负责补丁：`0008-updates-dnf.patch`。
 
 ### M8 补丁首行与门禁
 

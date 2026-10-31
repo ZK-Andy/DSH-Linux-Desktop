@@ -106,16 +106,17 @@ printf '{"id":1,"input":"%s","options":{"failOn":"error","limitInputPixels":fals
   | grep -q '"ok":true' || { log "sharp worker 解码失败：检查 0021 的 asarUnpack 是否含 detect-libc 与 semver"; exit 1; }
 log "sharp 解码 OK"
 
-# 更新链：helper 与 polkit 策略由 rpm %post 装到系统位置，helper 自己跑一遍升级（同版本重装）。
-log "验证更新链 helper 与 polkit 策略"
+# 更新链（M5）：helper、polkit 策略、.repo 与公钥都由 rpm 拥有；helper 不接受参数，
+# 只触发一次 `dnf5 upgrade dsh-desktop`。这里真跑一次，验证它不需要任何外部参数。
+log "验证更新链 helper 与 dnf 仓库"
 [ -x /usr/libexec/dsh-update-helper ] || { log "缺少 /usr/libexec/dsh-update-helper"; exit 1; }
 [ -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy ]   || { log "缺少 polkit 策略"; exit 1; }
-[ -f "$pkg/RPM-GPG-KEY-dsh-desktop" ] || { log "缺少随包公钥"; exit 1; }
-mkdir -p /var/cache/dsh-desktop
-cp /pkg/*.rpm /var/cache/dsh-desktop/
-/usr/libexec/dsh-update-helper /var/cache/dsh-desktop/*.rpm \
+[ -f /etc/yum.repos.d/dsh-desktop.repo ] || { log "缺少 /etc/yum.repos.d/dsh-desktop.repo"; exit 1; }
+[ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop ] || { log "缺少随包公钥"; exit 1; }
+rpm -qa 'gpg-pubkey-c85f90ee*' | grep -q . || { log "公钥没有导入 rpmdb"; exit 1; }
+/usr/libexec/dsh-update-helper \
   || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
-grep -q '安装成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
+grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
 # M4：系统侧文件现在由 rpm 自己拥有，安装后不应出现校验差异。
 rpm -q --whatprovides /usr/libexec/dsh-update-helper >/dev/null || { log "helper 不属于任何包"; exit 1; }
 rpm -q --whatprovides /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy >/dev/null \

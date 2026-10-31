@@ -5,12 +5,12 @@
 <policyconfig>
   <vendor>DSH Linux Desktop</vendor>
   <action id="org.deepseek.harness.desktop.update">
-    <description>Install a downloaded DeepSeek Harness desktop update</description>
-    <message>Authentication is required to install the downloaded update.</message>
+    <description>Upgrade DeepSeek Harness desktop from the dsh-desktop repository</description>
+    <message>Authentication is required to upgrade the desktop application.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
+      <allow_active>yes</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dsh-update-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>

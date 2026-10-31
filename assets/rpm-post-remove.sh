@@ -25,3 +25,11 @@ if [ -f "$APPARMOR_PROFILE_DEST" ]; then
   fi
   rm -f "$APPARMOR_PROFILE_DEST"
 fi
+
+# --- DSH Linux Desktop: 卸载（不是升级）时撤掉随包导入的更新链公钥 ---
+# key ID 必须与 packaging/RPM-GPG-KEY-dsh-desktop 一致，verify.sh 会核对两者。
+if [ "$1" = "0" ]; then
+  for key in $(rpm -qa 'gpg-pubkey-c85f90ee*' 2>/dev/null); do
+    rpm -e --allmatches "$key" > /dev/null 2>&1 || true
+  done
+fi

@@ -55,3 +55,9 @@ if apparmor_status --enabled > /dev/null 2>&1; then
     echo "Skipping the installation of the AppArmor profile as this version of AppArmor does not seem to support the bundled profile"
   fi
 fi
+
+# --- DSH Linux Desktop: 更新链的公钥由 rpm 拥有，这里做一次幂等导入 ---
+# 用户可能手工删过 keyring；导入到 rpmdb 后 dnf 首次同步仓库不再需要交互确认。
+if [ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop ]; then
+  rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop > /dev/null 2>&1 || true
+fi

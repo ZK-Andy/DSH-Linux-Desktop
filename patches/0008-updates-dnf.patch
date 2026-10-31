@@ -1,15 +1,14 @@
-变化理由：应用内更新：读 version.json、下载并验签 rpm、经 pkexec helper 升级。
+变化理由：更新收敛为 dnf-only：检查走 dnf5 repoquery --upgrades，安装走无参 polkit helper 的 dnf5 upgrade；应用内不再下载、校验或缓存 rpm。
 diff --git a/apps/desktop/src/linux-updates.ts b/apps/desktop/src/linux-updates.ts
 new file mode 100644
-index 00000000..00c888c1
+index 00000000..03f987b8
 --- /dev/null
 +++ b/apps/desktop/src/linux-updates.ts
-@@ -0,0 +1,35 @@
-+import { app } from 'electron'
+@@ -0,0 +1,30 @@
 +import { existsSync } from 'node:fs'
-+import { join } from 'node:path'
-+import { LINUX_UPDATE_FEED_URL } from './update-feed.ts'
-+import { LinuxPackageUpdater, defaultCacheDir, installedRpmReleaseSync } from './update-linux.ts'
++import {
++  LINUX_UPDATER_HELPER, LinuxPackageUpdater, currentLinuxVersion,
++} from './update-linux.ts'
 +
 +export interface LinuxUpdateRuntime {
 +  updater?: LinuxPackageUpdater
@@ -18,255 +17,52 @@ index 00000000..00c888c1
 +}
 +
 +/**
-+ * Linux installs through the package manager, so the coordinator talks to a release-manifest
-+ * updater whose install step is a polkit-authorized helper; the embedded updater is never used.
-+ * The installed rpm release is part of the compared version, otherwise every start would offer
-+ * the build that is already installed.
++ * Linux updates go through the shipped dnf repository: the updater only asks dnf whether an
++ * upgrade exists, and the polkit helper installs it. The installed rpm release is part of the
++ * compared version, otherwise every start would offer the build that is already installed.
 + * @returns updater plus the coordinator hooks; empty off Linux.
 + */
 +export function linuxUpdateRuntime(): LinuxUpdateRuntime {
 +  if (process.platform !== 'linux') return {}
++  const helperPath = existsSync(LINUX_UPDATER_HELPER) ? LINUX_UPDATER_HELPER : undefined
 +  const updater = new LinuxPackageUpdater({
-+    feedUrl: LINUX_UPDATE_FEED_URL,
-+    cacheDir: defaultCacheDir(),
-+    // Tests and development runs have no resourcesPath; an update is then simply unavailable.
-+    ...process.resourcesPath === undefined ? {} : { keyPath: join(process.resourcesPath, 'RPM-GPG-KEY-dsh-desktop') },
-+    ...existsSync('/usr/libexec/dsh-update-helper') ? { helperPath: '/usr/libexec/dsh-update-helper' } : {},
++    ...helperPath === undefined ? {} : { helperPath },
++    currentVersion: currentLinuxVersion,
 +  })
-+  const release = installedRpmReleaseSync()
 +  return {
 +    updater,
 +    enabled: () => updater.available(),
-+    ...release === undefined ? {} : { currentVersion: () => `${app.getVersion()}.${release}` },
++    currentVersion: currentLinuxVersion,
 +  }
-+}
-diff --git a/apps/desktop/src/update-download.ts b/apps/desktop/src/update-download.ts
-new file mode 100644
-index 00000000..ee6396cb
---- /dev/null
-+++ b/apps/desktop/src/update-download.ts
-@@ -0,0 +1,101 @@
-+/**
-+ * Linux update download: fetch the signed rpm named by the release manifest, hash it while it
-+ * streams, and verify the OpenPGP signature before the helper is ever allowed to install it.
-+ *
-+ * Bytes that fail either check are deleted; a partial file never reaches a user-visible path.
-+ */
-+import { createHash } from 'node:crypto'
-+import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-+import { mkdir, rename, rm, stat } from 'node:fs/promises'
-+import { join } from 'node:path'
-+import { Readable } from 'node:stream'
-+import { pipeline } from 'node:stream/promises'
-+import { execFile } from 'node:child_process'
-+import { mkdtemp } from 'node:fs/promises'
-+import { tmpdir } from 'node:os'
-+import { promisify } from 'node:util'
-+import type { DesktopReleaseFeed } from './update-feed.ts'
-+
-+const run = promisify(execFile)
-+
-+/** @param feed - Validated manifest. @returns Asset download URL for the release tag. */
-+export function releaseAssetUrl(feed: DesktopReleaseFeed): string {
-+  return `https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/download/${feed.tag}/${feed.package}`
-+}
-+
-+/** @param feed - Validated manifest. @returns File name inside the user's cache directory. */
-+export function releaseAssetName(feed: DesktopReleaseFeed): string {
-+  return feed.package
-+}
-+
-+async function sha256File(path: string): Promise<string> {
-+  const hash = createHash('sha256')
-+  await pipeline(createReadStream(path), hash)
-+  return hash.digest('hex')
-+}
-+
-+/**
-+ * @param directory - Download directory; created when missing.
-+ * @param feed - Validated manifest.
-+ * @param onProgress - Percent callback, 0-100.
-+ * @returns Path of a fully downloaded and hash-verified rpm.
-+ */
-+export async function downloadRelease(
-+  directory: string,
-+  feed: DesktopReleaseFeed,
-+  onProgress: (percent: number) => void,
-+): Promise<string> {
-+  await mkdir(directory, { recursive: true })
-+  const target = join(directory, releaseAssetName(feed))
-+  if (existsSync(target) && (await stat(target)).size === feed.bytes && await sha256File(target) === feed.sha256) return target
-+
-+  const partial = `${target}.part`
-+  await rm(partial, { force: true })
-+  const response = await fetch(releaseAssetUrl(feed), { redirect: 'follow' })
-+  if (!response.ok || response.body === null) throw new Error(`更新包下载失败：HTTP ${response.status}`)
-+  const declared = Number(response.headers.get('content-length') ?? '0')
-+  if (declared > 0 && declared !== feed.bytes) throw new Error(`更新包长度不符：清单 ${feed.bytes}，服务器 ${declared}`)
-+
-+  const hash = createHash('sha256')
-+  let received = 0
-+  const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
-+  body.on('data', (chunk: Buffer) => {
-+    received += chunk.length
-+    hash.update(chunk)
-+    // Report at most one percent step at a time; the sink is fire-and-forget by contract.
-+    onProgress(Math.min(99, Math.floor((received / feed.bytes) * 100)))
-+  })
-+  await pipeline(body, createWriteStream(partial, { mode: 0o644 }))
-+  if (received !== feed.bytes) {
-+    await rm(partial, { force: true })
-+    throw new Error(`更新包不完整：收到 ${received} 字节，清单要求 ${feed.bytes}`)
-+  }
-+  const digest = hash.digest('hex')
-+  if (digest !== feed.sha256) {
-+    await rm(partial, { force: true })
-+    throw new Error(`更新包 sha256 不符：收到 ${digest}`)
-+  }
-+  await rename(partial, target)
-+  onProgress(100)
-+  return target
-+}
-+
-+/**
-+ * @param rpmPath - Downloaded package.
-+ * @param keyPath - Public key shipped with the application.
-+ * @returns true when rpm reports a valid OpenPGP signature over the header and payload.
-+ */
-+export async function verifySignedPackage(rpmPath: string, keyPath: string): Promise<boolean> {
-+  const db = await mkdtemp(join(tmpdir(), 'dsh-update-keys-'))
-+  try {
-+    await run('rpm', ['--dbpath', db, '--import', keyPath], { encoding: 'utf8' })
-+    // Non-verbose on purpose: `-Kv` prints one line per digest and never emits
-+    // "digests signatures OK", which made every signed package look unverified.
-+    const { stdout } = await run('rpm', ['--dbpath', db, '-K', rpmPath], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-+    return /digests signatures OK/.test(stdout)
-+  } catch {
-+    return false
-+  } finally {
-+    await rm(db, { recursive: true, force: true })
-+  }
-+}
-diff --git a/apps/desktop/src/update-feed.ts b/apps/desktop/src/update-feed.ts
-new file mode 100644
-index 00000000..340c4a13
---- /dev/null
-+++ b/apps/desktop/src/update-feed.ts
-@@ -0,0 +1,89 @@
-+/**
-+ * Linux update feed: the release asset `version.json` published next to the signed rpm.
-+ *
-+ * The electron-updater feed is replaced on Linux because the installer is the package manager:
-+ * a release is one signed rpm and one JSON manifest describing it. Everything here is pure so the
-+ * parser and the comparison can be unit-tested without Electron or the network.
-+ */
-+
-+/** Where a packaged Linux build looks for the newest release manifest. */
-+export const LINUX_UPDATE_FEED_URL = 'https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/version.json'
-+
-+/** One published release, validated field by field before any download is allowed. */
-+export interface DesktopReleaseFeed {
-+  /** semver-comparable form used by the update coordinator (0.2.2-alpha.2.2). */
-+  readonly version: string
-+  /** Published tag (v0.2.2-alpha.2-2). */
-+  readonly tag: string
-+  readonly rpmVersion: string
-+  readonly rpmRelease: string
-+  readonly package: string
-+  readonly sha256: string
-+  readonly bytes: number
-+  readonly publishedAt?: string
-+  readonly signingKeyId?: string
-+}
-+
-+const PACKAGE_NAME = /^dsh-desktop-[0-9A-Za-z.~+_-]+\.rpm$/
-+const SHA256 = /^[0-9a-f]{64}$/
-+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
-+
-+class FeedFieldError extends Error {
-+  readonly field: string
-+
-+  constructor(field: string, detail: string) {
-+    super(`更新清单的 ${field} 不可信：${detail}`)
-+    this.field = field
-+  }
-+}
-+
-+const text = (value: unknown, field: string, pattern?: RegExp): string => {
-+  if (typeof value !== 'string' || value.length === 0) throw new FeedFieldError(field, '不是非空字符串')
-+  if (pattern !== undefined && !pattern.test(value)) throw new FeedFieldError(field, `格式不匹配：${value}`)
-+  return value
-+}
-+
-+/**
-+ * @param value - Parsed JSON from the release asset.
-+ * @returns The manifest with every field narrowed.
-+ * @throws FeedFieldError when a field is missing or malformed; the caller reports it instead of downloading.
-+ */
-+export function parseReleaseFeed(value: unknown): DesktopReleaseFeed {
-+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new FeedFieldError('根', '不是对象')
-+  const record = value as Record<string, unknown>
-+  const bytes = record.bytes
-+  if (typeof bytes !== 'number' || !Number.isInteger(bytes) || bytes <= 0) throw new FeedFieldError('bytes', '不是正整数')
-+  const publishedAt = record.publishedAt
-+  const signingKeyId = record.signingKeyId
-+  const version = text(record.version, 'version', SEMVER)
-+  // The release must ride in a numeric segment (…alpha.2.2); a tag-style …alpha.2-2 would compare
-+  // wrong the moment the release reaches two digits.
-+  if (!/\.\d+$/.test(version)) throw new FeedFieldError('version', `缺少数值打包号：${version}`)
-+  return {
-+    version,
-+    tag: text(record.tag, 'tag', /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-\d+$/),
-+    rpmVersion: text(record.rpmVersion, 'rpmVersion'),
-+    rpmRelease: text(record.rpmRelease, 'rpmRelease', /^\d+$/),
-+    package: text(record.package, 'package', PACKAGE_NAME),
-+    sha256: text(record.sha256, 'sha256', SHA256),
-+    bytes,
-+    ...(typeof publishedAt === 'string' && publishedAt.length > 0 ? { publishedAt } : {}),
-+    ...(typeof signingKeyId === 'string' && signingKeyId.length > 0 ? { signingKeyId } : {}),
-+  }
-+}
-+
-+/**
-+ * @param url - Manifest URL.
-+ * @param timeoutMs - Abort budget for the whole request.
-+ * @returns The validated manifest.
-+ * @throws Error with the HTTP status or parse failure; callers surface it as a check failure.
-+ */
-+export async function fetchReleaseFeed(url: string, timeoutMs: number): Promise<DesktopReleaseFeed> {
-+  const response = await fetch(url, {
-+    redirect: 'follow',
-+    headers: { accept: 'application/json' },
-+    signal: AbortSignal.timeout(timeoutMs),
-+  })
-+  if (!response.ok) throw new Error(`更新清单请求失败：HTTP ${response.status}`)
-+  return parseReleaseFeed(await response.json())
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..271f31d5
+index 00000000..6c17f1fa
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,185 @@
 +/**
-+ * Linux package updater: the electron-updater surface the coordinator needs, backed by the
-+ * release manifest and the system package manager instead of an embedded installer.
-+ *
-+ * Only three methods are consumed by DesktopUpdateCoordinator: checkForUpdates, downloadUpdate and
-+ * quitAndInstall. Installation never happens in this process: a polkit-authorized helper runs
-+ * `dnf5 install` on the verified rpm, and the application relaunches after the helper succeeds.
++ * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
++ * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
++ * `dnf5` discovers the update through the shipped repository and installs it through the polkit
++ * helper. The only things this file owns are version encoding and the two dnf queries.
 + */
 +import { EventEmitter } from 'node:events'
 +import { execFile, execFileSync } from 'node:child_process'
 +import { existsSync } from 'node:fs'
-+import { homedir } from 'node:os'
-+import { join } from 'node:path'
 +import { promisify } from 'node:util'
 +import { app } from 'electron'
-+import { fetchReleaseFeed, type DesktopReleaseFeed } from './update-feed.ts'
-+import { downloadRelease, verifySignedPackage } from './update-download.ts'
 +
 +const run = promisify(execFile)
++
++/** Package name in the rpm database; also the repository's only package. */
++export const LINUX_PACKAGE_NAME = 'dsh-desktop'
++
++/** Root entry point installed by the rpm; it takes no arguments. */
++export const LINUX_UPDATER_HELPER = '/usr/libexec/dsh-update-helper'
++
++/** Repository defines this so a missing repository never blocks unrelated dnf transactions. */
++const REPO_SKIP_OPTION = '--setopt=dsh-desktop.skip_if_unavailable=0'
 +
 +/** Shape returned by checkForUpdates; mirrors the fields the coordinator reads. */
 +interface LinuxCheckResult {
@@ -275,37 +71,45 @@ index 00000000..271f31d5
 +}
 +
 +export interface LinuxUpdaterOptions {
-+  /** Published manifest URL. */
-+  readonly feedUrl: string
-+  /** Cache directory for downloaded packages. */
-+  readonly cacheDir: string
-+  /** Public key shipped next to the application; undefined outside a packaged app. */
-+  readonly keyPath?: string
 +  /** Installed polkit helper; its absence disables the update stack. */
 +  readonly helperPath?: string
-+  /** Request budget for the manifest and the package. */
-+  readonly timeoutMs?: number
++  /** Version compared by the coordinator; defaults to the packaged application version. */
++  readonly currentVersion?: () => string
 +  /** Relaunch after a successful install; overridable for tests. */
 +  readonly relaunch?: () => void
++  /** dnf runner; overridable for tests. */
++  readonly queryUpgrades?: () => Promise<string>
 +}
 +
 +/**
-+ * @returns The Release segment of the installed rpm, or undefined when the rpm database cannot be queried.
++ * Encode an rpm EVR as a semver that electron-updater's `gt()` orders the way rpm orders releases.
++ * Prerelease builds keep their prerelease segment (`0.2.2~alpha.2-6` → `0.2.2-alpha.2.6`); stable
++ * builds get a `.z` marker so they sort after every prerelease of the same version
++ * (`0.2.3-1` → `0.2.3.z.1`). Epoch prefixes are stripped because rpm prints them as `0:`.
++ * @param version - `%{VERSION}` or `%{EVR}`; a trailing `-<release>` is split off when present.
++ * @param release - `%{RELEASE}` to append when `version` has none.
++ * @returns Semver-shaped version for the coordinator's comparison.
 + */
-+export async function installedRpmRelease(): Promise<string | undefined> {
-+  try {
-+    const { stdout } = await run('rpm', ['-q', '--qf', '%{RELEASE}', 'dsh-desktop'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-+    const value = stdout.trim()
-+    return /^\d+$/.test(value) ? value : undefined
-+  } catch {
-+    return undefined
-+  }
++export function encodeVersion(evr: string, fallbackRelease = ''): string {
++  const withoutEpoch = evr.replace(/^\d+:/, '')
++  const cut = withoutEpoch.lastIndexOf('-')
++  const tail = cut === -1 ? '' : withoutEpoch.slice(cut + 1)
++  const hasRelease = cut !== -1 && /^\d+$/.test(tail)
++  const base = hasRelease ? withoutEpoch.slice(0, cut) : withoutEpoch
++  const segment = hasRelease ? tail : fallbackRelease
++  if (segment.length === 0) return base
++  return base.includes('~') ? `${base.replace('~', '-')}.${segment}` : `${base}-z.${segment}`
 +}
 +
-+/** Sync variant for the coordinator's `currentVersion` provider; the rpm query is a single local read. */
++/** @returns The first EVR reported for the package, or undefined when dnf reports no upgrade. */
++export function parseUpgrade(evrOutput: string): string | undefined {
++  return evrOutput.split('\n').map((line) => line.trim()).find((line) => line.length > 0)
++}
++
++/** @returns The Release segment of the installed rpm, or undefined when the rpm database cannot be queried. */
 +export function installedRpmReleaseSync(): string | undefined {
 +  try {
-+    const value = execFileSync('rpm', ['-q', '--qf', '%{RELEASE}', 'dsh-desktop'], {
++    const value = execFileSync('rpm', ['-q', '--qf', '%{RELEASE}', LINUX_PACKAGE_NAME], {
 +      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },
 +    }).trim()
 +    return /^\d+$/.test(value) ? value : undefined
@@ -314,10 +118,22 @@ index 00000000..271f31d5
 +  }
 +}
 +
-+/** electron's getPath has no 'cache' key in this typings version; XDG wins, then ~/.cache. */
-+export function defaultCacheDir(): string {
-+  const xdg = process.env.XDG_CACHE_HOME
-+  return join(xdg !== undefined && xdg.length > 0 ? xdg : join(homedir(), '.cache'), 'dsh-desktop')
++/** @returns The installed rpm EVR (`version-release`), or undefined outside an rpm install. */
++export function installedEvrSync(): string | undefined {
++  try {
++    const value = execFileSync('rpm', ['-q', '--qf', '%{VERSION}-%{RELEASE}', LINUX_PACKAGE_NAME], {
++      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },
++    }).trim()
++    return /^\S+-\d+$/.test(value) ? value : undefined
++  } catch {
++    return undefined
++  }
++}
++
++/** @returns The installed version+release encoded the same way dnf results are. */
++export function currentLinuxVersion(): string {
++  const evr = installedEvrSync()
++  return evr === undefined ? app.getVersion() : encodeVersion(evr)
 +}
 +
 +export class LinuxPackageUpdater extends EventEmitter {
@@ -327,12 +143,11 @@ index 00000000..271f31d5
 +  allowPrerelease = true
 +  allowDowngrade = false
 +
-+  private feed: DesktopReleaseFeed | undefined
-+  private packagePath: string | undefined
++  private candidate: string | undefined
 +
 +  private readonly options: LinuxUpdaterOptions
 +
-+  constructor(options: LinuxUpdaterOptions) {
++  constructor(options: LinuxUpdaterOptions = {}) {
 +    super()
 +    this.options = options
 +  }
@@ -344,55 +159,49 @@ index 00000000..271f31d5
 +  }
 +
 +  /**
-+   * @returns The published release; the coordinator decides whether it is newer than this build.
-+   * @throws When the manifest cannot be fetched or validated.
++   * Asks the package manager whether an upgrade exists.
++   * @returns The upgrade candidate, or the current version when there is none.
++   * @throws When dnf cannot be queried; the coordinator surfaces the message as-is.
 +   */
 +  async checkForUpdates(): Promise<LinuxCheckResult> {
-+    const feed = await fetchReleaseFeed(this.options.feedUrl, this.options.timeoutMs ?? 20_000)
-+    this.feed = feed
-+    return { updateInfo: { version: feed.version }, isUpdateAvailable: true }
++    const evr = parseUpgrade(await this.queryUpgrades())
++    if (evr === undefined) {
++      this.candidate = undefined
++      return { updateInfo: { version: this.current() }, isUpdateAvailable: false }
++    }
++    const version = encodeVersion(evr, '')
++    this.candidate = version
++    return { updateInfo: { version }, isUpdateAvailable: true }
 +  }
 +
 +  /**
-+   * Downloads and verifies the checked release.
-+   * @throws When no check ran, the hash does not match, or the signature is invalid.
++   * Nothing is downloaded into a private cache: dnf fetches what it needs during the upgrade.
++   * The step exists because the coordinator asks for an explicit preparation before install.
++   * @throws When no check ran or the helper is missing.
 +   */
 +  async downloadUpdate(): Promise<void> {
-+    const feed = this.feed
-+    if (feed === undefined) throw new Error('desktop update: 没有已检查的更新')
-+    const path = await downloadRelease(this.options.cacheDir, feed, (percent) => {
-+      this.emit('download-progress', { percent, transferred: 0, total: feed.bytes, bytesPerSecond: 0 })
-+    })
-+    const keyPath = this.options.keyPath
-+    if (keyPath === undefined) throw new Error('desktop update: 没有随包签名公钥')
-+    if (!await verifySignedPackage(path, keyPath)) {
-+      throw new Error('desktop update: 更新包签名校验未通过')
-+    }
-+    this.packagePath = path
-+    this.emit('update-downloaded', { version: feed.version })
++    const version = this.candidate
++    if (version === undefined) throw new Error('desktop update: 没有已检查的更新')
++    if (!this.available()) throw new Error('desktop update: 没有 polkit helper')
++    this.emit('update-downloaded', { version })
 +  }
 +
 +  /**
-+   * Hands the verified package to the polkit helper, then relaunches on success.
++   * Hands control to the polkit helper, which runs `dnf5 upgrade dsh-desktop`, then relaunches.
 +   * Errors after this point are emitted rather than thrown; the caller has already returned.
 +   */
 +  quitAndInstall(): void {
-+    const path = this.packagePath
-+    if (path === undefined) {
-+      this.emit('error', new Error('desktop update: 没有已下载的更新包'))
-+      return
-+    }
 +    const helper = this.options.helperPath
-+    if (helper === undefined) {
++    if (helper === undefined || !existsSync(helper)) {
 +      this.emit('error', new Error('desktop update: 没有 polkit helper'))
 +      return
 +    }
-+    const child = execFile('pkexec', [helper, path], (error) => {
++    const child = execFile('pkexec', [helper], { env: { ...process.env, LC_ALL: 'C' } }, (error) => {
 +      if (error !== null) {
 +        this.emit('error', new Error(`desktop update: 安装失败：${error.message}`))
 +        return
 +      }
-+      this.emit('installed', { version: this.feed?.version, path })
++      this.emit('installed', { version: this.candidate })
 +      if (this.options.relaunch !== undefined) this.options.relaunch()
 +      else {
 +        app.relaunch()
@@ -402,9 +211,19 @@ index 00000000..271f31d5
 +    child.on('error', (error) => { this.emit('error', error) })
 +  }
 +
-+  /** @returns Cache path used by this instance; exposed for the CI upgrade case. */
-+  static cacheDirectory(): string {
-+    return defaultCacheDir()
++  private current(): string {
++    const provider = this.options.currentVersion
++    return provider === undefined ? app.getVersion() : provider()
++  }
++
++  private async queryUpgrades(): Promise<string> {
++    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades()
++    const { stdout } = await run(
++      'dnf5',
++      ['repoquery', '--upgrades', '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME],
++      { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } },
++    )
++    return stdout
 +  }
 +}
 diff --git a/apps/desktop/src/update-schedule.ts b/apps/desktop/src/update-schedule.ts
@@ -420,139 +239,103 @@ index 7c08e569..d6a0561a 100644
    const maxBackoffMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_MAX_BACKOFF_MS', Math.max(intervalMs, 3_600_000))
    const jitter = Number(env.DSH_DESKTOP_UPDATE_CHECK_JITTER ?? 0.2)
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
-diff --git a/apps/desktop/tests/update-download.spec.ts b/apps/desktop/tests/update-download.spec.ts
+diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..1c0da5a0
+index 00000000..c9f6d2c7
 --- /dev/null
-+++ b/apps/desktop/tests/update-download.spec.ts
-@@ -0,0 +1,79 @@
-+import { createHash } from 'node:crypto'
-+import { mkdtemp, readFile, rm } from 'node:fs/promises'
-+import { tmpdir } from 'node:os'
-+import { join } from 'node:path'
-+import { afterEach, expect, it, vi } from 'vitest'
-+import type { DesktopReleaseFeed } from '../src/update-feed.ts'
-+import { downloadRelease, releaseAssetUrl } from '../src/update-download.ts'
++++ b/apps/desktop/tests/update-linux.spec.ts
+@@ -0,0 +1,92 @@
++import { gt } from 'semver'
++import { describe, expect, it, vi } from 'vitest'
++import {
++  LinuxPackageUpdater, currentLinuxVersion, encodeVersion, parseUpgrade,
++} from '../src/update-linux.ts'
 +
-+const body = Buffer.from('signed rpm bytes')
-+const feed: DesktopReleaseFeed = {
-+  version: '0.2.2-alpha.2.2',
-+  tag: 'v0.2.2-alpha.2-2',
-+  rpmVersion: '0.2.2~alpha.2',
-+  rpmRelease: '2',
-+  package: 'dsh-desktop-0.2.2-alpha.2-x86_64.rpm',
-+  sha256: createHash('sha256').update(body).digest('hex'),
-+  bytes: body.length,
++vi.mock('electron', () => ({
++  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn() },
++}))
++
++function updater(overrides: Partial<ConstructorParameters<typeof LinuxPackageUpdater>[0]> = {}) {
++  return new LinuxPackageUpdater({
++    helperPath: '/bin/sh',
++    currentVersion: () => '0.2.2-alpha.2.5',
++    queryUpgrades: async () => '',
++    relaunch: vi.fn(),
++    ...overrides,
++  })
 +}
 +
-+const dirs: string[] = []
-+async function cacheDir(): Promise<string> {
-+  const dir = await mkdtemp(join(tmpdir(), 'dsh-update-test-'))
-+  dirs.push(dir)
-+  return dir
-+}
++describe('encodeVersion', () => {
++  it('keeps the prerelease segment of an rpm EVR and appends the release', () => {
++    expect(encodeVersion('0.2.2~alpha.2-6', '')).toBe('0.2.2-alpha.2.6')
++    expect(encodeVersion('0:0.2.2~alpha.2-6', '')).toBe('0.2.2-alpha.2.6')
++    expect(encodeVersion('0.2.2~alpha.2', '6')).toBe('0.2.2-alpha.2.6')
++  })
 +
-+afterEach(async () => {
-+  vi.unstubAllGlobals()
-+  await Promise.all(dirs.splice(0).map(async dir => rm(dir, { recursive: true, force: true })))
++  it('marks stable builds so they sort after prereleases of the same version', () => {
++    expect(encodeVersion('0.2.3-1', '')).toBe('0.2.3-z.1')
++    expect(encodeVersion('0.2.3', '4')).toBe('0.2.3-z.4')
++  })
++
++  it('orders releases the way rpm orders them', () => {
++    expect(gt(encodeVersion('0.2.2~alpha.2-10', ''), encodeVersion('0.2.2~alpha.2-9', ''))).toBe(true)
++    expect(gt(encodeVersion('0.2.2~alpha.3-1', ''), encodeVersion('0.2.2~alpha.2-10', ''))).toBe(true)
++    expect(gt(encodeVersion('0.2.3-1', ''), encodeVersion('0.2.2~alpha.2-9', ''))).toBe(true)
++    expect(gt(encodeVersion('0.2.3~alpha.1-1', ''), encodeVersion('0.2.2-9', ''))).toBe(true)
++  })
 +})
 +
-+function stubFetch(payload: Buffer, status = 200, length = payload.length) {
-+  // Buffer is a view over ArrayBufferLike; Response wants an ArrayBuffer of its own.
-+  const bytes = payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength) as ArrayBuffer
-+  const fetchMock = vi.fn(async () => new Response(bytes, {
-+    status,
-+    headers: length > 0 ? { 'content-length': String(length) } : {},
-+  }))
-+  vi.stubGlobal('fetch', fetchMock)
-+  return fetchMock
-+}
-+
-+it('points at the asset of the published tag', () => {
-+  expect(releaseAssetUrl(feed)).toBe(`https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/download/${feed.tag}/${feed.package}`)
++describe('parseUpgrade', () => {
++  it('returns the first reported EVR and ignores blank lines', () => {
++    expect(parseUpgrade('0.2.2~alpha.2-6\n\n')).toBe('0.2.2~alpha.2-6')
++    expect(parseUpgrade('')).toBeUndefined()
++    expect(parseUpgrade('\n \n')).toBeUndefined()
++  })
 +})
 +
-+it('downloads, hashes and reuses the package', async () => {
-+  const dir = await cacheDir()
-+  const fetchMock = stubFetch(body)
-+  const progress: number[] = []
-+  const path = await downloadRelease(dir, feed, percent => progress.push(percent))
-+  expect(await readFile(path)).toEqual(body)
-+  expect(progress.at(-1)).toBe(100)
-+  expect(fetchMock).toHaveBeenCalledTimes(1)
++describe('LinuxPackageUpdater', () => {
++  it('reports the encoded candidate when dnf sees an upgrade', async () => {
++    const u = updater({ queryUpgrades: async () => '0.2.2~alpha.2-6\n' })
++    await expect(u.checkForUpdates()).resolves.toEqual({
++      updateInfo: { version: '0.2.2-alpha.2.6' }, isUpdateAvailable: true,
++    })
++  })
 +
-+  const again = await downloadRelease(dir, feed, () => undefined)
-+  expect(again).toBe(path)
-+  expect(fetchMock).toHaveBeenCalledTimes(1)
-+})
++  it('reports the current version when dnf sees no upgrade', async () => {
++    const u = updater()
++    await expect(u.checkForUpdates()).resolves.toEqual({
++      updateInfo: { version: '0.2.2-alpha.2.5' }, isUpdateAvailable: false,
++    })
++  })
 +
-+it('deletes a payload whose digest does not match the manifest', async () => {
-+  const dir = await cacheDir()
-+  // Same length as the manifest claims, different bytes: only the digest can catch this.
-+  stubFetch(Buffer.alloc(body.length, 0x78), 200, feed.bytes)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/sha256 不符/)
-+  expect(await readFile(join(dir, `${feed.package}.part`), 'utf8').catch(() => 'missing')).toBe('missing')
-+})
++  it('turns an empty check into a preparation failure instead of an install', async () => {
++    const u = updater()
++    await expect(u.downloadUpdate()).rejects.toThrow('没有已检查的更新')
++  })
 +
-+it('refuses a response whose length disagrees with the manifest', async () => {
-+  const dir = await cacheDir()
-+  stubFetch(body, 200, body.length + 5)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/长度不符/)
-+})
++  it('prepares the install by reporting the candidate, not by downloading a package', async () => {
++    const u = updater({ queryUpgrades: async () => '0.2.2~alpha.2-6\n' })
++    await u.checkForUpdates()
++    const downloaded = vi.fn()
++    u.on('update-downloaded', downloaded)
++    await u.downloadUpdate()
++    expect(downloaded).toHaveBeenCalledWith({ version: '0.2.2-alpha.2.6' })
++  })
 +
-+it('refuses an http error', async () => {
-+  const dir = await cacheDir()
-+  stubFetch(body, 404)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/HTTP 404/)
-+})
-diff --git a/apps/desktop/tests/update-feed.spec.ts b/apps/desktop/tests/update-feed.spec.ts
-new file mode 100644
-index 00000000..2fc99dca
---- /dev/null
-+++ b/apps/desktop/tests/update-feed.spec.ts
-@@ -0,0 +1,43 @@
-+import { expect, it } from 'vitest'
-+import { parseReleaseFeed } from '../src/update-feed.ts'
++  it('refuses to prepare when the helper is missing', async () => {
++    const u = updater({ helperPath: '/nonexistent/dsh-update-helper', queryUpgrades: async () => '0.2.2~alpha.2-6\n' })
++    await u.checkForUpdates()
++    await expect(u.downloadUpdate()).rejects.toThrow('没有 polkit helper')
++  })
 +
-+const manifest = {
-+  version: '0.2.2-alpha.2.2',
-+  tag: 'v0.2.2-alpha.2-2',
-+  rpmVersion: '0.2.2~alpha.2',
-+  rpmRelease: '2',
-+  package: 'dsh-desktop-0.2.2-alpha.2-x86_64.rpm',
-+  sha256: 'a'.repeat(64),
-+  bytes: 238565069,
-+  publishedAt: '2026-10-30T19:19:52Z',
-+  signingKeyId: '428be141c85f90ee',
-+}
++  it('is unavailable without the helper', () => {
++    expect(updater({ helperPath: undefined }).available()).toBe(false)
++    expect(updater().available()).toBe(true)
++  })
 +
-+it('accepts the manifest published by scripts/make-version-json.sh', () => {
-+  expect(parseReleaseFeed(manifest)).toEqual(manifest)
-+})
-+
-+it('keeps optional fields away when they are absent', () => {
-+  const required: Record<string, unknown> = { ...manifest }
-+  delete required.publishedAt
-+  delete required.signingKeyId
-+  const parsed = parseReleaseFeed(required)
-+  expect(parsed).not.toHaveProperty('publishedAt')
-+  expect(parsed).not.toHaveProperty('signingKeyId')
-+})
-+
-+it.each([
-+  ['bytes', { ...manifest, bytes: 0 }],
-+  ['package', { ...manifest, package: 'dsh-desktop.rpm.sh' }],
-+  ['sha256', { ...manifest, sha256: 'XYZ' }],
-+  ['version', { ...manifest, version: '0.2.2-alpha.2-2' }],
-+  ['tag', { ...manifest, tag: 'v0.2.2' }],
-+  ['rpmRelease', { ...manifest, rpmRelease: 'alpha' }],
-+])('rejects a manifest whose %s is not publishable', (_field, value) => {
-+  expect(() => parseReleaseFeed(value)).toThrow(/更新清单的/)
-+})
-+
-+it('rejects values that are not an object', () => {
-+  expect(() => parseReleaseFeed([])).toThrow(/不是对象/)
-+  expect(() => parseReleaseFeed(null)).toThrow(/不是对象/)
++  it('encodes the installed version with its rpm release', () => {
++    expect(currentLinuxVersion()).toMatch(/^0\.2\.2(?:-alpha\.2|-z\.|$)/)
++  })
 +})
 diff --git a/apps/desktop/tests/update-schedule.spec.ts b/apps/desktop/tests/update-schedule.spec.ts
 index 9d481f21..cd5a2b39 100644

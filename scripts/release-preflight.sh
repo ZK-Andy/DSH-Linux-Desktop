@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 发布前总检位：资产矩阵、验签、version.json 与 rpm 事实一致、校验和自洽。
+# 发布前总检位：资产矩阵、验签、校验和自洽。
 # 任何一项不满足都以非零退出，发布作业就此终止（fail closed）。
 set -euo pipefail
 
@@ -9,7 +9,7 @@ fail() { echo "::error::$*" >&2; exit 1; }
 rpm_files=("$dir"/*.rpm)
 [[ ${#rpm_files[@]} -eq 1 && -f "${rpm_files[0]}" ]] || fail "dist 里应当恰好有一个 rpm，实际：$(ls "$dir")"
 rpm="${rpm_files[0]}"
-for f in RPM-GPG-KEY-dsh-desktop version.json SHA256SUMS.txt; do
+for f in RPM-GPG-KEY-dsh-desktop SHA256SUMS.txt; do
   [[ -f "$dir/$f" ]] || fail "缺少发布资产 $f"
 done
 
@@ -30,32 +30,6 @@ grep -q 'NOKEY' "$keydb/verify.txt" && { cat "$keydb/verify.txt" >&2; fail "rpm 
 size=$(stat -c %s "$rpm")
 (( size > 100000000 )) || fail "rpm 体积异常：$size 字节"
 
-# version.json 必须与 rpm 的字节和头部事实一致。
-python3 - "$dir/version.json" "$rpm" <<'PY'
-import json, subprocess, sys, hashlib, os
-
-meta_path, rpm_path = sys.argv[1], sys.argv[2]
-meta = json.load(open(meta_path, encoding='utf-8'))
-q = lambda fmt: subprocess.check_output(['rpm', '-qp', '--qf', fmt, rpm_path], text=True).strip()
-
-def need(cond, msg):
-    if not cond:
-        print(f'::error::{msg}', file=sys.stderr)
-        sys.exit(1)
-
-digest = hashlib.sha256(open(rpm_path, 'rb').read()).hexdigest()
-need(meta['package'] == os.path.basename(rpm_path), f"version.json 的 package 与文件不符：{meta['package']}")
-need(meta['sha256'] == digest, 'version.json 的 sha256 与 rpm 字节不符')
-need(int(meta['bytes']) == os.path.getsize(rpm_path), 'version.json 的 bytes 与 rpm 大小不符')
-need(meta['rpmVersion'] == q('%{VERSION}'), f"version.json 的 rpmVersion 与包不符：{meta['rpmVersion']}")
-need(meta['rpmRelease'] == q('%{RELEASE}'), f"version.json 的 rpmRelease 与包不符：{meta['rpmRelease']}")
-# 更新链比较用的 version 是点分形式，tag 是发布形式，两者必须由同一组头部字段拼出。
-expected_version = q('%{VERSION}').replace('~', '-') + '.' + q('%{RELEASE}')
-expected_tag = 'v' + q('%{VERSION}').replace('~', '-') + '-' + q('%{RELEASE}')
-need(meta['version'] == expected_version, f"version.json 的 version 不是点分形式：{meta['version']} ≠ {expected_version}")
-need(meta.get('tag') == expected_tag, f"version.json 的 tag 与包不符：{meta.get('tag')} ≠ {expected_tag}")
-print('version.json ↔ rpm 一致：', meta['version'], digest[:16])
-PY
 
 # tag 尾部的 Release 必须与包内 Release 一致：v0.2.2-alpha.2-2 ⇒ Release 2。
 tag="${GITHUB_REF_NAME:-}"
