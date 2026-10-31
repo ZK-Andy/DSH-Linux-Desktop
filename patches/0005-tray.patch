@@ -1,6 +1,6 @@
 变化理由：Linux 托盘：图标、菜单、关于与检查更新入口，随语言重建。
 diff --git a/apps/desktop/scripts/render-tray-icon.ts b/apps/desktop/scripts/render-tray-icon.ts
-index 01bacdea..b857c541 100644
+index 01bacde..b857c54 100644
 --- a/apps/desktop/scripts/render-tray-icon.ts
 +++ b/apps/desktop/scripts/render-tray-icon.ts
 @@ -1,11 +1,14 @@
@@ -87,7 +87,7 @@ index 01bacdea..b857c541 100644
  
  if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) await main()
 diff --git a/apps/desktop/src/background-notice.ts b/apps/desktop/src/background-notice.ts
-index c2a0007d..64053e43 100644
+index c2a0007..64053e4 100644
 --- a/apps/desktop/src/background-notice.ts
 +++ b/apps/desktop/src/background-notice.ts
 @@ -1,4 +1,4 @@
@@ -98,7 +98,7 @@ index c2a0007d..64053e43 100644
  import { dirname } from 'node:path'
 diff --git a/apps/desktop/src/linux-tray.ts b/apps/desktop/src/linux-tray.ts
 new file mode 100644
-index 00000000..0720ef9c
+index 0000000..0720ef9
 --- /dev/null
 +++ b/apps/desktop/src/linux-tray.ts
 @@ -0,0 +1,45 @@
@@ -147,19 +147,100 @@ index 00000000..0720ef9c
 +    about: options.about,
 +  })
 +}
+diff --git a/apps/desktop/src/locale-linux.ts b/apps/desktop/src/locale-linux.ts
+new file mode 100644
+index 0000000..e28ad89
+--- /dev/null
++++ b/apps/desktop/src/locale-linux.ts
+@@ -0,0 +1,70 @@
++/**
++ * Linux-only shell copy: the tray menu entries and the About dialog lines the Desktop adds.
++ *
++ * Keeping them here rather than in the upstream dictionaries means `locale.ts` owns one expansion
++ * point (`resolveDesktopLocale`) instead of eight insertion points, and the packaging modules can
++ * gain copy without touching the shared message file (see PLAN.md §3.1, AGENTS.md rule 3).
++ */
++
++/** Copy added by the Linux tray and About dialog, per shipped language. */
++export const linuxMessages = {
++  en: {
++    aboutTrayMenu: 'About',
++    aboutUpstreamVersion: 'DSH version: V{version}',
++    checkForUpdates: 'Check for Updates',
++  },
++  zh: {
++    aboutTrayMenu: '关于',
++    aboutUpstreamVersion: 'DSH 版本：V{version}',
++    checkForUpdates: '检查更新',
++  },
++  ja: {
++    aboutTrayMenu: '情報',
++    aboutUpstreamVersion: 'DSH バージョン: V{version}',
++    checkForUpdates: 'アップデートを確認',
++  },
++  es: {
++    aboutTrayMenu: 'Acerca de',
++    aboutUpstreamVersion: 'Versión de DSH: V{version}',
++    checkForUpdates: 'Buscar actualizaciones',
++  },
++  fr: {
++    aboutTrayMenu: 'À propos',
++    aboutUpstreamVersion: 'Version de DSH : V{version}',
++    checkForUpdates: 'Rechercher des mises à jour',
++  },
++  de: {
++    aboutTrayMenu: 'Über',
++    aboutUpstreamVersion: 'DSH-Version: V{version}',
++    checkForUpdates: 'Nach Updates suchen',
++  },
++  ru: {
++    aboutTrayMenu: 'О программе',
++    aboutUpstreamVersion: 'Версия DSH: V{version}',
++    checkForUpdates: 'Проверить обновления',
++  },
++  pt: {
++    aboutTrayMenu: 'Sobre',
++    aboutUpstreamVersion: 'Versão do DSH: V{version}',
++    checkForUpdates: 'Verificar atualizações',
++  },
++} as const satisfies Record<string, Record<string, string>>
++
++/** The Linux additions, widened to strings so every language satisfies the same shape. */
++export type LinuxMessages = { readonly [Key in keyof (typeof linuxMessages)['en']]: string }
++
++/** Keys of {@link LinuxMessages}, for lookups that fall back to English. */
++export type LinuxMessageKey = keyof LinuxMessages
++
++/**
++ * Adds the Linux copy to one upstream dictionary.
++ * @param dictionary - Upstream messages for the selected language.
++ * @param key - Dictionary key the language resolves to.
++ * @returns the merged message set.
++ */
++export function withLinuxMessages<Messages extends Record<string, string>>(
++  dictionary: Messages,
++  key: keyof typeof linuxMessages,
++): Messages & LinuxMessages {
++  return { ...dictionary, ...linuxMessages[key] }
++}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 74a1f199..a5ad5c16 100644
+index 74a1f19..6ae3ae2 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
-@@ -32,13 +32,16 @@ export const en = {
-   fileMenu: 'File',
+@@ -1,5 +1,7 @@
+ /** Typed shell copy for every shipped language owned by the Electron shell. */
+ 
++import { withLinuxMessages, type LinuxMessages } from './locale-linux.ts'
++
+ export const en = {
+   cliCommandMenu: 'Manage dsh Command…',
+   cliCommandTitle: 'Manage dsh Command',
+@@ -33,12 +35,12 @@ export const en = {
    closePage: 'Close Page or Window',
    aboutMenu: 'About DeepSeek Harness',
-+  aboutTrayMenu: 'About',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'Version V{version}',
 +  aboutVersion: 'Desktop version: V{version}',
-+  aboutUpstreamVersion: 'DSH version: V{version}',
    hideApplication: 'Hide DeepSeek Harness',
    hideOtherApplications: 'Hide Others',
    showAllApplications: 'Show All',
@@ -167,19 +248,28 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'Open DeepSeek Harness',
 +  quitApplication: 'Quit',
 +  openApplication: 'Show Main Window',
-+  checkForUpdates: 'Check for Updates',
    quit: 'Quit',
    cancel: 'Cancel',
    quitTitle: 'Quit DeepSeek Harness?',
-@@ -211,13 +214,16 @@ export const zh = {
-   fileMenu: '文件',
+@@ -177,7 +179,11 @@ export const en = {
+ } as const
+ 
+ /** Every Desktop locale supplies the complete English key set. */
+-export type DesktopMessages = { readonly [Key in keyof typeof en]: string }
++/** Upstream shell copy shipped with the shared dictionaries. */
++export type BaseMessages = { readonly [Key in keyof typeof en]: string }
++
++/** Everything the Desktop shell renders: upstream copy plus the Linux additions. */
++export type DesktopMessages = BaseMessages & LinuxMessages
+ 
+ export const zh = {
+   cliCommandMenu: '管理 dsh 命令…',
+@@ -212,12 +218,12 @@ export const zh = {
    closePage: '关闭页面或窗口',
    aboutMenu: '关于 DeepSeek Harness',
-+  aboutTrayMenu: '关于',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: '版本 V{version}',
 +  aboutVersion: '桌面端版本：V{version}',
-+  aboutUpstreamVersion: 'DSH 版本：V{version}',
    hideApplication: '隐藏 DeepSeek Harness',
    hideOtherApplications: '隐藏其他',
    showAllApplications: '显示全部',
@@ -187,19 +277,24 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: '打开 DeepSeek Harness',
 +  quitApplication: '退出',
 +  openApplication: '显示主窗',
-+  checkForUpdates: '检查更新',
    quit: '退出',
    cancel: '取消',
    quitTitle: '退出 DeepSeek Harness？',
-@@ -388,13 +394,16 @@ export const ja = {
-   fileMenu: 'ファイル',
+@@ -353,7 +359,7 @@ export const zh = {
+   mandatoryCopyFailed: '复制失败，请手动选择并复制下方链接。',
+   mandatoryAddress: '下载链接',
+   mandatoryNotification: '返回应用确认安装并重启。',
+-} as const satisfies DesktopMessages
++} as const satisfies BaseMessages
+ 
+ /** Japanese copy, checked against the English keys. */
+ export const ja = {
+@@ -389,12 +395,12 @@ export const ja = {
    closePage: 'ページまたはウィンドウを閉じる',
    aboutMenu: 'DeepSeek Harness について',
-+  aboutTrayMenu: '情報',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'バージョン V{version}',
 +  aboutVersion: 'デスクトップ版: V{version}',
-+  aboutUpstreamVersion: 'DSH バージョン: V{version}',
    hideApplication: 'DeepSeek Harness を隠す',
    hideOtherApplications: 'ほかを隠す',
    showAllApplications: 'すべて表示',
@@ -207,19 +302,15 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'DeepSeek Harness を開く',
 +  quitApplication: '終了',
 +  openApplication: 'メインウィンドウを表示',
-+  checkForUpdates: 'アップデートを確認',
    quit: '終了',
    cancel: 'キャンセル',
    quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -565,13 +574,16 @@ export const es = {
-   fileMenu: 'Archivo',
+@@ -566,12 +572,12 @@ export const es = {
    closePage: 'Cerrar página o ventana',
    aboutMenu: 'Acerca de DeepSeek Harness',
-+  aboutTrayMenu: 'Acerca de',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'Versión V{version}',
 +  aboutVersion: 'Versión de escritorio: V{version}',
-+  aboutUpstreamVersion: 'Versión de DSH: V{version}',
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar otros',
    showAllApplications: 'Mostrar todo',
@@ -227,19 +318,24 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'Abrir DeepSeek Harness',
 +  quitApplication: 'Salir',
 +  openApplication: 'Mostrar ventana principal',
-+  checkForUpdates: 'Buscar actualizaciones',
    quit: 'Salir',
    cancel: 'Cancelar',
    quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -742,13 +754,16 @@ export const fr = {
-   fileMenu: 'Fichier',
+@@ -707,7 +713,7 @@ export const es = {
+   mandatoryCopyFailed: 'No se pudo copiar el enlace. Selecciónelo y cópielo a continuación.',
+   mandatoryAddress: 'Enlace de descarga',
+   mandatoryNotification: 'Regrese a la aplicación para confirmar la instalación y reiniciar.',
+-} satisfies DesktopMessages
++} satisfies BaseMessages
+ 
+ /** French dictionary, checked against the English keys. */
+ export const fr = {
+@@ -743,12 +749,12 @@ export const fr = {
    closePage: 'Fermer la page ou la fenêtre',
    aboutMenu: 'À propos de DeepSeek Harness',
-+  aboutTrayMenu: 'À propos',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'VersionV{version}',
 +  aboutVersion: 'Version du bureau : V{version}',
-+  aboutUpstreamVersion: 'Version de DSH : V{version}',
    hideApplication: 'Masquer DeepSeek Harness',
    hideOtherApplications: 'Masquer les autres',
    showAllApplications: 'Afficher tout',
@@ -247,19 +343,24 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'Ouvrir DeepSeek Harness',
 +  quitApplication: 'Quitter',
 +  openApplication: 'Afficher la fenêtre principale',
-+  checkForUpdates: 'Rechercher des mises à jour',
    quit: 'Quitter',
    cancel: 'Annuler',
    quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -919,13 +934,16 @@ export const de = {
-   fileMenu: 'Datei',
+@@ -884,7 +890,7 @@ export const fr = {
+   mandatoryCopyFailed: 'Impossible de copier le lien. Sélectionnez-le et copiez-le ci-dessous.',
+   mandatoryAddress: 'Lien de téléchargement',
+   mandatoryNotification: "Revenez à l'application pour confirmer l'installation et redémarrer.",
+-} satisfies DesktopMessages
++} satisfies BaseMessages
+ 
+ /** German dictionary, checked against the English keys. */
+ export const de = {
+@@ -920,12 +926,12 @@ export const de = {
    closePage: 'Seite oder Fenster schließen',
    aboutMenu: 'Über DeepSeek Harness',
-+  aboutTrayMenu: 'Über',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'Version V{version}',
 +  aboutVersion: 'Desktop-Version: V{version}',
-+  aboutUpstreamVersion: 'DSH-Version: V{version}',
    hideApplication: 'DeepSeek Harness ausblenden',
    hideOtherApplications: 'Andere ausblenden',
    showAllApplications: 'Alle einblenden',
@@ -267,21 +368,27 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'DeepSeek Harness öffnen',
 +  quitApplication: 'Beenden',
 +  openApplication: 'Hauptfenster anzeigen',
-+  checkForUpdates: 'Nach Updates suchen',
    quit: 'Beenden',
    cancel: 'Abbrechen',
    quitTitle: 'DeepSeek Harness beenden?',
-@@ -1095,14 +1113,17 @@ export const ru = {
+@@ -1061,7 +1067,7 @@ export const de = {
+   mandatoryCopyFailed: 'Der Link konnte nicht kopiert werden. Wählen Sie es aus und kopieren Sie es unten.',
+   mandatoryAddress: 'Download-Link',
+   mandatoryNotification: 'Kehren Sie zur Anwendung zurück, um die Installation zu bestätigen und neu zu starten.',
+-} satisfies DesktopMessages
++} satisfies BaseMessages
+ 
+ /** Russian dictionary, checked against the English keys. */
+ export const ru = {
+@@ -1095,14 +1101,14 @@ export const ru = {
    application: 'Приложение',
    fileMenu: 'Файл',
    closePage: 'Закрыть страницу или окно',
 -  aboutMenu: 'О DeepSeek Harness',
 +  aboutMenu: 'О программе DeepSeek Harness',
-+  aboutTrayMenu: 'О программе',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'Версия V{version}',
 +  aboutVersion: 'Версия приложения: V{version}',
-+  aboutUpstreamVersion: 'Версия DSH: V{version}',
    hideApplication: 'Скрыть DeepSeek Harness',
    hideOtherApplications: 'Скрыть других',
    showAllApplications: 'Показать все',
@@ -289,21 +396,27 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'Открыть DeepSeek Harness',
 +  quitApplication: 'Выход',
 +  openApplication: 'Показать главное окно',
-+  checkForUpdates: 'Проверить обновления',
    quit: 'Выйти',
    cancel: 'Отмена',
    quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1272,14 +1293,17 @@ export const pt = {
+@@ -1238,7 +1244,7 @@ export const ru = {
+   mandatoryCopyFailed: 'Не удалось скопировать ссылку. Выделите и скопируйте его ниже.',
+   mandatoryAddress: 'Ссылка для скачивания',
+   mandatoryNotification: 'Вернитесь в приложение, чтобы подтвердить установку и перезапустить.',
+-} satisfies DesktopMessages
++} satisfies BaseMessages
+ 
+ /** Portuguese dictionary, checked against the English keys. */
+ export const pt = {
+@@ -1272,14 +1278,14 @@ export const pt = {
    application: 'Aplicativo',
    fileMenu: 'Arquivo',
    closePage: 'Fechar página ou janela',
 -  aboutMenu: 'Sobre DeepSeek Harness',
 +  aboutMenu: 'Sobre o DeepSeek Harness',
-+  aboutTrayMenu: 'Sobre',
    aboutProduct: 'DeepSeek Harness',
 -  aboutVersion: 'Versão V{version}',
 +  aboutVersion: 'Versão do desktop: V{version}',
-+  aboutUpstreamVersion: 'Versão do DSH: V{version}',
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar outros',
    showAllApplications: 'Mostrar tudo',
@@ -311,12 +424,35 @@ index 74a1f199..a5ad5c16 100644
 -  openApplication: 'Abra DeepSeek Harness',
 +  quitApplication: 'Sair',
 +  openApplication: 'Mostrar janela principal',
-+  checkForUpdates: 'Verificar atualizações',
    quit: 'Sair',
    cancel: 'Cancelar',
    quitTitle: 'Sair de DeepSeek Harness?',
+@@ -1415,9 +1421,9 @@ export const pt = {
+   mandatoryCopyFailed: 'Não foi possível copiar o link. Selecione e copie abaixo.',
+   mandatoryAddress: 'Link de download',
+   mandatoryNotification: 'Retorne ao aplicativo para confirmar a instalação e reinicie.',
+-} satisfies DesktopMessages
++} satisfies BaseMessages
+ 
+-const dictionaries = { en, zh, ja, es, fr, de, ru, pt }
++const dictionaries = { en, zh, ja, es, fr, de, ru, pt } satisfies Record<string, BaseMessages>
+ 
+ /** Locale payload exposed to the Desktop-owned renderer. */
+ export interface DesktopLocale {
+@@ -1430,9 +1436,9 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
+   const primary = locale.toLowerCase().split('-')[0]
+   if (primary !== undefined && Object.hasOwn(dictionaries, primary)) {
+     const id = primary as keyof typeof dictionaries
+-    return { id: id === 'zh' ? 'zh-CN' : id, messages: dictionaries[id] }
++    return { id: id === 'zh' ? 'zh-CN' : id, messages: withLinuxMessages(dictionaries[id], id) }
+   }
+-  return { id: 'en', messages: en }
++  return { id: 'en', messages: withLinuxMessages(en, 'en') }
+ }
+ 
+ /**
 diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index b2ce416b..e749b4e2 100644
+index b2ce416..e749b4e 100644
 --- a/apps/desktop/src/tray.ts
 +++ b/apps/desktop/src/tray.ts
 @@ -1,17 +1,24 @@
@@ -368,7 +504,7 @@ index b2ce416b..e749b4e2 100644
  
    /** Remove the icon; called once the quit is confirmed so no dead icon outlives the process. */
 diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a488..42e27064 100644
+index 11c3a48..42e2706 100644
 --- a/apps/desktop/tests/tray.spec.ts
 +++ b/apps/desktop/tests/tray.spec.ts
 @@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM
