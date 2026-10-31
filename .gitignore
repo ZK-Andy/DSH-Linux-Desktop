@@ -46,3 +46,7 @@ smoke-logs/
 # 本次排查留下的 gh 缓存与重放树
 .ghcache/
 .replay/
+
+# CI 日志临时文件（不要提交）
+.fail*.log
+.ok*.log
