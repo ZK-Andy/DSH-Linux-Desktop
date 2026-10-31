@@ -116,6 +116,12 @@ cp /pkg/*.rpm /var/cache/dsh-desktop/
 /usr/libexec/dsh-update-helper /var/cache/dsh-desktop/*.rpm \
   || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
 grep -q '安装成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
+# M4：三个系统侧文件现在由 rpm 自己拥有，安装后不应出现任何校验差异。
+rpm -q --whatprovides /usr/libexec/dsh-update-helper >/dev/null || { log "helper 不属于任何包"; exit 1; }
+rpm -q --whatprovides /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy >/dev/null \
+  || { log "polkit 策略不属于任何包"; exit 1; }
+rpm -q --whatprovides /etc/yum.repos.d/dsh-desktop.repo >/dev/null || { log ".repo 不属于任何包"; exit 1; }
+rpm -V dsh-desktop || { log "rpm -V dsh-desktop 报告的差异见上"; exit 1; }
 log "更新链 helper 安装 OK"
 
 export DSH_HOME=/tmp/dsh-home

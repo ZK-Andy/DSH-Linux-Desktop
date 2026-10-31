@@ -55,18 +55,3 @@ if apparmor_status --enabled > /dev/null 2>&1; then
     echo "Skipping the installation of the AppArmor profile as this version of AppArmor does not seem to support the bundled profile"
   fi
 fi
-
-# --- DSH Linux Desktop: 更新链的 helper 与 polkit 策略（PLAN §3.4）---
-# helper 只被 pkexec 调用；应用本身不写 /usr，这两个文件由 %post 放到系统位置、%postun 卸载时移除。
-RESOURCES='/opt/${sanitizedProductName}/resources'
-
-mkdir -p /usr/libexec /usr/share/polkit-1/actions
-
-if [ -f "$RESOURCES/dsh-update-helper" ]; then
-  install -m 0755 "$RESOURCES/dsh-update-helper" /usr/libexec/dsh-update-helper || true
-fi
-
-if [ -f "$RESOURCES/org.deepseek.harness.desktop.update.policy" ]; then
-  install -m 0644 "$RESOURCES/org.deepseek.harness.desktop.update.policy" \
-    /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy || true
-fi

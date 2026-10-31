@@ -31,6 +31,7 @@ ASSETS=(
   'assets/rpm-post-install.sh:apps/desktop/resources/rpm-post-install.sh:755'
   'assets/rpm-post-remove.sh:apps/desktop/resources/rpm-post-remove.sh:755'
   'packaging/RPM-GPG-KEY-dsh-desktop:apps/desktop/resources/RPM-GPG-KEY-dsh-desktop:644'
+  'packaging/dsh-desktop.repo:apps/desktop/resources/dsh-desktop.repo:644'
 )
 
 # 放置或撤掉上表里的资产。

@@ -25,8 +25,3 @@ if [ -f "$APPARMOR_PROFILE_DEST" ]; then
   fi
   rm -f "$APPARMOR_PROFILE_DEST"
 fi
-# --- DSH Linux Desktop: 只在卸载（而不是升级）时撤掉更新 helper 与策略 ---
-if [ "$1" = "0" ]; then
-  rm -f /usr/libexec/dsh-update-helper
-  rm -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy
-fi
