@@ -131,7 +131,11 @@ jobs:
           site="$RUNNER_TEMP/site"
           git clone --branch gh-pages --depth 1 \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$site"
-          rsync -a --delete "$RUNNER_TEMP/repo/repodata/" "$site/repodata/"
+          # --checksum：rsync 默认只比「大小 + mtime」，新旧签名字节数相同、mtime 又可能落在同一秒，
+          # 不加 --checksum 会把签名文件跳过，导致 repomd.xml 与 repomd.xml.asc 对不上（dnf 报 Bad PGP signature）。
+          rsync -a --delete --checksum "$RUNNER_TEMP/repo/repodata/" "$site/repodata/"
+          cmp "$RUNNER_TEMP/repo/repodata/repomd.xml.asc" "$site/repodata/repomd.xml.asc" || {
+            echo "::error::repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
           cp "$RUNNER_TEMP/repo/dsh-desktop.repo" "$site/dsh-desktop.repo"
           cd "$site"
           git config user.name "github-actions[bot]"
