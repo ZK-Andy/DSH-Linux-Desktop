@@ -150,10 +150,10 @@ index cf0c19e8..01876090 100644
  }
 diff --git a/apps/desktop/scripts/electron-builder-linux.mjs b/apps/desktop/scripts/electron-builder-linux.mjs
 new file mode 100644
-index 00000000..2a7ad6ab
+index 00000000..3020b6a7
 --- /dev/null
 +++ b/apps/desktop/scripts/electron-builder-linux.mjs
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,126 @@
 +/**
 + * Linux packaging decisions: the target options, the package identity and the rpm hardening all live
 + * here, so `electron-builder-config.mjs` keeps a single expansion point for them (see PLAN.md §3.2).
@@ -256,6 +256,10 @@ index 00000000..2a7ad6ab
 +        `${resource('dsh-update-helper')}=/usr/libexec/dsh-update-helper`,
 +        `${resource('org.deepseek.harness.desktop.update.policy')}=/usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy`,
 +        `${resource('dsh-desktop.repo')}=/etc/yum.repos.d/dsh-desktop.repo`,
++        // 公钥也由 rpm 拥有：M5 的 .repo 会指向这个本地文件，%post 只做幂等 import。
++        `${resource('RPM-GPG-KEY-dsh-desktop')}=/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`,
++        // helper 的日志目录由包以 %dir 拥有，被清理后 helper 的 tee 才不会失败。
++        `${resource('log-dir')}=/var/log/dsh-desktop`,
 +        // 用户会改镜像地址或 proxy，升级时不能覆盖本地修改。
 +        '--config-files', '/etc/yum.repos.d/dsh-desktop.repo',
 +        '--rpm-auto-add-directories',

@@ -62,6 +62,12 @@ place_assets() {
       install -Dm"$mode" "$src" "$target"
     fi
   done
+  # 空目录占位：fpm 的 dir 映射把它装成 /var/log/dsh-desktop（%dir 归属）。
+  if [[ "$action" == "remove" ]]; then
+    rmdir "$UPSTREAM/apps/desktop/resources/log-dir" 2>/dev/null || true
+  else
+    mkdir -p "$UPSTREAM/apps/desktop/resources/log-dir"
+  fi
 }
 
 MODE="apply"

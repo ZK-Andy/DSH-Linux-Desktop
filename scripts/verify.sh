@@ -106,6 +106,9 @@ check "rpm 拥有 helper 的系统位置" grep -qx '/usr/libexec/dsh-update-help
 check "rpm 拥有 polkit 策略的系统位置" \
   grep -qx '/usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy' <<<"$files"
 check "rpm 拥有 dnf 仓库文件" grep -qx '/etc/yum.repos.d/dsh-desktop.repo' <<<"$files"
+check "rpm 拥有公钥（M5 的 .repo 指向它）" \
+  grep -qx '/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$files"
+check "rpm 以 %dir 拥有 /var/log/dsh-desktop" grep -qx '/var/log/dsh-desktop' <<<"$files"
 repo_flags="$(rpm -qp --qf '[%{FILEFLAGS:fflags} %{FILENAMES}\n]' "$rpm" 2>/dev/null \
   | awk '$2 == "/etc/yum.repos.d/dsh-desktop.repo" { print $1 }')"
 check ".repo 标为 %config（用户改镜像/代理后升级不覆盖）" grep -q 'c' <<<"$repo_flags"
