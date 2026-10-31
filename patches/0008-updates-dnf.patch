@@ -292,7 +292,7 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..c6bf7309
+index 00000000..bb7e661d
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
 @@ -0,0 +1,162 @@
@@ -307,9 +307,9 @@ index 00000000..c6bf7309
 +}))
 +
 +const spawned = await vi.hoisted(async () => {
-+  const { EventEmitter } = await import('node:events')
++  type Emitter = { on: (event: string, cb: (code: number | null) => void) => void }
 +  return { calls: [] as string[][], child: undefined as undefined | {
-+    stdout: EventEmitter, stderr: EventEmitter, on: (event: string, cb: (code: number) => void) => void,
++    stdout: Emitter, stderr: Emitter, on: (event: string, cb: (code: number | null) => void) => void,
 +  } }
 +})
 +vi.mock('node:child_process', async (importOriginal) => {
@@ -450,7 +450,7 @@ index 00000000..c6bf7309
 +  })
 +
 +  it('is unavailable without the helper', () => {
-+    expect(updater({ helperPath: undefined }).available()).toBe(false)
++    expect(updater({ helperPath: '' }).available()).toBe(false)
 +    expect(updater().available()).toBe(true)
 +  })
 +
