@@ -283,13 +283,18 @@ index 0000000..d74c314
 +</style>`
 +}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 7cb338b..6095e11 100644
+index 7cb338b..5cefecb 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
-@@ -34,11 +34,13 @@ export const en = {
-   aboutMenu: 'About DeepSeek Harness',
+@@ -31,14 +31,16 @@ export const en = {
+   application: 'Application',
+   fileMenu: 'File',
+   closePage: 'Close Page or Window',
+-  aboutMenu: 'About DeepSeek Harness',
++  aboutMenu: 'About',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'Version V{version}',
+-  aboutVersion: 'Version V{version}',
++  aboutVersion: 'Desktop version: V{version}',
 +  aboutUpstreamVersion: 'DSH version: V{version}',
    hideApplication: 'Hide DeepSeek Harness',
    hideOtherApplications: 'Hide Others',
@@ -300,10 +305,15 @@ index 7cb338b..6095e11 100644
    quit: 'Quit',
    cancel: 'Cancel',
    quitTitle: 'Quit DeepSeek Harness?',
-@@ -213,11 +215,13 @@ export const zh = {
-   aboutMenu: '关于 DeepSeek Harness',
+@@ -210,14 +212,16 @@ export const zh = {
+   application: '应用',
+   fileMenu: '文件',
+   closePage: '关闭页面或窗口',
+-  aboutMenu: '关于 DeepSeek Harness',
++  aboutMenu: '关于',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: '版本 V{version}',
+-  aboutVersion: '版本 V{version}',
++  aboutVersion: '桌面端版本：V{version}',
 +  aboutUpstreamVersion: 'DSH 版本：V{version}',
    hideApplication: '隐藏 DeepSeek Harness',
    hideOtherApplications: '隐藏其他',
@@ -314,10 +324,15 @@ index 7cb338b..6095e11 100644
    quit: '退出',
    cancel: '取消',
    quitTitle: '退出 DeepSeek Harness？',
-@@ -390,11 +394,13 @@ export const ja = {
-   aboutMenu: 'DeepSeek Harness について',
+@@ -387,14 +391,16 @@ export const ja = {
+   application: 'アプリケーション',
+   fileMenu: 'ファイル',
+   closePage: 'ページまたはウィンドウを閉じる',
+-  aboutMenu: 'DeepSeek Harness について',
++  aboutMenu: '情報',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'バージョン V{version}',
+-  aboutVersion: 'バージョン V{version}',
++  aboutVersion: 'デスクトップ版: V{version}',
 +  aboutUpstreamVersion: 'DSH バージョン: V{version}',
    hideApplication: 'DeepSeek Harness を隠す',
    hideOtherApplications: 'ほかを隠す',
@@ -328,10 +343,15 @@ index 7cb338b..6095e11 100644
    quit: '終了',
    cancel: 'キャンセル',
    quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -567,11 +573,13 @@ export const es = {
-   aboutMenu: 'Acerca de DeepSeek Harness',
+@@ -564,14 +570,16 @@ export const es = {
+   application: 'Solicitud',
+   fileMenu: 'Archivo',
+   closePage: 'Cerrar página o ventana',
+-  aboutMenu: 'Acerca de DeepSeek Harness',
++  aboutMenu: 'Acerca de',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'Versión V{version}',
+-  aboutVersion: 'Versión V{version}',
++  aboutVersion: 'Versión de escritorio: V{version}',
 +  aboutUpstreamVersion: 'Versión de DSH: V{version}',
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar otros',
@@ -342,10 +362,15 @@ index 7cb338b..6095e11 100644
    quit: 'Salir',
    cancel: 'Cancelar',
    quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -744,11 +752,13 @@ export const fr = {
-   aboutMenu: 'À propos de DeepSeek Harness',
+@@ -741,14 +749,16 @@ export const fr = {
+   application: 'Application',
+   fileMenu: 'Fichier',
+   closePage: 'Fermer la page ou la fenêtre',
+-  aboutMenu: 'À propos de DeepSeek Harness',
++  aboutMenu: 'À propos',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'VersionV{version}',
+-  aboutVersion: 'VersionV{version}',
++  aboutVersion: 'Version du bureau : V{version}',
 +  aboutUpstreamVersion: 'Version de DSH : V{version}',
    hideApplication: 'Masquer DeepSeek Harness',
    hideOtherApplications: 'Masquer les autres',
@@ -356,10 +381,15 @@ index 7cb338b..6095e11 100644
    quit: 'Quitter',
    cancel: 'Annuler',
    quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -921,11 +931,13 @@ export const de = {
-   aboutMenu: 'Über DeepSeek Harness',
+@@ -918,14 +928,16 @@ export const de = {
+   application: 'Anwendung',
+   fileMenu: 'Datei',
+   closePage: 'Seite oder Fenster schließen',
+-  aboutMenu: 'Über DeepSeek Harness',
++  aboutMenu: 'Über',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'Version V{version}',
+-  aboutVersion: 'Version V{version}',
++  aboutVersion: 'Desktop-Version: V{version}',
 +  aboutUpstreamVersion: 'DSH-Version: V{version}',
    hideApplication: 'DeepSeek Harness ausblenden',
    hideOtherApplications: 'Andere ausblenden',
@@ -370,10 +400,15 @@ index 7cb338b..6095e11 100644
    quit: 'Beenden',
    cancel: 'Abbrechen',
    quitTitle: 'DeepSeek Harness beenden?',
-@@ -1098,11 +1110,13 @@ export const ru = {
-   aboutMenu: 'О DeepSeek Harness',
+@@ -1095,14 +1107,16 @@ export const ru = {
+   application: 'Приложение',
+   fileMenu: 'Файл',
+   closePage: 'Закрыть страницу или окно',
+-  aboutMenu: 'О DeepSeek Harness',
++  aboutMenu: 'О программе',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'Версия V{version}',
+-  aboutVersion: 'Версия V{version}',
++  aboutVersion: 'Версия приложения: V{version}',
 +  aboutUpstreamVersion: 'Версия DSH: V{version}',
    hideApplication: 'Скрыть DeepSeek Harness',
    hideOtherApplications: 'Скрыть других',
@@ -384,10 +419,15 @@ index 7cb338b..6095e11 100644
    quit: 'Выйти',
    cancel: 'Отмена',
    quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1275,11 +1289,13 @@ export const pt = {
-   aboutMenu: 'Sobre DeepSeek Harness',
+@@ -1272,14 +1286,16 @@ export const pt = {
+   application: 'Aplicativo',
+   fileMenu: 'Arquivo',
+   closePage: 'Fechar página ou janela',
+-  aboutMenu: 'Sobre DeepSeek Harness',
++  aboutMenu: 'Sobre',
    aboutProduct: 'DeepSeek Harness',
-   aboutVersion: 'Versão V{version}',
+-  aboutVersion: 'Versão V{version}',
++  aboutVersion: 'Versão do desktop: V{version}',
 +  aboutUpstreamVersion: 'Versão do DSH: V{version}',
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar outros',
@@ -1327,7 +1367,7 @@ index a74ea7c..476658e 100644
      headers: { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' },
    })
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index a25876d..f2dc5cd 100644
+index a25876d..e72ab82 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -1346,6 +1386,15 @@ index a25876d..f2dc5cd 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
+@@ -587,7 +589,7 @@ describe('desktop main startup', () => {
+     await vi.advanceTimersByTimeAsync(0)
+     const zh = locale === 'zh-CN'
+     expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
+-      type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
++      type: 'info', title: zh ? '关于' : 'About', message: 'DeepSeek Harness',
+       detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
+     }))
+     // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
 @@ -869,12 +871,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
@@ -1408,6 +1457,15 @@ index a25876d..f2dc5cd 100644
    })
  
    it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
+@@ -1031,7 +1065,7 @@ describe('desktop main startup', () => {
+     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
+     const application = handler(event, 'application', 48, 34)
+     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
+-      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
++      '关于', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
+     ])
+     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
+     expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
 diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
 index 735b77f..cc055f0 100644
 --- a/apps/desktop/tests/preload-windows.client.spec.ts
@@ -1466,7 +1524,7 @@ index b285bb9..2d91b42 100644
 +  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(path), expect.any(Error))
 +})
 diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a48..8728e3c 100644
+index 11c3a48..42e2706 100644
 --- a/apps/desktop/tests/tray.spec.ts
 +++ b/apps/desktop/tests/tray.spec.ts
 @@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM
@@ -1497,7 +1555,7 @@ index 11c3a48..8728e3c 100644
    expect(f.native.setToolTip).toHaveBeenCalledWith('DeepSeek Harness')
 -  expect(labels(native.menus[0]!)).toEqual(['Open DeepSeek Harness', 'separator', 'Quit DeepSeek Harness'])
 +  expect(labels(native.menus[0]!)).toEqual([
-+    'Show Main Window', 'Check for Updates', 'separator', 'Restart', 'Quit', 'separator', 'About DeepSeek Harness',
++    'Show Main Window', 'Check for Updates', 'separator', 'Restart', 'Quit', 'separator', 'About',
 +  ])
    expect(f.native.setContextMenu).toHaveBeenCalledWith({ template: native.menus[0] })
  })
@@ -1532,7 +1590,7 @@ index 11c3a48..8728e3c 100644
    f.tray.relabel()
 -  expect(labels(native.menus[1]!)).toEqual(['打开 DeepSeek Harness', 'separator', '退出 DeepSeek Harness'])
 +  expect(labels(native.menus[1]!)).toEqual([
-+    '显示主窗', '检查更新', 'separator', '重启', '退出', 'separator', '关于 DeepSeek Harness',
++    '显示主窗', '检查更新', 'separator', '重启', '退出', 'separator', '关于',
 +  ])
    f.tray.dispose()
    f.tray.dispose()
