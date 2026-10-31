@@ -1,6 +1,45 @@
 变化理由：产包身份与 rpm 目标：应用 id、产品名、二进制名、desktop 项、rpm 依赖、%post/%postun 与更新链资产、构建入口。
+diff --git a/apps/desktop/.env.linux.example b/apps/desktop/.env.linux.example
+new file mode 100644
+index 00000000..3dfb1af6
+--- /dev/null
++++ b/apps/desktop/.env.linux.example
+@@ -0,0 +1,33 @@
++# Copy to .env.linux (Git ignored). Use UTF-8 and quote secrets containing # or spaces.
++# Linux Desktop artifacts are built unsigned, so no signing, notarization, or certificate
++# setting applies. Credential file paths may be absolute or relative to apps/desktop.
++# Values are not shell-expanded.
++DSH_DESKTOP_APP_ID=com.deepseek.harness
++
++# Debian and RPM control files name a maintainer and a project URL, and fpm refuses to build either
++# format without them; AppImage carries neither. The maintainer is whoever built this package, not the
++# upstream author, and GitHub's noreply address is a valid address for that field. Required only when
++# the run selects the deb or rpm format.
++DSH_DESKTOP_LINUX_MAINTAINER="ZK-Andy <ZK-Andy@users.noreply.github.com>"
++DSH_DESKTOP_LINUX_HOMEPAGE="https://github.com/ZK-Andy/DSH-Linux-Desktop"
++
++# The mandatory-update policy channel is Windows and macOS only. The policy service identifies its
++# Desktop clients as desktop-win or desktop-mac and has no Linux identity, and a Linux release carries
++# no update channel, so no policy decision could drive an action. A Linux application therefore embeds
++# no policy and polls nothing: DSH_DESKTOP_AUTO_UPDATE_ENV, both
++# DSH_DESKTOP_MANDATORY_UPDATE_*_ORIGIN settings, and DSH_DESKTOP_MANDATORY_UPDATE_CONFIG do not apply.
++
++# Optional npm registry for the bundled dsh runtime install; defaults to https://registry.npmjs.org/.
++# A local mirror such as https://registry.npmmirror.com speeds up repeated local packages.
++# DSH_DESKTOP_NPM_REGISTRY=https://registry.npmmirror.com
++
++# Optional upload configuration; packaging does not require these credentials.
++# DOWNLOAD_TEST_ORIGIN=
++# Required for test releases: 32 lowercase hexadecimal characters from a secure random generator.
++# DOWNLOAD_TEST_RELEASE_ID=
++# DOWNLOAD_TEST_COS_BUCKET=
++# DOWNLOAD_TEST_COS_SECRET_ID=
++# DOWNLOAD_TEST_COS_SECRET_KEY=
++# DOWNLOAD_PROD_COS_BUCKET=
++# DOWNLOAD_PROD_COS_SECRET_ID=
++# DOWNLOAD_PROD_COS_SECRET_KEY=
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index cf0c19e..47460ad 100644
+index cf0c19e8..82999f4a 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -23,7 +23,8 @@ import {
@@ -28,38 +67,80 @@ index cf0c19e..47460ad 100644
    if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
    const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
    if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
-@@ -111,6 +118,10 @@ export function createElectronBuilderConfig(
+@@ -76,7 +83,13 @@ export function createElectronBuilderConfig(
+   let dshDestination
+   let windowsCode = []
+   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
+-    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
++    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
++    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
++    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
++    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
++    // dependencies left inside the archive, so they are unpacked alongside the package.
++    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
++    '**/node_modules/semver/**']
+   const windowsSigner = packagesWindows && !unsigned
+     ? createWindowsTokenSigner({
+         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
+@@ -111,15 +124,26 @@ export function createElectronBuilderConfig(
        dshDesktopAppId: appId,
        dshDesktopUpdateChannel: update?.channel ?? 'nightly',
        ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
 +      // Read by Electron as the window app_id and by the Linux target as the .desktop filename.
-+      ...(resolvedPlatform === 'linux' ? { desktopName: 'deepseek-harness' } : {}),
++      ...(resolvedPlatform === 'linux' ? { desktopName: 'dsh-desktop' } : {}),
 +      // fpm takes the project URL from the packaged manifest when it builds a Debian or RPM control file.
 +      ...(linuxPackages === undefined ? {} : { homepage: linuxPackages.homepage }),
        ...buildVersion === productVersion ? {} : { version: buildVersion },
        ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
      },
-@@ -120,7 +131,10 @@ export function createElectronBuilderConfig(
+-    productName: 'DeepSeek Harness',
++    productName: 'deepseek-harness-desktop',
+     // The default copyright uses author.name; this line names the product instead.
+     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
      // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-     artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
+-    artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
++    artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
++    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
++    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
++    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 5.
++    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '5',
      directories: { output: output.directory },
--    asar: true,
-+    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
-+    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
-+    // subprocesses load readable outside Electron.
-+    asar: resolvedPlatform !== 'linux',
++    // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
++    // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
++    // cannot read inside the archive (see the asarUnpack patterns below).
+     asar: true,
      electronDist: buildPaths.electron,
      electronFuses: { runAsNode: true },
-     beforeBuild: async () => {
-@@ -253,9 +267,38 @@ export function createElectronBuilderConfig(
+@@ -158,8 +182,21 @@ export function createElectronBuilderConfig(
+     extraResources: [
+       { from: buildPaths.runtime, to: 'runtime' },
+       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
+-      // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
++      // Windows and Linux tray bitmaps; macOS keeps the Dock and ships no menu bar icon. Linux gets the single
++      // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
+       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
++      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
++      // The frameless Linux window hands this bitmap to BrowserWindow for X11 task switching.
++      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/icons-linux/256x256.png', import.meta.url)), to: 'app-icon.png' }] : []),
++      // Update chain: the polkit helper, its policy and the signing key are installed by the rpm
++      // %post from these copies; the application never writes to /usr itself.
++      ...(resolvedPlatform === 'linux' ? [
++        { from: fileURLToPath(new URL('../resources/dsh-update-helper', import.meta.url)), to: 'dsh-update-helper' },
++        { from: fileURLToPath(new URL('../resources/org.deepseek.harness.desktop.update.policy', import.meta.url)), to: 'org.deepseek.harness.desktop.update.policy' },
++        { from: fileURLToPath(new URL('../resources/RPM-GPG-KEY-dsh-desktop', import.meta.url)), to: 'RPM-GPG-KEY-dsh-desktop' },
++      ] : []),
+     ],
+     mac: {
+       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
+@@ -253,8 +290,64 @@ export function createElectronBuilderConfig(
        target: ['nsis'],
      },
      linux: {
-+      // Linux shares macOS's artwork. The SVG rather than the PNG: a single PNG file is installed
-+      // as-is at its own pixel size, which put the icon at hicolor/1024x1024/apps — a directory
-+      // several distributions' hicolor index.theme does not declare, leaving it unresolvable. SVG
-+      // installs to hicolor/scalable/apps, which every hicolor index.theme declares.
-+      icon: fileURLToPath(new URL('../resources/icon-macos.svg', import.meta.url)),
++      // The Linux package ships its own hicolor size set (16-512): the macOS squircle plate reads
++      // poorly in a Linux application grid, and a single PNG only lands at its own pixel size.
++      icon: fileURLToPath(new URL('../resources/icons-linux', import.meta.url)),
        category: 'Development',
 -      target: ['AppImage'],
 +      // electron-builder otherwise derives the command from the scoped package name.
@@ -70,10 +151,12 @@ index cf0c19e..47460ad 100644
 +      // fpm writes the synopsis as the Debian Description's first line and as the RPM Summary. Debian
 +      // policy requires a nonempty synopsis there, and an unset one leaves that line blank.
 +      synopsis: 'DeepSeek Harness desktop application',
++      // productName 是路径安全的 token（/opt 目录跟着它走），菜单里显示的名字在这里单独覆盖。
++      desktop: { entry: { Name: 'DeepSeek Harness' } },
 +      // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
 +      ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
 +      target: linuxFormats ?? ['AppImage'],
-     },
++    },
 +    // The legacy AppImage toolset otherwise writes "Exec=AppRun --no-sandbox %U", which turns off the
 +    // Chromium sandbox for every launch from the desktop menu. An explicitly empty argument list keeps
 +    // that flag out of the entry and leaves AppRun's own "unshare -Ur true" probe in charge: it adds the
@@ -86,121 +169,6 @@ index cf0c19e..47460ad 100644
 +    // rejects it with "Tag takes single token only", so both formats name the package explicitly.
 +    // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
 +    // Group as "default", which names neither a Debian section nor an RPM group.
-+    deb: { packageName: 'deepseek-harness', packageCategory: 'devel' },
-+    rpm: { packageName: 'deepseek-harness', packageCategory: 'Development/Tools' },
-     nsis: {
-       uninstallDisplayName: '${productName}',
-       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
-diff --git a/apps/desktop/.env.linux.example b/apps/desktop/.env.linux.example
-new file mode 100644
-index 0000000..7185dc9
---- /dev/null
-+++ b/apps/desktop/.env.linux.example
-@@ -0,0 +1,33 @@
-+# Copy to .env.linux (Git ignored). Use UTF-8 and quote secrets containing # or spaces.
-+# Linux Desktop artifacts are built unsigned, so no signing, notarization, or certificate
-+# setting applies. Credential file paths may be absolute or relative to apps/desktop.
-+# Values are not shell-expanded.
-+DSH_DESKTOP_APP_ID=com.deepseek.harness
-+
-+# Debian and RPM control files name a maintainer and a project URL, and fpm refuses to build either
-+# format without them; AppImage carries neither. The maintainer is whoever built this package, not the
-+# upstream author, and GitHub's noreply address is a valid address for that field. Required only when
-+# the run selects the deb or rpm format.
-+DSH_DESKTOP_LINUX_MAINTAINER="ffyfox <299493445+ffyfox@users.noreply.github.com>"
-+DSH_DESKTOP_LINUX_HOMEPAGE="https://github.com/deepseek-ai/deepseek-harness"
-+
-+# The mandatory-update policy channel is Windows and macOS only. The policy service identifies its
-+# Desktop clients as desktop-win or desktop-mac and has no Linux identity, and a Linux release carries
-+# no update channel, so no policy decision could drive an action. A Linux application therefore embeds
-+# no policy and polls nothing: DSH_DESKTOP_AUTO_UPDATE_ENV, both
-+# DSH_DESKTOP_MANDATORY_UPDATE_*_ORIGIN settings, and DSH_DESKTOP_MANDATORY_UPDATE_CONFIG do not apply.
-+
-+# Optional npm registry for the bundled dsh runtime install; defaults to https://registry.npmjs.org/.
-+# A local mirror such as https://registry.npmmirror.com speeds up repeated local packages.
-+# DSH_DESKTOP_NPM_REGISTRY=https://registry.npmmirror.com
-+
-+# Optional upload configuration; packaging does not require these credentials.
-+# DOWNLOAD_TEST_ORIGIN=
-+# Required for test releases: 32 lowercase hexadecimal characters from a secure random generator.
-+# DOWNLOAD_TEST_RELEASE_ID=
-+# DOWNLOAD_TEST_COS_BUCKET=
-+# DOWNLOAD_TEST_COS_SECRET_ID=
-+# DOWNLOAD_TEST_COS_SECRET_KEY=
-+# DOWNLOAD_PROD_COS_BUCKET=
-+# DOWNLOAD_PROD_COS_SECRET_ID=
-+# DOWNLOAD_PROD_COS_SECRET_KEY=
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 47460ad..027803e 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -172,8 +172,10 @@ export function createElectronBuilderConfig(
-     extraResources: [
-       { from: buildPaths.runtime, to: 'runtime' },
-       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
--      // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
-+      // Windows and Linux tray bitmaps; macOS keeps the Dock and ships no menu bar icon. Linux gets the single
-+      // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
-       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-     ],
-     mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
-diff --git a/apps/desktop/.env.linux.example b/apps/desktop/.env.linux.example
-index 7185dc9..3dfb1af 100644
---- a/apps/desktop/.env.linux.example
-+++ b/apps/desktop/.env.linux.example
-@@ -8,8 +8,8 @@ DSH_DESKTOP_APP_ID=com.deepseek.harness
- # format without them; AppImage carries neither. The maintainer is whoever built this package, not the
- # upstream author, and GitHub's noreply address is a valid address for that field. Required only when
- # the run selects the deb or rpm format.
--DSH_DESKTOP_LINUX_MAINTAINER="ffyfox <299493445+ffyfox@users.noreply.github.com>"
--DSH_DESKTOP_LINUX_HOMEPAGE="https://github.com/deepseek-ai/deepseek-harness"
-+DSH_DESKTOP_LINUX_MAINTAINER="ZK-Andy <ZK-Andy@users.noreply.github.com>"
-+DSH_DESKTOP_LINUX_HOMEPAGE="https://github.com/ZK-Andy/DSH-Linux-Desktop"
- 
- # The mandatory-update policy channel is Windows and macOS only. The policy service identifies its
- # Desktop clients as desktop-win or desktop-mac and has no Linux identity, and a Linux release carries
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 027803e..f5c78d4 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -119,17 +119,17 @@ export function createElectronBuilderConfig(
-       dshDesktopUpdateChannel: update?.channel ?? 'nightly',
-       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
-       // Read by Electron as the window app_id and by the Linux target as the .desktop filename.
--      ...(resolvedPlatform === 'linux' ? { desktopName: 'deepseek-harness' } : {}),
-+      ...(resolvedPlatform === 'linux' ? { desktopName: 'dsh-desktop' } : {}),
-       // fpm takes the project URL from the packaged manifest when it builds a Debian or RPM control file.
-       ...(linuxPackages === undefined ? {} : { homepage: linuxPackages.homepage }),
-       ...buildVersion === productVersion ? {} : { version: buildVersion },
-       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
-     },
--    productName: 'DeepSeek Harness',
-+    productName: 'deepseek-harness-desktop',
-     // The default copyright uses author.name; this line names the product instead.
-     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
-     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
--    artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
-+    artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
-     directories: { output: output.directory },
-     // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
-     // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
-@@ -283,6 +283,8 @@ export function createElectronBuilderConfig(
-       // fpm writes the synopsis as the Debian Description's first line and as the RPM Summary. Debian
-       // policy requires a nonempty synopsis there, and an unset one leaves that line blank.
-       synopsis: 'DeepSeek Harness desktop application',
-+      // productName 是路径安全的 token（/opt 目录跟着它走），菜单里显示的名字在这里单独覆盖。
-+      desktop: { entry: { Name: 'DeepSeek Harness' } },
-       // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
-       ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
-       target: linuxFormats ?? ['AppImage'],
-@@ -299,8 +301,33 @@ export function createElectronBuilderConfig(
-     // rejects it with "Tag takes single token only", so both formats name the package explicitly.
-     // The category is explicit for the same reason: fpm otherwise stamps Debian's Section and RPM's
-     // Group as "default", which names neither a Debian section nor an RPM group.
--    deb: { packageName: 'deepseek-harness', packageCategory: 'devel' },
--    rpm: { packageName: 'deepseek-harness', packageCategory: 'Development/Tools' },
 +    deb: { packageName: 'dsh-desktop', packageCategory: 'devel' },
 +    // The package owns /opt/deepseek-harness-desktop and an ELF payload that must not be touched by
 +    // rpmbuild's post-processing: stripping Electron/Node binaries breaks their embedded resources,
@@ -220,6 +188,8 @@ index 027803e..f5c78d4 100644
 +        'expat', 'glib2', 'pango', 'cairo', 'gdk-pixbuf2', 'dbus-libs', 'systemd-libs',
 +        'libX11', 'libXcomposite', 'libXdamage', 'libXext', 'libXfixes', 'libXrandr', 'libxcb',
 +      ],
++      afterInstall: fileURLToPath(new URL('../resources/rpm-post-install.sh', import.meta.url)),
++      afterRemove: fileURLToPath(new URL('../resources/rpm-post-remove.sh', import.meta.url)),
 +      fpm: [
 +        '--rpm-rpmbuild-define', '_build_id_links none',
 +        '--rpm-rpmbuild-define', '__os_install_post %{nil}',
@@ -227,264 +197,6 @@ index 027803e..f5c78d4 100644
 +        '--rpm-rpmbuild-define', '__brp_strip /bin/true',
 +        '--rpm-rpmbuild-define', '_binary_payload w19.zstdio',
 +      ],
-+    },
+     },
      nsis: {
        uninstallDisplayName: '${productName}',
-       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 969e104..19e5f15 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -83,7 +83,13 @@ export function createElectronBuilderConfig(
-   let dshDestination
-   let windowsCode = []
-   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
--    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
-+    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
-+    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
-+    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
-+    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
-+    // dependencies left inside the archive, so they are unpacked alongside the package.
-+    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
-+    '**/node_modules/semver/**']
-   const windowsSigner = packagesWindows && !unsigned
-     ? createWindowsTokenSigner({
-         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
-@@ -131,10 +137,10 @@ export function createElectronBuilderConfig(
-     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
-     directories: { output: output.directory },
--    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
--    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
--    // subprocesses load readable outside Electron.
--    asar: resolvedPlatform !== 'linux',
-+    // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
-+    // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
-+    // cannot read inside the archive (see the asarUnpack patterns below).
-+    asar: true,
-     electronDist: buildPaths.electron,
-     electronFuses: { runAsNode: true },
-     beforeBuild: async () => {
-@@ -176,6 +182,8 @@ export function createElectronBuilderConfig(
-       // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
-       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-+      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
-     ],
-     mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 8c34828d..19e5f159 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -277,11 +277,9 @@ export function createElectronBuilderConfig(
-       target: ['nsis'],
-     },
-     linux: {
--      // Linux shares macOS's artwork. The SVG rather than the PNG: a single PNG file is installed
--      // as-is at its own pixel size, which put the icon at hicolor/1024x1024/apps — a directory
--      // several distributions' hicolor index.theme does not declare, leaving it unresolvable. SVG
--      // installs to hicolor/scalable/apps, which every hicolor index.theme declares.
--      icon: fileURLToPath(new URL('../resources/icon-macos.svg', import.meta.url)),
-+      // The Linux package ships its own hicolor size set (16-512): the macOS squircle plate reads
-+      // poorly in a Linux application grid, and a single PNG only lands at its own pixel size.
-+      icon: fileURLToPath(new URL('../resources/icons-linux', import.meta.url)),
-       category: 'Development',
-       // electron-builder otherwise derives the command from the scoped package name.
-       executableName: 'deepseek-harness',
-diff --git a/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop b/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
-new file mode 100644
-index 0000000..f4298e7
---- /dev/null
-+++ b/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
-@@ -0,0 +1,30 @@
-+-----BEGIN PGP PUBLIC KEY BLOCK-----
-+
-+mQINBGrk1oUBEADIiTCzYTZ0qUdMT/KXU4tURAyh8bcxy7vujYXx3RIrLCrT+mLg
-+XVUaNtfmAYf2Gf+NUWxTBtJ0xhoN9AapxmJzYQnZFWxm2oZOHNPW61i1snWe/dc4
-+if2WAKz2Yceb2DJ3jcd24tyMzjUDEUN+aqqQhXukp2dW4LAMXtO+l0zzbkETpgRN
-+FNp/qeIjbmusMDZ+hTeIh7kECzlVQzOeH8s/awpZOngq1z1MGsdz+m3sFYYqiAvt
-+lu5L5nf6MPU3hOR0An6XyPLbVDZlKSFagRmlypOsaHXUZb+YlpR26FiBeIZ0YIRX
-+gGcIOQfpRPuQvQXHjeoysuFhsLmfAitvvTbfAmZciddUt6mJu8fjBKKb7saFVn4T
-+pm8dPY7d1bi72/fjmCic4VUX6aaecLtpPixdjTanmxkpsxrLZssMFhqiGLDids2V
-+cUwKp58w4ssbOpmQ8BoWbShAs3XKlGii55k00zRgBj07afqtHGdl1kJ1z9b8RJT8
-+qFw0wCB6jOewS+Js+JfZ3T5wTTQjovGyAMi/g6QSRbL711rE3m28y26E/RHb28Hu
-+gMWZlwIolDwzZ/YG/hxLGhYlO+o/NYp8uyc3VdGctapZ+ZsB6XfWI2y1qSwe+kiF
-+5+Ea8KZdV7w5OpCTCuSt0VfaCEJ5zvtxyPVFVXfP6PRyCT1Rk99CGH7ZBwARAQAB
-+tFNEU0ggTGludXggRGVza3RvcCBSUE0gU2lnbmluZyAodW5vZmZpY2lhbCBidWls
-+ZCkgPHprLWFuZHlAdXNlcnMubm9yZXBseS5naXRodWIuY29tPokCUQQTAQoAOxYh
-+BHgpIvuwY9svUbPTPUKL4UHIX5DuBQJq5NaFAhsDBQsJCAcCAiICBhUKCQgLAgQW
-+AgMBAh4HAheAAAoJEEKL4UHIX5Du6hoQAKTPPBYwna1mOEpSPG/22yQrzo9ZySQW
-+1opiZqpijMLBlPqOwr8nHqocAj7BG3jfaMa1Ohu0UgU32MPNF9aB033WZIZJzXh3
-+/s6j4ycFZxIpDbXwzB5YIlwlDfLBh1OZ1ViaNptAhNUAoWMkpZUbequ8ognbws/4
-+BlKO6W19qNigfKl4deEYnVITxm9DXOJdC27InovaqfLTMKWvZXiF8zmp1F50ViQz
-+YsQG+LzAniVrEdU7UJ81V99QW4CMIDGCpOTH7T9V+rpcoxH3dyJqTbMy3dCBx26R
-+NPZ3ky2lbo3WEXE8wiLo9A7Y0apTjFe5IHGpFnwU930ByeRlmJ/hetycJYt5Fol0
-+Ua/4aQdB40S4AREHeyAwwdnjQKS4jWfsNz93+byfIB7pnHyw5MpFELYv0GTx61P2
-+aOvdll7bRg2Lr//NojbOJ75H62DYGfnGpBWkw8zOB1hxd0RrpOWo02tAZfWZUu1h
-+2kwBN+sYX7oAKnNfJNsuHCRcQm1Goj0hoYWuQ4wS/J0EezUh3OiAXr7jVXDXlEYj
-+APCdmIrNWth2ow2EidCR1drZjJh8U5n1RLtmzP2mJy3SKzCUAH9MKQZ7eaA8ZAfi
-+/2AA49JbNn9RmLHXHgUKK1kKl8vos0Mwim1xB3gJsHoWWRDRdmoOIDN8oRLJ6duo
-+8XS/xcBr0FV6
-+=07EO
-+-----END PGP PUBLIC KEY BLOCK-----
-diff --git a/apps/desktop/resources/dsh-update-helper b/apps/desktop/resources/dsh-update-helper
-new file mode 100755
-index 0000000..27e9034
---- /dev/null
-+++ b/apps/desktop/resources/dsh-update-helper
-@@ -0,0 +1,48 @@
-+#!/bin/sh
-+# 由 pkexec 以 root 调用的唯一入口：安装用户已经下载并校验过的 dsh-desktop rpm。
-+#
-+# 参数只有一个：缓存目录里的 rpm 绝对路径。脚本只接受我们自己写的那两个缓存目录，
-+# 并强制对本地包做 OpenPGP 校验（localpkg_gpgcheck=1），与 PLAN §3.4 一致。
-+set -eu
-+
-+LOG_DIR=/var/log/dsh-desktop
-+LOG="$LOG_DIR/update.log"
-+mkdir -p "$LOG_DIR"
-+chmod 0755 "$LOG_DIR"
-+
-+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
-+
-+if [ "$#" -ne 1 ]; then
-+  log "拒绝：参数个数为 $#，只接受一个 rpm 路径"
-+  exit 64
-+fi
-+
-+case "$1" in
-+  /home/*/.cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-+  /var/cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-+  *) log "拒绝：不在更新缓存的 rpm：$1"; exit 64 ;;
-+esac
-+
-+if [ ! -f "$1" ]; then
-+  log "找不到包：$1"
-+  exit 66
-+fi
-+
-+if [ "$(id -u)" -ne 0 ]; then
-+  log "拒绝：必须经 pkexec 以 root 运行"
-+  exit 77
-+fi
-+
-+log "开始安装 $1"
-+rpm --import /opt/deepseek-harness-desktop/resources/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
-+  log "导入签名公钥失败"
-+  exit 70
-+}
-+
-+if dnf5 install -y --setopt=localpkg_gpgcheck=1 "$1" >>"$LOG" 2>&1; then
-+  log "安装成功"
-+  exit 0
-+fi
-+
-+log "安装失败，见上方 dnf5 输出"
-+exit 1
-diff --git a/apps/desktop/resources/org.deepseek.harness.desktop.update.policy b/apps/desktop/resources/org.deepseek.harness.desktop.update.policy
-new file mode 100644
-index 0000000..dfae665
---- /dev/null
-+++ b/apps/desktop/resources/org.deepseek.harness.desktop.update.policy
-@@ -0,0 +1,18 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE policyconfig PUBLIC
-+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
-+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-+<policyconfig>
-+  <vendor>DSH Linux Desktop</vendor>
-+  <action id="org.deepseek.harness.desktop.update">
-+    <description>Install a downloaded DeepSeek Harness desktop update</description>
-+    <message>Authentication is required to install the downloaded update.</message>
-+    <defaults>
-+      <allow_any>auth_admin</allow_any>
-+      <allow_inactive>no</allow_inactive>
-+      <allow_active>auth_admin_keep</allow_active>
-+    </defaults>
-+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dsh-update-helper</annotate>
-+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
-+  </action>
-+</policyconfig>
-diff --git a/apps/desktop/resources/rpm-post-install.sh b/apps/desktop/resources/rpm-post-install.sh
-new file mode 100755
-index 0000000..caa3e5f
---- /dev/null
-+++ b/apps/desktop/resources/rpm-post-install.sh
-@@ -0,0 +1,19 @@
-+#!/bin/sh
-+# rpm %post：把 polkit helper 与策略装到系统位置。helper 只被 pkexec 调用，应用自己不改 /usr。
-+set -eu
-+
-+RESOURCES=/opt/deepseek-harness-desktop/resources
-+
-+install -d -m 0755 /usr/libexec
-+install -d -m 0755 /usr/share/polkit-1/actions
-+
-+if [ -f "$RESOURCES/dsh-update-helper" ]; then
-+  install -m 0755 "$RESOURCES/dsh-update-helper" /usr/libexec/dsh-update-helper
-+fi
-+
-+if [ -f "$RESOURCES/org.deepseek.harness.desktop.update.policy" ]; then
-+  install -m 0644 "$RESOURCES/org.deepseek.harness.desktop.update.policy" \
-+    /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy
-+fi
-+
-+exit 0
-diff --git a/apps/desktop/resources/rpm-post-remove.sh b/apps/desktop/resources/rpm-post-remove.sh
-new file mode 100755
-index 0000000..34a32a8
---- /dev/null
-+++ b/apps/desktop/resources/rpm-post-remove.sh
-@@ -0,0 +1,10 @@
-+#!/bin/sh
-+# rpm %postun：只在卸载（而不是升级）时撤掉 helper 与 polkit 策略。
-+set -eu
-+
-+if [ "$1" = "0" ]; then
-+  rm -f /usr/libexec/dsh-update-helper
-+  rm -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy
-+fi
-+
-+exit 0
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 19e5f15..82999f4 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -136,6 +136,10 @@ export function createElectronBuilderConfig(
-     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
-     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
-+    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
-+    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
-+    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 5.
-+    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '5',
-     directories: { output: output.directory },
-     // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
-     // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
-@@ -184,6 +188,15 @@ export function createElectronBuilderConfig(
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-       // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
-+      // The frameless Linux window hands this bitmap to BrowserWindow for X11 task switching.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/icons-linux/256x256.png', import.meta.url)), to: 'app-icon.png' }] : []),
-+      // Update chain: the polkit helper, its policy and the signing key are installed by the rpm
-+      // %post from these copies; the application never writes to /usr itself.
-+      ...(resolvedPlatform === 'linux' ? [
-+        { from: fileURLToPath(new URL('../resources/dsh-update-helper', import.meta.url)), to: 'dsh-update-helper' },
-+        { from: fileURLToPath(new URL('../resources/org.deepseek.harness.desktop.update.policy', import.meta.url)), to: 'org.deepseek.harness.desktop.update.policy' },
-+        { from: fileURLToPath(new URL('../resources/RPM-GPG-KEY-dsh-desktop', import.meta.url)), to: 'RPM-GPG-KEY-dsh-desktop' },
-+      ] : []),
-     ],
-     mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
-@@ -326,6 +339,8 @@ export function createElectronBuilderConfig(
-         'expat', 'glib2', 'pango', 'cairo', 'gdk-pixbuf2', 'dbus-libs', 'systemd-libs',
-         'libX11', 'libXcomposite', 'libXdamage', 'libXext', 'libXfixes', 'libXrandr', 'libxcb',
-       ],
-+      afterInstall: fileURLToPath(new URL('../resources/rpm-post-install.sh', import.meta.url)),
-+      afterRemove: fileURLToPath(new URL('../resources/rpm-post-remove.sh', import.meta.url)),
-       fpm: [
-         '--rpm-rpmbuild-define', '_build_id_links none',
-         '--rpm-rpmbuild-define', '__os_install_post %{nil}',
