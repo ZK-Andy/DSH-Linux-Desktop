@@ -100,7 +100,8 @@ for patch in patches:
             )
 
 for target, entries in sorted(touched.items()):
-    names = sorted({name for name, is_new in entries if not is_new})
+    # 新建这个文件的补丁也算一个拥有者：一个补丁新建、另一个补丁再改，同样是两个补丁。
+    names = sorted({name for name, _ in entries})
     if target == 'apps/desktop/src/main.ts' or len(names) <= 1:
         continue
     ok(f'{target} 被 {len(names)} 个补丁触碰：{" ".join(names)}', target)
