@@ -152,6 +152,30 @@ postun="$(rpm -qp --scripts "$rpm" 2>/dev/null | sed -n '/^postuninstall scriptl
 check_not "%postun 不删 rpm 拥有的 helper" grep -q '/usr/libexec/dsh-update-helper' <<<"$postun"
 check_not "%postun 不删 rpm 拥有的 polkit 策略" grep -q 'org.deepseek.harness.desktop.update.policy' <<<"$postun"
 
+# --- 更新链收敛为 dnf-only（M5）---
+helper="$(rpm_cat /usr/libexec/dsh-update-helper 2>/dev/null)"
+check "helper 不接受参数" grep -q '不接受参数' <<<"$helper"
+check "helper 只跑 dnf5 upgrade dsh-desktop" grep -q 'dnf5 upgrade -y --refresh.*dsh-desktop' <<<"$helper"
+check_not "helper 不再接收 rpm 路径参数" grep -q '\$1' <<<"$helper"
+check "helper 用 tee 同时写日志与 stdout" grep -q '2>&1 | tee -a "\$LOG"' <<<"$helper"
+repo="$(rpm_cat /etc/yum.repos.d/dsh-desktop.repo 2>/dev/null)"
+check ".repo 的 gpgkey 指向随包公钥" \
+  grep -qx 'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$repo"
+check ".repo 的 metadata_expire=1h" grep -qx 'metadata_expire=1h' <<<"$repo"
+check ".repo 的 skip_if_unavailable=1" grep -qx 'skip_if_unavailable=1' <<<"$repo"
+check "%post 幂等导入随包公钥" \
+  grep -q 'rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$post"
+# 公钥在 rpmdb 里是 NAME=gpg-pubkey、VERSION=指纹，%postun 只能按指纹尾筛。
+check "%postun 卸载时删除公钥" grep -q "c85f90ee" <<<"$postun"
+check "%postun 按指纹删除公钥" grep -q 'rpmkeys --delete' <<<"$postun"
+keydb="$(mktemp -d)"
+rpm --dbpath "$keydb" --import packaging/RPM-GPG-KEY-dsh-desktop >/dev/null 2>&1
+# rpm 把导入的公钥当成 gpg-pubkey 包：NAME 固定为 gpg-pubkey，VERSION 才是指纹。
+keyid="$(rpm --dbpath "$keydb" -qa --qf '%{VERSION}\n' 2>/dev/null | head -n 1)"
+rm -rf "$keydb"
+keyid="${keyid: -8}"
+check "公钥 ID 与 %postun 写死的 ID 一致" test "$keyid" = "c85f90ee"
+
 echo
 printf '==> %d 项通过，%d 项失败\n' "$pass" "$fail"
 exit "$((fail > 0))"

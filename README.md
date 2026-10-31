@@ -45,7 +45,7 @@ sudo rpm --import ./RPM-GPG-KEY-dsh-desktop
 sudo dnf5 install ./dsh-desktop-*.rpm
 ```
 
-`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，同时随每个 Release 提供（与 rpm、`version.json`、`SHA256SUMS.txt` 一起）。仓库的 repodata 托管在 GitHub Pages（`gh-pages` 分支），rpm 本体仍在版本 Release 里——repodata 的 `<location xml:base>` 指向对应版本的 Release 目录，所以 Pages 上只有索引，不放大文件。
+`RPM-GPG-KEY-dsh-desktop` 在仓库 `packaging/` 下，同时随每个 Release 提供（与 rpm、`SHA256SUMS.txt` 一起）。仓库的 repodata 托管在 GitHub Pages（`gh-pages` 分支），rpm 本体仍在版本 Release 里——repodata 的 `<location xml:base>` 指向对应版本的 Release 目录，所以 Pages 上只有索引，不放大文件。
 
 GNOME 默认不显示托盘图标，需要安装并启用扩展：
 
@@ -58,11 +58,11 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 
 ## 更新模型
 
-- 包管理器是唯一真源，应用不写 `/usr`、不自更新。
-- Releases 上发布 `version.json`（`version` 点分形式、`tag`、rpm 资产名、sha256、字节数）；应用启动后延迟检查一次，托盘「检查更新」与设置页也可手动触发。
-- 下载到 `~/.cache/dsh-desktop/`，边下边算 sha256，长度或摘要不符即删除；落盘后再用随包公钥在临时 rpmdb 里 `rpm -Kv` 验签，不通过就不交给安装器。
-- 安装经 `pkexec` 调用 `/usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，`allow_active=auth_admin_keep`，授权一次）。helper 只接受缓存目录里的 `dsh-desktop-*.rpm`，先 `rpm --import` 公钥，再 `dnf5 install -y --setopt=localpkg_gpgcheck=1`，日志写 `/var/log/dsh-desktop/update.log`；成功后应用自动重启。
-- helper 与 polkit 策略由 rpm `%post` 从 `/opt/deepseek-harness-desktop/resources/` 装到 `/usr/libexec` 与 `/usr/share/polkit-1/actions`，卸载（`%postun` 参数为 0）时移除；应用自身不写 `/usr`。
+- 包管理器是唯一真源，应用不写 `/usr`、不自更新、不自带下载器。
+- 检查更新：`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`。有输出即有新版本，空输出即已是最新，命令失败则原样展示错误；启动后延迟检查一次，托盘「检查更新」与设置页可手动触发（手动时带 `--refresh`）。
+- 安装：`pkexec /usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，`allow_active=yes` 放行一次）。helper 不接受任何参数，只执行 `dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`，日志写 `/var/log/dsh-desktop/update.log`；成功后应用自动重启。
+- 版本比较：应用把安装的 rpm `VERSION-RELEASE` 编码成 semver 再比（预发布 `0.2.2~alpha.2-6` → `0.2.2-alpha.2.6`，正式版 `0.2.3-1` → `0.2.3.z.1`），所以第 10 个 release 不会被当成比第 9 个旧。
+- helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与日志目录 `/var/log/dsh-desktop` 都由 rpm 文件清单直接拥有（fpm 的 `源=目标` 映射）；`.repo` 标 `%config(noreplace)`，`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载（参数 0）时删掉随包公钥。
 - dnf 仓库已维护：repodata 在 `gh-pages`（GitHub Pages），rpm 在版本 Release；每次发版用 `scripts/publish-repo.sh` 重生 repodata 并推上去，否则 `dnf5 check-update` 只看到旧版本。
 
 ## 构建
@@ -72,7 +72,7 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 两条入口共用 `package.yml`（出包腿：补丁 → 构建 → 签名 → 静态验收 → 容器冒烟）：
 
 - `.github/workflows/build.yml`（周一定时 / 手动）只出包，不碰 Release。
-- `.github/workflows/release.yml`（push tag `v*`）出包后聚合资产、生成 `version.json` 与 `SHA256SUMS.txt`、跑 `scripts/release-preflight.sh`（资产矩阵、验签、version.json 与包内事实逐项核对），最后创建 Release。
+- `.github/workflows/release.yml`（push tag `v*`）出包后聚合资产、生成 `SHA256SUMS.txt`、跑 `scripts/release-preflight.sh`（资产矩阵、验签、校验和自洽），最后创建 Release 并刷新 gh-pages 的 repodata。
 
 发版就是打 tag 并推送（tag 尾部的数字即 rpm Release 段）：
 

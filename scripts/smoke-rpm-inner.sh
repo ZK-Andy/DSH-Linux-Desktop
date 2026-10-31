@@ -15,7 +15,11 @@ mkdir -p "$SHOT_DIR" "$LOG_DIR"
 if [[ "${1:-}" == "--launch" ]]; then
   export DSH_HOME="${DSH_HOME:-/tmp/dsh-home}"
   app_log="$LOG_DIR/app.log"
-  "$APP" --no-sandbox --disable-gpu --disable-dev-shm-usage >"$app_log" 2>&1 &
+  # 直接跑包内的二进制：/usr/bin 的入口是 %post 用 update-alternatives/ln 建的，
+  # 容器里不一定存在；它在装包断言里单独验。
+  APP_BIN=/opt/deepseek-harness-desktop/deepseek-harness
+  [ -x "$APP_BIN" ] || { log "缺少 $APP_BIN"; exit 1; }
+  "$APP_BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage >"$app_log" 2>&1 &
   app=$!
   trap 'kill "$app" 2>/dev/null || true' EXIT
 
@@ -106,17 +110,20 @@ printf '{"id":1,"input":"%s","options":{"failOn":"error","limitInputPixels":fals
   | grep -q '"ok":true' || { log "sharp worker 解码失败：检查 0021 的 asarUnpack 是否含 detect-libc 与 semver"; exit 1; }
 log "sharp 解码 OK"
 
-# 更新链：helper 与 polkit 策略由 rpm %post 装到系统位置，helper 自己跑一遍升级（同版本重装）。
-log "验证更新链 helper 与 polkit 策略"
+# 更新链（M5）：helper、polkit 策略、.repo 与公钥都由 rpm 拥有；helper 不接受参数，
+# 只触发一次 `dnf5 upgrade dsh-desktop`。这里真跑一次，验证它不需要任何外部参数。
+log "验证更新链 helper 与 dnf 仓库"
 [ -x /usr/libexec/dsh-update-helper ] || { log "缺少 /usr/libexec/dsh-update-helper"; exit 1; }
 [ -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy ]   || { log "缺少 polkit 策略"; exit 1; }
-[ -f "$pkg/RPM-GPG-KEY-dsh-desktop" ] || { log "缺少随包公钥"; exit 1; }
-mkdir -p /var/cache/dsh-desktop
-cp /pkg/*.rpm /var/cache/dsh-desktop/
-/usr/libexec/dsh-update-helper /var/cache/dsh-desktop/*.rpm \
-  || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
-grep -q '安装成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
-# M4：系统侧文件现在由 rpm 自己拥有，安装后不应出现校验差异。
+[ -f /etc/yum.repos.d/dsh-desktop.repo ] || { log "缺少 /etc/yum.repos.d/dsh-desktop.repo"; exit 1; }
+[ -f /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop ] || { log "缺少随包公钥"; exit 1; }
+# 公钥在 rpmdb 里是 NAME=gpg-pubkey、VERSION=指纹，按指纹尾 8 位判定是否已导入。
+rpm -qa --qf '%{NAME} %{VERSION}\n' \
+  | awk '$1 == "gpg-pubkey" && substr($2, length($2) - 7) == "c85f90ee"' | grep -q . \
+  || { log "公钥没有导入 rpmdb"; exit 1; }
+# M4：系统侧文件必须由 rpm 拥有、且安装后无校验差异。这些断言放在 helper 之前：
+# helper 会 `dnf5 upgrade` 到仓库里的最新版，而仓库里的版本可能早于 M4（那时 helper 还是 %post 复制的），
+# 升级后再断言归属就不再是在验证本次构建的包了。
 rpm -q --whatprovides /usr/libexec/dsh-update-helper >/dev/null || { log "helper 不属于任何包"; exit 1; }
 rpm -q --whatprovides /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy >/dev/null \
   || { log "polkit 策略不属于任何包"; exit 1; }
@@ -129,6 +136,20 @@ sandbox_drift="$(rpm -V dsh-desktop | grep 'chrome-sandbox' || true)"
 unexpected="$(rpm -V dsh-desktop | grep -v 'chrome-sandbox' || true)"
 [[ -n "$sandbox_drift" ]] && log "chrome-sandbox 权限由 %post 调整（预期内）：$sandbox_drift"
 [[ -z "$unexpected" ]] || { echo "$unexpected" >&2; log "rpm -V dsh-desktop 报告了预期之外的差异"; exit 1; }
+# helper 不接受参数，跑一次 `dnf5 upgrade dsh-desktop`；它可能把包换成仓库里的发布版，
+# 所以这条放在归属断言之后。
+/usr/libexec/dsh-update-helper \
+  || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
+grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
+rpm -q dsh-desktop >/dev/null || { log "helper 跑完后 dsh-desktop 不在 rpmdb"; exit 1; }
+# helper 会把容器里的包换成仓库里的发布版，那一版的 /usr/bin 链接与本分支构建的包不一定一致。
+# 后续要测的是本次构建的二进制，所以这里降级回 /pkg 里的包。
+{ dnf5 downgrade -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm >/dev/null 2>&1 \
+    || dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm >/dev/null 2>&1; } \
+  || { log "helper 之后装回本次构建失败"; exit 1; }
+log "装回本次构建：$(rpm -q --qf '%{VERSION}-%{RELEASE}' dsh-desktop)"
+[ -x /opt/deepseek-harness-desktop/deepseek-harness ] \
+  || { log "装回后缺少 /opt/deepseek-harness-desktop/deepseek-harness"; exit 1; }
 log "更新链 helper 安装 OK"
 
 export DSH_HOME=/tmp/dsh-home

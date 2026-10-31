@@ -46,8 +46,6 @@ jobs:
           name: linux-x64-rpm
           path: dist
 
-      - name: 生成 version.json（更新链读取）
-        run: bash scripts/make-version-json.sh dist/*.rpm > dist/version.json && cat dist/version.json
 
       - name: 生成合并 SHA256SUMS
         run: |
@@ -83,7 +81,6 @@ jobs:
           files: |
             dist/*.rpm
             dist/RPM-GPG-KEY-dsh-desktop
-            dist/version.json
             dist/SHA256SUMS.txt
 
   # 每次发版刷新 dnf 仓库：repodata 推到 gh-pages，rpm 本体留在本版本的 Release 里

@@ -1,9 +1,9 @@
-#!/bin/sh
-# 由 pkexec 以 root 调用的唯一入口：安装用户已经下载并校验过的 dsh-desktop rpm。
+#!/bin/bash
+# 由 pkexec 以 root 调用的唯一入口：把 dsh-desktop 升到仓库里的最新版。
 #
-# 参数只有一个：缓存目录里的 rpm 绝对路径。脚本只接受我们自己写的那两个缓存目录，
-# 并强制对本地包做 OpenPGP 校验（localpkg_gpgcheck=1），与 PLAN §3.4 一致。
-set -eu
+# 不接受任何参数：仓库地址、签名公钥与 gpgcheck 全部由 /etc/yum.repos.d/dsh-desktop.repo
+# 与随包公钥定义，helper 只负责触发一次 `dnf5 upgrade`。日志写在 /var/log/dsh-desktop/。
+set -euo pipefail
 
 LOG_DIR=/var/log/dsh-desktop
 LOG="$LOG_DIR/update.log"
@@ -12,20 +12,9 @@ chmod 0755 "$LOG_DIR"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
 
-if [ "$#" -ne 1 ]; then
-  log "拒绝：参数个数为 $#，只接受一个 rpm 路径"
+if [ "$#" -ne 0 ]; then
+  log "拒绝：不接受参数（收到 $# 个）"
   exit 64
-fi
-
-case "$1" in
-  /home/*/.cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-  /var/cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-  *) log "拒绝：不在更新缓存的 rpm：$1"; exit 64 ;;
-esac
-
-if [ ! -f "$1" ]; then
-  log "找不到包：$1"
-  exit 66
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -33,16 +22,19 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 77
 fi
 
-log "开始安装 $1"
-rpm --import /opt/deepseek-harness-desktop/resources/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
+log "开始升级 dsh-desktop"
+# 公钥由 rpm 装在 /etc/pki/rpm-gpg/，%post 已做过一次幂等导入；这里再导入一次，
+# 保证手工删除过 keyring 的机器也能升级。
+rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
   log "导入签名公钥失败"
   exit 70
 }
 
-if dnf5 install -y --setopt=localpkg_gpgcheck=1 "$1" >>"$LOG" 2>&1; then
-  log "安装成功"
+# dnf5 的输出用 tee 同时进日志与 stdout：pkexec 客户端按行读取，安装期间显示最新一行。
+if dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop 2>&1 | tee -a "$LOG"; then
+  log "升级成功"
   exit 0
 fi
 
-log "安装失败，见上方 dnf5 输出"
+log "升级失败，见上方 dnf5 输出（退出码 $?）"
 exit 1
