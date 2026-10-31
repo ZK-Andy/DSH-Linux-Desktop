@@ -154,7 +154,7 @@ index 00000000..e194d369
 +}
 +
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
-index e62a84f0..5109c39b 100644
+index e62a84f0..8cbde91b 100644
 --- a/apps/desktop/src/ipc.ts
 +++ b/apps/desktop/src/ipc.ts
 @@ -36,6 +36,9 @@ export const DESKTOP_IPC = {
@@ -167,7 +167,12 @@ index e62a84f0..5109c39b 100644
  } as const
  
  /** Desktop release update state rendered by desktop-owned UI. */
-@@ -74,6 +77,24 @@ export interface DesktopUpdatePresentation {
+@@ -71,9 +74,29 @@ export interface DesktopUpdatePresentation {
+   readonly phase: DesktopUpdateState['phase']
+   readonly version?: string
+   readonly percent?: number
++  /** Latest package-manager line during installation, already stripped of terminal control codes. */
++  readonly installDetail?: string
    readonly failure?: DesktopUpdateFailureKind
  }
  
@@ -192,7 +197,7 @@ index e62a84f0..5109c39b 100644
  /** Product documents cannot supply update versions, package URLs, or installation authorization. */
  export interface DshDesktopProductApi {
    readonly protocolVersion: 1
-@@ -81,6 +102,8 @@ export interface DshDesktopProductApi {
+@@ -81,6 +104,8 @@ export interface DshDesktopProductApi {
    readonly fileDrag: DesktopFileDrag
    readonly keyboard: DesktopKeyboardApi
    readonly shortcuts: DesktopShortcutsApi
