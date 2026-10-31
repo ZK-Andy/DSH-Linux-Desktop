@@ -165,11 +165,15 @@ check ".repo 的 metadata_expire=1h" grep -qx 'metadata_expire=1h' <<<"$repo"
 check ".repo 的 skip_if_unavailable=1" grep -qx 'skip_if_unavailable=1' <<<"$repo"
 check "%post 幂等导入随包公钥" \
   grep -q 'rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$post"
-check "%postun 卸载时删除公钥" grep -q 'gpg-pubkey-c85f90ee' <<<"$postun"
+# 公钥在 rpmdb 里是 NAME=gpg-pubkey、VERSION=指纹，%postun 只能按指纹尾筛。
+check "%postun 卸载时删除公钥" grep -q "c85f90ee" <<<"$postun"
+check "%postun 按指纹删除公钥" grep -q 'rpmkeys --delete' <<<"$postun"
 keydb="$(mktemp -d)"
 rpm --dbpath "$keydb" --import packaging/RPM-GPG-KEY-dsh-desktop >/dev/null 2>&1
-keyid="$(rpm --dbpath "$keydb" -qa --qf '%{NAME}\n' 'gpg-pubkey-*' 2>/dev/null | sed 's/^gpg-pubkey-//' | cut -c1-8)"
+# rpm 把导入的公钥当成 gpg-pubkey 包：NAME 固定为 gpg-pubkey，VERSION 才是指纹。
+keyid="$(rpm --dbpath "$keydb" -qa --qf '%{VERSION}\n' 2>/dev/null | head -n 1)"
 rm -rf "$keydb"
+keyid="${keyid: -8}"
 check "公钥 ID 与 %postun 写死的 ID 一致" test "$keyid" = "c85f90ee"
 
 echo
