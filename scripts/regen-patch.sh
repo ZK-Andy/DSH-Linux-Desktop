@@ -18,7 +18,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"
   exit 2
 }
 
@@ -39,8 +39,7 @@ done
 [[ ${#paths[@]} -gt 0 ]] || { echo "regen-patch: 未给出路径" >&2; exit 2; }
 [[ -d "$repo/.git" || -f "$repo/.git" ]] || { echo "regen-patch: $repo 不是 git 仓库" >&2; exit 2; }
 
-[[ "$name" == patches/*.patch ]] || name="patches/${name%.patch}.patch"
-[[ "$name" == patches/*.patch ]] || name="${name}.patch"
+bare=${name#patches/}; bare=${bare%.patch}; name="patches/${bare}.patch"
 
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT

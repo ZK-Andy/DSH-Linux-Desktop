@@ -6,7 +6,7 @@
 # 才算已登记：
 #   - 首行：§10 里那句「没有补丁首行写」（M8 现状句；PR 2 补齐首行后必须删掉这句）；
 #   - main.ts 净增：§10 的同一行里同时出现 `00NN`、main.ts、净增；
-#   - 多补丁文件：§10 里出现该文件的完整路径；
+#   - 多补丁文件：取 §10 里含该完整路径的那一行，实际触碰的补丁集合必须与行内登记的集合完全一致（数量不得上升）；
 #   - 内嵌资源：§10 里出现该落点的完整路径。
 # §10 条目删掉后，对应检查自动变成硬失败。
 set -euo pipefail
@@ -56,6 +56,7 @@ def sections(patch: pathlib.Path):
     """yield (target, is_new, added, removed)，按 diff --git 分段统计。"""
     target = None
     is_new = False
+    binary = False
     added = removed = 0
     for raw in patch.read_text(encoding='utf-8', errors='replace').splitlines():
         if raw.startswith('diff --git '):
@@ -64,10 +65,16 @@ def sections(patch: pathlib.Path):
             match = re.search(r' b/(.+)$', raw)
             target = match.group(1) if match else None
             is_new = False
+            binary = False
             added = removed = 0
             continue
         if raw.startswith('new file mode'):
             is_new = True
+            continue
+        if raw.startswith('GIT binary patch'):
+            binary = True
+            continue
+        if binary:
             continue
         if raw.startswith('+++') or raw.startswith('---'):
             continue
@@ -99,12 +106,28 @@ for patch in patches:
                 f'`{patch.stem[:4]}`', 'main.ts', '净增', line_only=True,
             )
 
+def registered_patch_ids(target):
+    """§10 里包含该路径的那一行登记的补丁集合；找不到这一行返回 None。"""
+    for line in lines:
+        if target in line:
+            return set(re.findall(r'`(00\d{2})`', line))
+    return None
+
 for target, entries in sorted(touched.items()):
     # 新建这个文件的补丁也算一个拥有者：一个补丁新建、另一个补丁再改，同样是两个补丁。
     names = sorted({name for name, _ in entries})
     if target == 'apps/desktop/src/main.ts' or len(names) <= 1:
         continue
-    ok(f'{target} 被 {len(names)} 个补丁触碰：{" ".join(names)}', target)
+    actual = {name[:4] for name in names}
+    expected = registered_patch_ids(target)
+    if expected is None:
+        failures.append(f'{target} 被 {len(names)} 个补丁触碰：{" ".join(names)}（§10 未登记）')
+    elif actual != expected:
+        failures.append(
+            f'{target} 被 {sorted(actual)} 触碰，与 §10 登记 {sorted(expected)} 不一致（补丁数不得上升）'
+        )
+    else:
+        registered.append(f'{target} 被 {sorted(actual)} 触碰，与 §10 登记一致')
 
 assets_src = (root / 'scripts/apply-patches.sh').read_text(encoding='utf-8')
 block = re.search(r'^ASSETS=\((.*?)^\)', assets_src, re.M | re.S)
