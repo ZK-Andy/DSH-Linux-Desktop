@@ -15,7 +15,11 @@ mkdir -p "$SHOT_DIR" "$LOG_DIR"
 if [[ "${1:-}" == "--launch" ]]; then
   export DSH_HOME="${DSH_HOME:-/tmp/dsh-home}"
   app_log="$LOG_DIR/app.log"
-  "$APP" --no-sandbox --disable-gpu --disable-dev-shm-usage >"$app_log" 2>&1 &
+  # 直接跑包内的二进制：/usr/bin 的入口是 %post 用 update-alternatives/ln 建的，
+  # 容器里不一定存在；它在装包断言里单独验。
+  APP_BIN=/opt/deepseek-harness-desktop/deepseek-harness
+  [ -x "$APP_BIN" ] || { log "缺少 $APP_BIN"; exit 1; }
+  "$APP_BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage >"$app_log" 2>&1 &
   app=$!
   trap 'kill "$app" 2>/dev/null || true' EXIT
 
@@ -144,7 +148,8 @@ rpm -q dsh-desktop >/dev/null || { log "helper 跑完后 dsh-desktop 不在 rpmd
     || dnf5 install -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /pkg/*.rpm >/dev/null 2>&1; } \
   || { log "helper 之后装回本次构建失败"; exit 1; }
 log "装回本次构建：$(rpm -q --qf '%{VERSION}-%{RELEASE}' dsh-desktop)"
-command -v "$APP" >/dev/null || { log "装回后没有 $APP"; exit 1; }
+[ -x /opt/deepseek-harness-desktop/deepseek-harness ] \
+  || { log "装回后缺少 /opt/deepseek-harness-desktop/deepseek-harness"; exit 1; }
 log "更新链 helper 安装 OK"
 
 export DSH_HOME=/tmp/dsh-home
