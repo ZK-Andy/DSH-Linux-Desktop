@@ -231,6 +231,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 - 现状：
   - `package-target.ts`：`0002`、`0025`；
   - `prepare-dsh.ts`：`0004`、`0022`；
+  - `.env.linux.example`：`0005`、`0020`（`patch-surface.sh` 首次跑出的漏登记项）；
   - `locale.ts`：`0024`、`0026`；
   - `tray.ts`：`0013`、`0026`；
   - `preload-windows.ts` 及测试 `main-startup.spec.ts`、`preload-windows.client.spec.ts`、`welcome-startup.spec.ts`：`0016`、`0026`；
@@ -240,9 +241,10 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
   - `tray.ts`：随托盘模块合并消除；
   - `preload-windows.ts` 及三个测试：随窗口外观模块合并消除；
   - `locale.ts`：各模块文案放各自的新文件，`locale.ts` 只留一处展开，由托盘模块拥有挂钩；
+  - `.env.linux.example`：两份改动合成一份，由发布设置补丁拥有；
   - `prepare-dsh.ts`：构建链拥有；`0022` 的接入方式（并入构建链的一处调用，或登记为规则 3 例外）在实施时定，定后改写本条。
 - 验收：`patch-surface.sh` 报告除 `main.ts` 外每个上游文件补丁数 = 1。
-- 负责补丁：构建链、托盘、窗口外观模块补丁；`0022`。
+- 负责补丁：构建链、托盘、窗口外观模块补丁；`0022`；`.env.linux.example` 由 `0005` 所属的发布设置模块拥有。
 
 ### M4 系统文件由 rpm 拥有
 
