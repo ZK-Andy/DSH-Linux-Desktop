@@ -1,0 +1,36 @@
+name: patch-gate
+
+# 只做补丁门禁：几十秒内跑完，不做构建、不打 rpm。
+# M8 要求 patch-surface.sh 在重放补丁之前运行；这里同时把「补丁在干净上游树上试打通过」
+# 一起验证，PR 2 起补丁带 preamble 后，这一步也在验证 git apply 接受 preamble。
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patch-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: bash -n scripts/*.sh
+
+      - name: Check patch surface
+        run: bash scripts/patch-surface.sh
+
+      - name: Fetch upstream
+        run: scripts/fetch-upstream.sh
+
+      # 不用 --check：补丁是依次叠加的（0020 依赖 0005 新建的 .env.linux.example），
+      # `git apply --check` 每条都对干净树试打，从 0020 起必然失败。这里在一次性 runner 的
+      # 干净克隆上真打，效果等同打包流程里的同一步。
+      - name: Apply patches
+        run: scripts/apply-patches.sh

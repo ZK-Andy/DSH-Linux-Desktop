@@ -221,7 +221,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 ### M2 收拢 `electron-builder-config.mjs`
 
-- 现状：被 6 个补丁触碰：`0003`、`0013`、`0020`、`0021`、`0023`、`0026`。
+- 现状：`apps/desktop/scripts/electron-builder-config.mjs` 被 6 个补丁触碰：`0003`、`0013`、`0020`、`0021`、`0023`、`0026`。
 - 目标：新文件 `apps/desktop/scripts/electron-builder-linux.mjs` 持有全部 Linux builder 配置（target、图标、包身份、rpm 硬化、asarUnpack、extraResources、fpm 参数），由打包配置补丁拥有；上游文件只留一处展开。
 - 验收：`patch-surface.sh` 报告该文件补丁数 = 1。
 - 负责补丁：打包配置补丁（收拢 `0003`、`0020`、`0023` 及其他补丁里的 builder 片段）。
@@ -229,20 +229,22 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 ### M3 其他多补丁触碰的上游文件
 
 - 现状：
-  - `package-target.ts`：`0002`、`0025`；
-  - `prepare-dsh.ts`：`0004`、`0022`；
-  - `locale.ts`：`0024`、`0026`；
-  - `tray.ts`：`0013`、`0026`；
-  - `preload-windows.ts` 及测试 `main-startup.spec.ts`、`preload-windows.client.spec.ts`、`welcome-startup.spec.ts`：`0016`、`0026`；
-  - `main.ts`：`0013`、`0016`、`0026`（规则 3 豁免 `main.ts`，只受规则 4 约束）。
+  - `apps/desktop/scripts/package-target.ts`：`0002`、`0025`；
+  - `apps/desktop/scripts/prepare-dsh.ts`：`0004`、`0022`；
+  - `apps/desktop/.env.linux.example`：`0005`、`0020`（`patch-surface.sh` 首次跑出的漏登记项）；
+  - `apps/desktop/src/locale.ts`：`0024`、`0026`；
+  - `apps/desktop/src/tray.ts`：`0013`、`0026`；
+  - `apps/desktop/src/preload-windows.ts` 及测试 `apps/desktop/tests/main-startup.spec.ts`、`apps/desktop/tests/preload-windows.client.spec.ts`、`apps/desktop/tests/welcome-startup.spec.ts`：`0016`、`0026`；
+  - `apps/desktop/src/main.ts`：`0013`、`0016`、`0026`（规则 3 豁免 `main.ts`，只受规则 4 约束）。
 - 目标：
   - `package-target.ts`：随构建链合并（`0002`、`0025` 并入构建链补丁）消除；
   - `tray.ts`：随托盘模块合并消除；
   - `preload-windows.ts` 及三个测试：随窗口外观模块合并消除；
   - `locale.ts`：各模块文案放各自的新文件，`locale.ts` 只留一处展开，由托盘模块拥有挂钩；
+  - `.env.linux.example`：两份改动合成一份，由发布设置补丁拥有；
   - `prepare-dsh.ts`：构建链拥有；`0022` 的接入方式（并入构建链的一处调用，或登记为规则 3 例外）在实施时定，定后改写本条。
 - 验收：`patch-surface.sh` 报告除 `main.ts` 外每个上游文件补丁数 = 1。
-- 负责补丁：构建链、托盘、窗口外观模块补丁；`0022`。
+- 负责补丁：构建链、托盘、窗口外观模块补丁；`0022`；`.env.linux.example` 由 `0005` 所属的发布设置模块拥有。
 
 ### M4 系统文件由 rpm 拥有
 
@@ -274,7 +276,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 ### M6 补丁内嵌的资源副本
 
-- 现状：`0026` 以新文件形式内嵌 `RPM-GPG-KEY-dsh-desktop`、`dsh-update-helper`、polkit 策略、`rpm-post-install.sh`、`rpm-post-remove.sh`；`scripts/apply-patches.sh` 已从 `assets/`、`packaging/` 放置同名文件。
+- 现状：`0026` 以新文件形式内嵌以下落点：`apps/desktop/resources/RPM-GPG-KEY-dsh-desktop`、`apps/desktop/resources/dsh-update-helper`、`apps/desktop/resources/org.deepseek.harness.desktop.update.policy`、`apps/desktop/resources/rpm-post-install.sh`、`apps/desktop/resources/rpm-post-remove.sh`；`scripts/apply-patches.sh` 已从 `assets/`、`packaging/` 放置同名文件。
 - 目标：补丁不含这些文件，只由 `apply-patches.sh` 放置。
 - 验收：`patch-surface.sh` 断言 `patches/` 新增文件的目标路径不与 `apply-patches.sh` 的 `ASSETS` 表重合。
 - 负责补丁：随 M1 拆分一并删除。
@@ -300,4 +302,6 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
   - 本节每条引用的补丁存在；
   - 补丁新增文件不与 `ASSETS` 表重合（M6）。
 - 验收：CI 在 `apply-patches.sh` 之前运行该脚本；对现状输出的违规恰好是本节登记的项。
+- 首行检查的登记串是本节的现状句「没有补丁首行写」；PR 2 补齐首行时删掉这句，检查随之变硬。
+- `apply-patches.sh --check` 对叠加补丁不成立（每条都对干净树试打，后置补丁依赖前置补丁新建的文件），待修成累积试打或删除该选项。
 - 负责补丁：不涉及补丁（`scripts/`）；首行随各模块补丁重写补齐。
