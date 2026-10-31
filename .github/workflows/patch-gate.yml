@@ -29,5 +29,8 @@ jobs:
       - name: Fetch upstream
         run: scripts/fetch-upstream.sh
 
-      - name: Apply patches (check)
-        run: scripts/apply-patches.sh --check
+      # 不用 --check：补丁是依次叠加的（0020 依赖 0005 新建的 .env.linux.example），
+      # `git apply --check` 每条都对干净树试打，从 0020 起必然失败。这里在一次性 runner 的
+      # 干净克隆上真打，效果等同打包流程里的同一步。
+      - name: Apply patches
+        run: scripts/apply-patches.sh
