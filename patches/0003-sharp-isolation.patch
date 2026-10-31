@@ -1,3 +1,4 @@
+变化理由：把 sharp 移出 asar 并用独立 Node 子进程解码，避免 Electron 主进程加载 libvips。
 diff --git a/apps/desktop/resources/sharp-worker.cjs b/apps/desktop/resources/sharp-worker.cjs
 new file mode 100644
 index 0000000..9198621
@@ -61,49 +62,6 @@ index 0000000..9198621
 +    },
 +  )
 +})
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 969e104..19e5f15 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -83,7 +83,13 @@ export function createElectronBuilderConfig(
-   let dshDestination
-   let windowsCode = []
-   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
--    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
-+    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
-+    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
-+    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
-+    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
-+    // dependencies left inside the archive, so they are unpacked alongside the package.
-+    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
-+    '**/node_modules/semver/**']
-   const windowsSigner = packagesWindows && !unsigned
-     ? createWindowsTokenSigner({
-         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
-@@ -131,10 +137,10 @@ export function createElectronBuilderConfig(
-     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
-     directories: { output: output.directory },
--    // A standalone Node cannot read inside an ASAR archive, and Linux hosts the payload in the primary
--    // runtime's Node rather than Electron's. An unpacked tree keeps every file the Host and its plugin
--    // subprocesses load readable outside Electron.
--    asar: resolvedPlatform !== 'linux',
-+    // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
-+    // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
-+    // cannot read inside the archive (see the asarUnpack patterns below).
-+    asar: true,
-     electronDist: buildPaths.electron,
-     electronFuses: { runAsNode: true },
-     beforeBuild: async () => {
-@@ -176,6 +182,8 @@ export function createElectronBuilderConfig(
-       // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
-       ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-+      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
-     ],
-     mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
 diff --git a/packages/attachment/attachment-local/src/sharp-worker-client.ts b/packages/attachment/attachment-local/src/sharp-worker-client.ts
 new file mode 100644
 index 0000000..96c249d

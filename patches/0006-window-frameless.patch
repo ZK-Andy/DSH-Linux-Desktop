@@ -1,198 +1,199 @@
-diff --git a/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop b/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
-new file mode 100644
-index 0000000..f4298e7
---- /dev/null
-+++ b/apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
-@@ -0,0 +1,30 @@
-+-----BEGIN PGP PUBLIC KEY BLOCK-----
-+
-+mQINBGrk1oUBEADIiTCzYTZ0qUdMT/KXU4tURAyh8bcxy7vujYXx3RIrLCrT+mLg
-+XVUaNtfmAYf2Gf+NUWxTBtJ0xhoN9AapxmJzYQnZFWxm2oZOHNPW61i1snWe/dc4
-+if2WAKz2Yceb2DJ3jcd24tyMzjUDEUN+aqqQhXukp2dW4LAMXtO+l0zzbkETpgRN
-+FNp/qeIjbmusMDZ+hTeIh7kECzlVQzOeH8s/awpZOngq1z1MGsdz+m3sFYYqiAvt
-+lu5L5nf6MPU3hOR0An6XyPLbVDZlKSFagRmlypOsaHXUZb+YlpR26FiBeIZ0YIRX
-+gGcIOQfpRPuQvQXHjeoysuFhsLmfAitvvTbfAmZciddUt6mJu8fjBKKb7saFVn4T
-+pm8dPY7d1bi72/fjmCic4VUX6aaecLtpPixdjTanmxkpsxrLZssMFhqiGLDids2V
-+cUwKp58w4ssbOpmQ8BoWbShAs3XKlGii55k00zRgBj07afqtHGdl1kJ1z9b8RJT8
-+qFw0wCB6jOewS+Js+JfZ3T5wTTQjovGyAMi/g6QSRbL711rE3m28y26E/RHb28Hu
-+gMWZlwIolDwzZ/YG/hxLGhYlO+o/NYp8uyc3VdGctapZ+ZsB6XfWI2y1qSwe+kiF
-+5+Ea8KZdV7w5OpCTCuSt0VfaCEJ5zvtxyPVFVXfP6PRyCT1Rk99CGH7ZBwARAQAB
-+tFNEU0ggTGludXggRGVza3RvcCBSUE0gU2lnbmluZyAodW5vZmZpY2lhbCBidWls
-+ZCkgPHprLWFuZHlAdXNlcnMubm9yZXBseS5naXRodWIuY29tPokCUQQTAQoAOxYh
-+BHgpIvuwY9svUbPTPUKL4UHIX5DuBQJq5NaFAhsDBQsJCAcCAiICBhUKCQgLAgQW
-+AgMBAh4HAheAAAoJEEKL4UHIX5Du6hoQAKTPPBYwna1mOEpSPG/22yQrzo9ZySQW
-+1opiZqpijMLBlPqOwr8nHqocAj7BG3jfaMa1Ohu0UgU32MPNF9aB033WZIZJzXh3
-+/s6j4ycFZxIpDbXwzB5YIlwlDfLBh1OZ1ViaNptAhNUAoWMkpZUbequ8ognbws/4
-+BlKO6W19qNigfKl4deEYnVITxm9DXOJdC27InovaqfLTMKWvZXiF8zmp1F50ViQz
-+YsQG+LzAniVrEdU7UJ81V99QW4CMIDGCpOTH7T9V+rpcoxH3dyJqTbMy3dCBx26R
-+NPZ3ky2lbo3WEXE8wiLo9A7Y0apTjFe5IHGpFnwU930ByeRlmJ/hetycJYt5Fol0
-+Ua/4aQdB40S4AREHeyAwwdnjQKS4jWfsNz93+byfIB7pnHyw5MpFELYv0GTx61P2
-+aOvdll7bRg2Lr//NojbOJ75H62DYGfnGpBWkw8zOB1hxd0RrpOWo02tAZfWZUu1h
-+2kwBN+sYX7oAKnNfJNsuHCRcQm1Goj0hoYWuQ4wS/J0EezUh3OiAXr7jVXDXlEYj
-+APCdmIrNWth2ow2EidCR1drZjJh8U5n1RLtmzP2mJy3SKzCUAH9MKQZ7eaA8ZAfi
-+/2AA49JbNn9RmLHXHgUKK1kKl8vos0Mwim1xB3gJsHoWWRDRdmoOIDN8oRLJ6duo
-+8XS/xcBr0FV6
-+=07EO
-+-----END PGP PUBLIC KEY BLOCK-----
-diff --git a/apps/desktop/resources/dsh-update-helper b/apps/desktop/resources/dsh-update-helper
-new file mode 100755
-index 0000000..27e9034
---- /dev/null
-+++ b/apps/desktop/resources/dsh-update-helper
-@@ -0,0 +1,48 @@
-+#!/bin/sh
-+# 由 pkexec 以 root 调用的唯一入口：安装用户已经下载并校验过的 dsh-desktop rpm。
-+#
-+# 参数只有一个：缓存目录里的 rpm 绝对路径。脚本只接受我们自己写的那两个缓存目录，
-+# 并强制对本地包做 OpenPGP 校验（localpkg_gpgcheck=1），与 PLAN §3.4 一致。
-+set -eu
-+
-+LOG_DIR=/var/log/dsh-desktop
-+LOG="$LOG_DIR/update.log"
-+mkdir -p "$LOG_DIR"
-+chmod 0755 "$LOG_DIR"
-+
-+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
-+
-+if [ "$#" -ne 1 ]; then
-+  log "拒绝：参数个数为 $#，只接受一个 rpm 路径"
-+  exit 64
-+fi
-+
-+case "$1" in
-+  /home/*/.cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-+  /var/cache/dsh-desktop/dsh-desktop-*.rpm) ;;
-+  *) log "拒绝：不在更新缓存的 rpm：$1"; exit 64 ;;
-+esac
-+
-+if [ ! -f "$1" ]; then
-+  log "找不到包：$1"
-+  exit 66
-+fi
-+
-+if [ "$(id -u)" -ne 0 ]; then
-+  log "拒绝：必须经 pkexec 以 root 运行"
-+  exit 77
-+fi
-+
-+log "开始安装 $1"
-+rpm --import /opt/deepseek-harness-desktop/resources/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
-+  log "导入签名公钥失败"
-+  exit 70
+变化理由：Linux 无边框窗口：自绘标题栏与窗口按钮、窗口状态 IPC、尺寸持久化接线，以及相关 main.ts 挂钩。
+例外：规则 4 main.ts 的净增暂时超过 15 行；M1 第二步把实现搬进模块后删掉这一行。
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 583bf74..76ef3b4 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -1087,15 +1087,22 @@ async function main(): Promise<void> {
+     tray?.relabel()
+   }
+   refreshApplicationMenu()
+-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
+-  if (process.platform === 'win32') {
++  // Windows picks a bitmap out of the multi-size ICO by display scale; Linux's StatusNotifierItem host
++  // scales the single PNG to the panel's icon size instead.
++  const trayIconPath = development
++    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'tray-windows.ico' : 'tray-linux.png')
++    : join(process.resourcesPath, process.platform === 'win32' ? 'tray.ico' : 'tray-linux.png')
++  if (process.platform === 'win32' || process.platform === 'linux') {
+     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
++    // On Linux the context menu is the entry that always works: a StatusNotifierItem host is free to show the
++    // menu on a left click instead of forwarding one.
+     try {
+       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
+         open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
+     } catch (error) { console.warn('desktop tray: unavailable', error) }
+   }
+-  const backgroundNotice = process.platform === 'win32'
++  // The confirmation sends the user to the tray, so it covers exactly the platforms that create one.
++  const backgroundNotice = process.platform === 'win32' || process.platform === 'linux'
+     ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
+       locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
+     : undefined
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 76ef3b4..fdc7e8e 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -290,6 +290,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+       devTools: true,
+     },
+   })
++  // Linux draws the caption menubar inside the page; a native menu bar would double that strip.
++  // The application menu stays set so its accelerators keep working.
++  if (process.platform === 'linux') window.setMenuBarVisibility(false)
+   window.webContents.setWindowOpenHandler(({ url }) => {
+     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
+     return { action: 'deny' }
+@@ -348,7 +351,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
+       const messages = currentDesktopLocale().messages
+       Menu.buildFromTemplate(items.map(item => ({
+         ...item,
+-        ...(process.platform === 'win32' && item.role !== undefined && item.role in messages
++        ...((process.platform === 'win32' || process.platform === 'linux')
++          && item.role !== undefined && item.role in messages
+           ? { label: messages[item.role as keyof typeof messages] } : {}),
+         accelerator: '',
+       }))).popup({ window })
+@@ -1119,7 +1123,8 @@ async function main(): Promise<void> {
+     ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
+   })
+ 
+-  if (process.platform === 'win32') {
++  // Linux's caption menubar opens the same native popups; Windows also reports its overlay colours here.
++  if (process.platform === 'win32' || process.platform === 'linux') {
+     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
+       assertDesktopSender(event, ['app'])
+       if (mainWindow === undefined || event.sender !== mainWindow.webContents
+@@ -1160,7 +1165,8 @@ async function main(): Promise<void> {
+       // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
+       const validColor = (value: unknown): value is string => typeof value === 'string'
+         && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
+-      if (validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
++      // The overlay exists only on Windows primary windows; Linux borrows the caption menubar alone.
++      if (process.platform === 'win32' && validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })
+     })
+   }
+ 
+diff --git a/apps/desktop/src/preload-windows.ts b/apps/desktop/src/preload-windows.ts
+index 5b9ed75..f17cbdb 100644
+--- a/apps/desktop/src/preload-windows.ts
++++ b/apps/desktop/src/preload-windows.ts
+@@ -4,9 +4,11 @@ import { ipcRenderer } from 'electron'
+ import { DESKTOP_IPC } from './ipc.ts'
+ import { installWindowsMenu } from './preload-menu.ts'
+ 
+-/** Install the Windows-only titlebar marker and observe application language and palette changes. */
++/** Install the caption titlebar marker and observe application language and palette changes. */
+ export function syncWindowsAppearance(): void {
+-  if (process.platform !== 'win32') return
++  // Linux hides the native menu bar and draws the caption menubar inside the page, so it needs
++  // the same marker and appearance reporting as Windows.
++  if (process.platform !== 'win32' && process.platform !== 'linux') return
+   const mark = (): void => {
+     const root = document.documentElement
+     root.dataset.windowsTitlebar = ''
+diff --git a/apps/desktop/src/welcome-window.ts b/apps/desktop/src/welcome-window.ts
+index 61fda9e..364f580 100644
+--- a/apps/desktop/src/welcome-window.ts
++++ b/apps/desktop/src/welcome-window.ts
+@@ -59,6 +59,8 @@ let disposeActiveHandlers: (() => void) | undefined
+ export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
+   const options = welcomeWindowOptions(process.platform, locale)
+   const window = new BrowserWindow(options)
++  // This window carries no caption menubar, so on Linux the native one would sit alone under the titlebar.
++  if (process.platform === 'linux') window.setMenuBarVisibility(false)
+   disposeActiveHandlers?.()
+   let active = true
+   const disposeHandlers = (): void => {
+diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
+index 448241c..954430a 100644
+--- a/apps/desktop/tests/main-startup.spec.ts
++++ b/apps/desktop/tests/main-startup.spec.ts
+@@ -127,6 +127,7 @@ const harness = await vi.hoisted(async () => {
+     }
+     static getAllWindows() { return windows.filter(window => !window.destroyed) }
+     setMenu() {}
++    setMenuBarVisibility() {}
+     getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
+     setBounds() {}
+     setTitle = vi.fn()
+diff --git a/apps/desktop/tests/preload-windows.client.spec.ts b/apps/desktop/tests/preload-windows.client.spec.ts
+index e59b7eb..735b77f 100644
+--- a/apps/desktop/tests/preload-windows.client.spec.ts
++++ b/apps/desktop/tests/preload-windows.client.spec.ts
+@@ -17,16 +17,8 @@ afterEach(() => {
+   send.mockClear()
+ })
+ 
+-it.each(['darwin', 'linux'] as const)('does not install Windows controls on %s', (platform) => {
+-  vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+-  syncWindowsAppearance()
+-  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
+-  expect(send).not.toHaveBeenCalled()
+-})
+-
+-it('synchronizes live language and palette changes and stops observing a closed document', async () => {
+-  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+-  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
++/** Stubs the computed colours and 2D canvas the caption reads to report an appearance. */
++function stubCaptionRendering(): void {
+   vi.spyOn(globalThis, 'getComputedStyle').mockImplementation(() => ({
+     backgroundColor: document.body.hasAttribute('data-ds-dark-theme') ? 'oklch(0.2 0 0)' : 'hsl(0 0% 100%)',
+     color: 'black',
+@@ -37,6 +29,29 @@ it('synchronizes live language and palette changes and stops observing a closed
+       ? [0, 0, 0, 255] : context.fillStyle.startsWith('oklch') ? [27, 27, 28, 255] : [255, 255, 255, 255]) }),
+   }
+   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
 +}
 +
-+if dnf5 install -y --setopt=localpkg_gpgcheck=1 "$1" >>"$LOG" 2>&1; then
-+  log "安装成功"
-+  exit 0
-+fi
++it('does not install Windows controls on darwin', () => {
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
++  syncWindowsAppearance()
++  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(false)
++  expect(send).not.toHaveBeenCalled()
++})
 +
-+log "安装失败，见上方 dnf5 输出"
-+exit 1
-diff --git a/apps/desktop/resources/org.deepseek.harness.desktop.update.policy b/apps/desktop/resources/org.deepseek.harness.desktop.update.policy
-new file mode 100644
-index 0000000..dfae665
---- /dev/null
-+++ b/apps/desktop/resources/org.deepseek.harness.desktop.update.policy
-@@ -0,0 +1,18 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE policyconfig PUBLIC
-+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
-+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-+<policyconfig>
-+  <vendor>DSH Linux Desktop</vendor>
-+  <action id="org.deepseek.harness.desktop.update">
-+    <description>Install a downloaded DeepSeek Harness desktop update</description>
-+    <message>Authentication is required to install the downloaded update.</message>
-+    <defaults>
-+      <allow_any>auth_admin</allow_any>
-+      <allow_inactive>no</allow_inactive>
-+      <allow_active>auth_admin_keep</allow_active>
-+    </defaults>
-+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dsh-update-helper</annotate>
-+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
-+  </action>
-+</policyconfig>
-diff --git a/apps/desktop/resources/rpm-post-install.sh b/apps/desktop/resources/rpm-post-install.sh
-new file mode 100755
-index 0000000..caa3e5f
---- /dev/null
-+++ b/apps/desktop/resources/rpm-post-install.sh
-@@ -0,0 +1,19 @@
-+#!/bin/sh
-+# rpm %post：把 polkit helper 与策略装到系统位置。helper 只被 pkexec 调用，应用自己不改 /usr。
-+set -eu
++it('installs the caption menubar and reports its appearance on linux', () => {
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
++  stubCaptionRendering()
++  document.documentElement.lang = 'en'
++  syncWindowsAppearance()
++  expect(document.documentElement.hasAttribute('data-windows-titlebar')).toBe(true)
++  expect(document.documentElement.style.getPropertyValue('--dsh-windows-titlebar-height')).toBe('40px')
++  expect(send).toHaveBeenCalledWith(DESKTOP_IPC.windowsAppearance, 'en', 'rgba(255, 255, 255, 1)', 'rgba(0, 0, 0, 1)')
++})
 +
-+RESOURCES=/opt/deepseek-harness-desktop/resources
-+
-+install -d -m 0755 /usr/libexec
-+install -d -m 0755 /usr/share/polkit-1/actions
-+
-+if [ -f "$RESOURCES/dsh-update-helper" ]; then
-+  install -m 0755 "$RESOURCES/dsh-update-helper" /usr/libexec/dsh-update-helper
-+fi
-+
-+if [ -f "$RESOURCES/org.deepseek.harness.desktop.update.policy" ]; then
-+  install -m 0644 "$RESOURCES/org.deepseek.harness.desktop.update.policy" \
-+    /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy
-+fi
-+
-+exit 0
-diff --git a/apps/desktop/resources/rpm-post-remove.sh b/apps/desktop/resources/rpm-post-remove.sh
-new file mode 100755
-index 0000000..34a32a8
---- /dev/null
-+++ b/apps/desktop/resources/rpm-post-remove.sh
-@@ -0,0 +1,10 @@
-+#!/bin/sh
-+# rpm %postun：只在卸载（而不是升级）时撤掉 helper 与 polkit 策略。
-+set -eu
-+
-+if [ "$1" = "0" ]; then
-+  rm -f /usr/libexec/dsh-update-helper
-+  rm -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy
-+fi
-+
-+exit 0
-diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index 19e5f15..82999f4 100644
---- a/apps/desktop/scripts/electron-builder-config.mjs
-+++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -136,6 +136,10 @@ export function createElectronBuilderConfig(
-     copyright: `Copyright © ${new Date().getFullYear()} \${productName}`,
-     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-     artifactName: `dsh-desktop-\${version}-\${arch}${output.suffix}.\${ext}`,
-+    // The rpm Release segment: which repack of this upstream version this is. dnf compares it after
-+    // Version, so a rebuilt package upgrades instead of looking identical to its predecessor.
-+    // CI derives it from the release tag (v0.2.2-alpha.2-2 → 2); local builds fall back to 5.
-+    buildNumber: process.env.DSH_RPM_BUILD_NUMBER ?? '5',
-     directories: { output: output.directory },
-     // The payload stays archived like the macOS and Windows builds. The one Linux exception is Sharp:
-     // its plain-Node worker loads the package from app.asar.unpacked because a non-Electron process
-@@ -184,6 +188,15 @@ export function createElectronBuilderConfig(
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-       // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
-       ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
-+      // The frameless Linux window hands this bitmap to BrowserWindow for X11 task switching.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/icons-linux/256x256.png', import.meta.url)), to: 'app-icon.png' }] : []),
-+      // Update chain: the polkit helper, its policy and the signing key are installed by the rpm
-+      // %post from these copies; the application never writes to /usr itself.
-+      ...(resolvedPlatform === 'linux' ? [
-+        { from: fileURLToPath(new URL('../resources/dsh-update-helper', import.meta.url)), to: 'dsh-update-helper' },
-+        { from: fileURLToPath(new URL('../resources/org.deepseek.harness.desktop.update.policy', import.meta.url)), to: 'org.deepseek.harness.desktop.update.policy' },
-+        { from: fileURLToPath(new URL('../resources/RPM-GPG-KEY-dsh-desktop', import.meta.url)), to: 'RPM-GPG-KEY-dsh-desktop' },
-+      ] : []),
-     ],
-     mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
-@@ -326,6 +339,8 @@ export function createElectronBuilderConfig(
-         'expat', 'glib2', 'pango', 'cairo', 'gdk-pixbuf2', 'dbus-libs', 'systemd-libs',
-         'libX11', 'libXcomposite', 'libXdamage', 'libXext', 'libXfixes', 'libXrandr', 'libxcb',
-       ],
-+      afterInstall: fileURLToPath(new URL('../resources/rpm-post-install.sh', import.meta.url)),
-+      afterRemove: fileURLToPath(new URL('../resources/rpm-post-remove.sh', import.meta.url)),
-       fpm: [
-         '--rpm-rpmbuild-define', '_build_id_links none',
-         '--rpm-rpmbuild-define', '__os_install_post %{nil}',
++it('synchronizes live language and palette changes and stops observing a closed document', async () => {
++  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
++  vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
++  stubCaptionRendering()
+   document.documentElement.lang = 'en'
+   syncWindowsAppearance()
+   expect(send).not.toHaveBeenCalled()
+diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
+index 7915248..2fb4f55 100644
+--- a/apps/desktop/tests/welcome-startup.spec.ts
++++ b/apps/desktop/tests/welcome-startup.spec.ts
+@@ -74,6 +74,7 @@ vi.mock('electron', () => ({
+     static getAllWindows() { return [] }
+     once(name: string, callback: () => void) { if (name === 'ready-to-show') this.ready = callback; return this }
+     on() { return this }
++    setMenuBarVisibility() {}
+     isDestroyed() { return false }
+     isMinimized() { return false }
+     restore = vi.fn()
+diff --git a/apps/desktop/tests/welcome-window.spec.ts b/apps/desktop/tests/welcome-window.spec.ts
+index 6d2807c..2100de7 100644
+--- a/apps/desktop/tests/welcome-window.spec.ts
++++ b/apps/desktop/tests/welcome-window.spec.ts
+@@ -33,6 +33,7 @@ function createWindow() {
+     isDestroyed: vi.fn().mockReturnValue(false),
+     destroy: vi.fn(),
+     show: vi.fn(),
++    setMenuBarVisibility: vi.fn(),
+     once: vi.fn<(name: string, callback: () => void) => void>(),
+   }
+ }
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
 index e62a84f..5109c39 100644
 --- a/apps/desktop/src/ipc.ts
@@ -282,162 +283,6 @@ index 0000000..d74c314
 +html[data-desktop-controls='overlay'] header[data-window-drag] { padding-right: 112px; }
 +</style>`
 +}
-diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 7cb338b..5cefecb 100644
---- a/apps/desktop/src/locale.ts
-+++ b/apps/desktop/src/locale.ts
-@@ -31,14 +31,16 @@ export const en = {
-   application: 'Application',
-   fileMenu: 'File',
-   closePage: 'Close Page or Window',
--  aboutMenu: 'About DeepSeek Harness',
-+  aboutMenu: 'About',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'Version V{version}',
-+  aboutVersion: 'Desktop version: V{version}',
-+  aboutUpstreamVersion: 'DSH version: V{version}',
-   hideApplication: 'Hide DeepSeek Harness',
-   hideOtherApplications: 'Hide Others',
-   showAllApplications: 'Show All',
-   quitApplication: 'Quit',
-   openApplication: 'Show Main Window',
-+  checkForUpdates: 'Check for Updates',
-   quit: 'Quit',
-   cancel: 'Cancel',
-   quitTitle: 'Quit DeepSeek Harness?',
-@@ -210,14 +212,16 @@ export const zh = {
-   application: '应用',
-   fileMenu: '文件',
-   closePage: '关闭页面或窗口',
--  aboutMenu: '关于 DeepSeek Harness',
-+  aboutMenu: '关于',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: '版本 V{version}',
-+  aboutVersion: '桌面端版本：V{version}',
-+  aboutUpstreamVersion: 'DSH 版本：V{version}',
-   hideApplication: '隐藏 DeepSeek Harness',
-   hideOtherApplications: '隐藏其他',
-   showAllApplications: '显示全部',
-   quitApplication: '退出',
-   openApplication: '显示主窗',
-+  checkForUpdates: '检查更新',
-   quit: '退出',
-   cancel: '取消',
-   quitTitle: '退出 DeepSeek Harness？',
-@@ -387,14 +391,16 @@ export const ja = {
-   application: 'アプリケーション',
-   fileMenu: 'ファイル',
-   closePage: 'ページまたはウィンドウを閉じる',
--  aboutMenu: 'DeepSeek Harness について',
-+  aboutMenu: '情報',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'バージョン V{version}',
-+  aboutVersion: 'デスクトップ版: V{version}',
-+  aboutUpstreamVersion: 'DSH バージョン: V{version}',
-   hideApplication: 'DeepSeek Harness を隠す',
-   hideOtherApplications: 'ほかを隠す',
-   showAllApplications: 'すべて表示',
-   quitApplication: '終了',
-   openApplication: 'メインウィンドウを表示',
-+  checkForUpdates: 'アップデートを確認',
-   quit: '終了',
-   cancel: 'キャンセル',
-   quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -564,14 +570,16 @@ export const es = {
-   application: 'Solicitud',
-   fileMenu: 'Archivo',
-   closePage: 'Cerrar página o ventana',
--  aboutMenu: 'Acerca de DeepSeek Harness',
-+  aboutMenu: 'Acerca de',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'Versión V{version}',
-+  aboutVersion: 'Versión de escritorio: V{version}',
-+  aboutUpstreamVersion: 'Versión de DSH: V{version}',
-   hideApplication: 'Ocultar DeepSeek Harness',
-   hideOtherApplications: 'Ocultar otros',
-   showAllApplications: 'Mostrar todo',
-   quitApplication: 'Salir',
-   openApplication: 'Mostrar ventana principal',
-+  checkForUpdates: 'Buscar actualizaciones',
-   quit: 'Salir',
-   cancel: 'Cancelar',
-   quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -741,14 +749,16 @@ export const fr = {
-   application: 'Application',
-   fileMenu: 'Fichier',
-   closePage: 'Fermer la page ou la fenêtre',
--  aboutMenu: 'À propos de DeepSeek Harness',
-+  aboutMenu: 'À propos',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'VersionV{version}',
-+  aboutVersion: 'Version du bureau : V{version}',
-+  aboutUpstreamVersion: 'Version de DSH : V{version}',
-   hideApplication: 'Masquer DeepSeek Harness',
-   hideOtherApplications: 'Masquer les autres',
-   showAllApplications: 'Afficher tout',
-   quitApplication: 'Quitter',
-   openApplication: 'Afficher la fenêtre principale',
-+  checkForUpdates: 'Rechercher des mises à jour',
-   quit: 'Quitter',
-   cancel: 'Annuler',
-   quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -918,14 +928,16 @@ export const de = {
-   application: 'Anwendung',
-   fileMenu: 'Datei',
-   closePage: 'Seite oder Fenster schließen',
--  aboutMenu: 'Über DeepSeek Harness',
-+  aboutMenu: 'Über',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'Version V{version}',
-+  aboutVersion: 'Desktop-Version: V{version}',
-+  aboutUpstreamVersion: 'DSH-Version: V{version}',
-   hideApplication: 'DeepSeek Harness ausblenden',
-   hideOtherApplications: 'Andere ausblenden',
-   showAllApplications: 'Alle einblenden',
-   quitApplication: 'Beenden',
-   openApplication: 'Hauptfenster anzeigen',
-+  checkForUpdates: 'Nach Updates suchen',
-   quit: 'Beenden',
-   cancel: 'Abbrechen',
-   quitTitle: 'DeepSeek Harness beenden?',
-@@ -1095,14 +1107,16 @@ export const ru = {
-   application: 'Приложение',
-   fileMenu: 'Файл',
-   closePage: 'Закрыть страницу или окно',
--  aboutMenu: 'О DeepSeek Harness',
-+  aboutMenu: 'О программе',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'Версия V{version}',
-+  aboutVersion: 'Версия приложения: V{version}',
-+  aboutUpstreamVersion: 'Версия DSH: V{version}',
-   hideApplication: 'Скрыть DeepSeek Harness',
-   hideOtherApplications: 'Скрыть других',
-   showAllApplications: 'Показать все',
-   quitApplication: 'Выход',
-   openApplication: 'Показать главное окно',
-+  checkForUpdates: 'Проверить обновления',
-   quit: 'Выйти',
-   cancel: 'Отмена',
-   quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1272,14 +1286,16 @@ export const pt = {
-   application: 'Aplicativo',
-   fileMenu: 'Arquivo',
-   closePage: 'Fechar página ou janela',
--  aboutMenu: 'Sobre DeepSeek Harness',
-+  aboutMenu: 'Sobre',
-   aboutProduct: 'DeepSeek Harness',
--  aboutVersion: 'Versão V{version}',
-+  aboutVersion: 'Versão do desktop: V{version}',
-+  aboutUpstreamVersion: 'Versão do DSH: V{version}',
-   hideApplication: 'Ocultar DeepSeek Harness',
-   hideOtherApplications: 'Ocultar outros',
-   showAllApplications: 'Mostrar tudo',
-   quitApplication: 'Sair',
-   openApplication: 'Mostrar janela principal',
-+  checkForUpdates: 'Verificar atualizações',
-   quit: 'Sair',
-   cancel: 'Cancelar',
-   quitTitle: 'Sair de DeepSeek Harness?',
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
 index 4854d44..9626d23 100644
 --- a/apps/desktop/src/main.ts
@@ -836,510 +681,6 @@ index f17cbdb..5d590a8 100644
    const mark = (): void => {
      const root = document.documentElement
      root.dataset.windowsTitlebar = ''
-diff --git a/apps/desktop/src/settings.ts b/apps/desktop/src/settings.ts
-index a4bb67b..1032a9d 100644
---- a/apps/desktop/src/settings.ts
-+++ b/apps/desktop/src/settings.ts
-@@ -5,17 +5,33 @@
- import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
- import { join } from 'node:path'
- 
-+/** Persisted frameless window geometry; absent until the window has been resized. */
-+export interface DesktopWindowSize {
-+  /** Normal (unmaximized) width in DIP. */
-+  readonly width: number
-+  /** Normal (unmaximized) height in DIP. */
-+  readonly height: number
-+  /** Whether the window was maximized when its size was last recorded. */
-+  readonly maximized: boolean
-+}
-+
- /** Resolved shell preferences; absent fields use the defaults without rewriting existing files. */
- export interface DesktopSettings {
-   readonly updates: {
-     readonly allowTestAuthPopupWindow: boolean
-   }
-+  readonly desktopWindowSize?: DesktopWindowSize
- }
- 
- function record(value: unknown): value is Record<string, unknown> {
-   return typeof value === 'object' && value !== null && !Array.isArray(value)
- }
- 
-+/** Persisted dimensions are whole positive numbers in device-independent pixels. */
-+function dimension(value: unknown): number | undefined {
-+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
-+}
-+
- /**
-  * Read shell settings, creating the default document exclusively when missing.
-  * @param userData - Electron's userData directory, independent of DSH_HOME.
-@@ -44,7 +60,16 @@ export function readDesktopSettings(userData: string): DesktopSettings {
-     if (allow !== undefined && typeof allow !== 'boolean') {
-       throw new Error('updates.allowTestAuthPopupWindow must be true or false')
-     }
--    return { updates: { allowTestAuthPopupWindow: allow ?? false } }
-+    const size = value.desktopWindowSize
-+    const updates = { updates: { allowTestAuthPopupWindow: allow ?? false } }
-+    if (size === undefined) return updates
-+    const width = record(size) ? dimension(size.width) : undefined
-+    const height = record(size) ? dimension(size.height) : undefined
-+    const maximized = record(size) ? size.maximized : undefined
-+    if (width === undefined || height === undefined || typeof maximized !== 'boolean') {
-+      throw new Error('desktopWindowSize must carry positive width and height and a boolean maximized')
-+    }
-+    return { ...updates, desktopWindowSize: { width, height, maximized } }
-   } catch (error) {
-     try {
-       console.warn(`desktop settings: ${path}: using defaults because settings could not be loaded`, error)
-@@ -55,3 +80,27 @@ export function readDesktopSettings(userData: string): DesktopSettings {
-     return defaults
-   }
- }
-+
-+/**
-+ * Persist the frameless window's normal geometry and maximized state, leaving
-+ * every other shell preference in the document untouched.
-+ * @param userData - Electron's userData directory, independent of DSH_HOME.
-+ * @param size - Normal (unmaximized) window dimensions in DIP and the maximized state.
-+ */
-+export function saveDesktopWindowSize(userData: string, size: DesktopWindowSize): void {
-+  const directory = join(userData, 'desktop')
-+  const path = join(directory, 'settings.json')
-+  mkdirSync(directory, { recursive: true, mode: 0o700 })
-+  let document: Record<string, unknown> = {}
-+  try {
-+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-+    if (record(parsed)) document = parsed
-+  } catch (error) {
-+    const code = (error as NodeJS.ErrnoException).code
-+    if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
-+  }
-+  document.desktopWindowSize = {
-+    width: Math.floor(size.width), height: Math.floor(size.height), maximized: size.maximized,
-+  }
-+  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
-+}
-diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index 1764a25..a2a986a 100644
---- a/apps/desktop/src/tray.ts
-+++ b/apps/desktop/src/tray.ts
-@@ -11,8 +11,14 @@ export interface DesktopTrayOptions {
-   readonly locale: () => DesktopLocale
-   /** Show and focus the primary window. */
-   readonly open: () => void
-+  /** System menu restart: relaunch the shell without going through the quit confirmation twice. */
-+  readonly restart: () => void
-+  /** Check for updates; always present so the entry never disappears with the update stack. */
-+  readonly checkUpdate: () => void
-   /** Request quit through the same confirmation as every other quit entry. */
-   readonly quit: () => void
-+  /** About dialog: the packaged version and the upstream client version. */
-+  readonly about: () => void
- }
- 
- /** Tray icon present for the whole run, not only while the window is hidden. */
-@@ -33,11 +39,18 @@ export class DesktopTray {
-     if (tray === undefined) return
-     const { messages } = this.options.locale()
-     tray.setToolTip(messages.aboutProduct)
--    tray.setContextMenu(Menu.buildFromTemplate([
-+    // Entry order: open, update check, then the restart/quit group, and About alone at the bottom.
-+    // The update entry is unconditional; the handler reports "already current" when there is nothing newer.
-+    const template: Parameters<typeof Menu.buildFromTemplate>[0] = [
-       { label: messages.openApplication, click: () => { this.options.open() } },
-+      { label: messages.checkForUpdates, click: () => { this.options.checkUpdate() } },
-       { type: 'separator' },
-+      { label: messages.restartApplication, click: () => { this.options.restart() } },
-       { label: messages.quitApplication, click: () => { this.options.quit() } },
--    ]))
-+      { type: 'separator' },
-+      { label: messages.aboutMenu, click: () => { this.options.about() } },
-+    ]
-+    tray.setContextMenu(Menu.buildFromTemplate(template))
-   }
- 
-   /** Remove the icon; called once the quit is confirmed so no dead icon outlives the process. */
-diff --git a/apps/desktop/src/update-download.ts b/apps/desktop/src/update-download.ts
-new file mode 100644
-index 0000000..ee6396c
---- /dev/null
-+++ b/apps/desktop/src/update-download.ts
-@@ -0,0 +1,101 @@
-+/**
-+ * Linux update download: fetch the signed rpm named by the release manifest, hash it while it
-+ * streams, and verify the OpenPGP signature before the helper is ever allowed to install it.
-+ *
-+ * Bytes that fail either check are deleted; a partial file never reaches a user-visible path.
-+ */
-+import { createHash } from 'node:crypto'
-+import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-+import { mkdir, rename, rm, stat } from 'node:fs/promises'
-+import { join } from 'node:path'
-+import { Readable } from 'node:stream'
-+import { pipeline } from 'node:stream/promises'
-+import { execFile } from 'node:child_process'
-+import { mkdtemp } from 'node:fs/promises'
-+import { tmpdir } from 'node:os'
-+import { promisify } from 'node:util'
-+import type { DesktopReleaseFeed } from './update-feed.ts'
-+
-+const run = promisify(execFile)
-+
-+/** @param feed - Validated manifest. @returns Asset download URL for the release tag. */
-+export function releaseAssetUrl(feed: DesktopReleaseFeed): string {
-+  return `https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/download/${feed.tag}/${feed.package}`
-+}
-+
-+/** @param feed - Validated manifest. @returns File name inside the user's cache directory. */
-+export function releaseAssetName(feed: DesktopReleaseFeed): string {
-+  return feed.package
-+}
-+
-+async function sha256File(path: string): Promise<string> {
-+  const hash = createHash('sha256')
-+  await pipeline(createReadStream(path), hash)
-+  return hash.digest('hex')
-+}
-+
-+/**
-+ * @param directory - Download directory; created when missing.
-+ * @param feed - Validated manifest.
-+ * @param onProgress - Percent callback, 0-100.
-+ * @returns Path of a fully downloaded and hash-verified rpm.
-+ */
-+export async function downloadRelease(
-+  directory: string,
-+  feed: DesktopReleaseFeed,
-+  onProgress: (percent: number) => void,
-+): Promise<string> {
-+  await mkdir(directory, { recursive: true })
-+  const target = join(directory, releaseAssetName(feed))
-+  if (existsSync(target) && (await stat(target)).size === feed.bytes && await sha256File(target) === feed.sha256) return target
-+
-+  const partial = `${target}.part`
-+  await rm(partial, { force: true })
-+  const response = await fetch(releaseAssetUrl(feed), { redirect: 'follow' })
-+  if (!response.ok || response.body === null) throw new Error(`更新包下载失败：HTTP ${response.status}`)
-+  const declared = Number(response.headers.get('content-length') ?? '0')
-+  if (declared > 0 && declared !== feed.bytes) throw new Error(`更新包长度不符：清单 ${feed.bytes}，服务器 ${declared}`)
-+
-+  const hash = createHash('sha256')
-+  let received = 0
-+  const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
-+  body.on('data', (chunk: Buffer) => {
-+    received += chunk.length
-+    hash.update(chunk)
-+    // Report at most one percent step at a time; the sink is fire-and-forget by contract.
-+    onProgress(Math.min(99, Math.floor((received / feed.bytes) * 100)))
-+  })
-+  await pipeline(body, createWriteStream(partial, { mode: 0o644 }))
-+  if (received !== feed.bytes) {
-+    await rm(partial, { force: true })
-+    throw new Error(`更新包不完整：收到 ${received} 字节，清单要求 ${feed.bytes}`)
-+  }
-+  const digest = hash.digest('hex')
-+  if (digest !== feed.sha256) {
-+    await rm(partial, { force: true })
-+    throw new Error(`更新包 sha256 不符：收到 ${digest}`)
-+  }
-+  await rename(partial, target)
-+  onProgress(100)
-+  return target
-+}
-+
-+/**
-+ * @param rpmPath - Downloaded package.
-+ * @param keyPath - Public key shipped with the application.
-+ * @returns true when rpm reports a valid OpenPGP signature over the header and payload.
-+ */
-+export async function verifySignedPackage(rpmPath: string, keyPath: string): Promise<boolean> {
-+  const db = await mkdtemp(join(tmpdir(), 'dsh-update-keys-'))
-+  try {
-+    await run('rpm', ['--dbpath', db, '--import', keyPath], { encoding: 'utf8' })
-+    // Non-verbose on purpose: `-Kv` prints one line per digest and never emits
-+    // "digests signatures OK", which made every signed package look unverified.
-+    const { stdout } = await run('rpm', ['--dbpath', db, '-K', rpmPath], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-+    return /digests signatures OK/.test(stdout)
-+  } catch {
-+    return false
-+  } finally {
-+    await rm(db, { recursive: true, force: true })
-+  }
-+}
-diff --git a/apps/desktop/src/update-feed.ts b/apps/desktop/src/update-feed.ts
-new file mode 100644
-index 0000000..340c4a1
---- /dev/null
-+++ b/apps/desktop/src/update-feed.ts
-@@ -0,0 +1,89 @@
-+/**
-+ * Linux update feed: the release asset `version.json` published next to the signed rpm.
-+ *
-+ * The electron-updater feed is replaced on Linux because the installer is the package manager:
-+ * a release is one signed rpm and one JSON manifest describing it. Everything here is pure so the
-+ * parser and the comparison can be unit-tested without Electron or the network.
-+ */
-+
-+/** Where a packaged Linux build looks for the newest release manifest. */
-+export const LINUX_UPDATE_FEED_URL = 'https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/version.json'
-+
-+/** One published release, validated field by field before any download is allowed. */
-+export interface DesktopReleaseFeed {
-+  /** semver-comparable form used by the update coordinator (0.2.2-alpha.2.2). */
-+  readonly version: string
-+  /** Published tag (v0.2.2-alpha.2-2). */
-+  readonly tag: string
-+  readonly rpmVersion: string
-+  readonly rpmRelease: string
-+  readonly package: string
-+  readonly sha256: string
-+  readonly bytes: number
-+  readonly publishedAt?: string
-+  readonly signingKeyId?: string
-+}
-+
-+const PACKAGE_NAME = /^dsh-desktop-[0-9A-Za-z.~+_-]+\.rpm$/
-+const SHA256 = /^[0-9a-f]{64}$/
-+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
-+
-+class FeedFieldError extends Error {
-+  readonly field: string
-+
-+  constructor(field: string, detail: string) {
-+    super(`更新清单的 ${field} 不可信：${detail}`)
-+    this.field = field
-+  }
-+}
-+
-+const text = (value: unknown, field: string, pattern?: RegExp): string => {
-+  if (typeof value !== 'string' || value.length === 0) throw new FeedFieldError(field, '不是非空字符串')
-+  if (pattern !== undefined && !pattern.test(value)) throw new FeedFieldError(field, `格式不匹配：${value}`)
-+  return value
-+}
-+
-+/**
-+ * @param value - Parsed JSON from the release asset.
-+ * @returns The manifest with every field narrowed.
-+ * @throws FeedFieldError when a field is missing or malformed; the caller reports it instead of downloading.
-+ */
-+export function parseReleaseFeed(value: unknown): DesktopReleaseFeed {
-+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new FeedFieldError('根', '不是对象')
-+  const record = value as Record<string, unknown>
-+  const bytes = record.bytes
-+  if (typeof bytes !== 'number' || !Number.isInteger(bytes) || bytes <= 0) throw new FeedFieldError('bytes', '不是正整数')
-+  const publishedAt = record.publishedAt
-+  const signingKeyId = record.signingKeyId
-+  const version = text(record.version, 'version', SEMVER)
-+  // The release must ride in a numeric segment (…alpha.2.2); a tag-style …alpha.2-2 would compare
-+  // wrong the moment the release reaches two digits.
-+  if (!/\.\d+$/.test(version)) throw new FeedFieldError('version', `缺少数值打包号：${version}`)
-+  return {
-+    version,
-+    tag: text(record.tag, 'tag', /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-\d+$/),
-+    rpmVersion: text(record.rpmVersion, 'rpmVersion'),
-+    rpmRelease: text(record.rpmRelease, 'rpmRelease', /^\d+$/),
-+    package: text(record.package, 'package', PACKAGE_NAME),
-+    sha256: text(record.sha256, 'sha256', SHA256),
-+    bytes,
-+    ...(typeof publishedAt === 'string' && publishedAt.length > 0 ? { publishedAt } : {}),
-+    ...(typeof signingKeyId === 'string' && signingKeyId.length > 0 ? { signingKeyId } : {}),
-+  }
-+}
-+
-+/**
-+ * @param url - Manifest URL.
-+ * @param timeoutMs - Abort budget for the whole request.
-+ * @returns The validated manifest.
-+ * @throws Error with the HTTP status or parse failure; callers surface it as a check failure.
-+ */
-+export async function fetchReleaseFeed(url: string, timeoutMs: number): Promise<DesktopReleaseFeed> {
-+  const response = await fetch(url, {
-+    redirect: 'follow',
-+    headers: { accept: 'application/json' },
-+    signal: AbortSignal.timeout(timeoutMs),
-+  })
-+  if (!response.ok) throw new Error(`更新清单请求失败：HTTP ${response.status}`)
-+  return parseReleaseFeed(await response.json())
-+}
-diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
-new file mode 100644
-index 0000000..271f31d
---- /dev/null
-+++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,159 @@
-+/**
-+ * Linux package updater: the electron-updater surface the coordinator needs, backed by the
-+ * release manifest and the system package manager instead of an embedded installer.
-+ *
-+ * Only three methods are consumed by DesktopUpdateCoordinator: checkForUpdates, downloadUpdate and
-+ * quitAndInstall. Installation never happens in this process: a polkit-authorized helper runs
-+ * `dnf5 install` on the verified rpm, and the application relaunches after the helper succeeds.
-+ */
-+import { EventEmitter } from 'node:events'
-+import { execFile, execFileSync } from 'node:child_process'
-+import { existsSync } from 'node:fs'
-+import { homedir } from 'node:os'
-+import { join } from 'node:path'
-+import { promisify } from 'node:util'
-+import { app } from 'electron'
-+import { fetchReleaseFeed, type DesktopReleaseFeed } from './update-feed.ts'
-+import { downloadRelease, verifySignedPackage } from './update-download.ts'
-+
-+const run = promisify(execFile)
-+
-+/** Shape returned by checkForUpdates; mirrors the fields the coordinator reads. */
-+interface LinuxCheckResult {
-+  readonly updateInfo: { readonly version: string }
-+  readonly isUpdateAvailable: boolean
-+}
-+
-+export interface LinuxUpdaterOptions {
-+  /** Published manifest URL. */
-+  readonly feedUrl: string
-+  /** Cache directory for downloaded packages. */
-+  readonly cacheDir: string
-+  /** Public key shipped next to the application; undefined outside a packaged app. */
-+  readonly keyPath?: string
-+  /** Installed polkit helper; its absence disables the update stack. */
-+  readonly helperPath?: string
-+  /** Request budget for the manifest and the package. */
-+  readonly timeoutMs?: number
-+  /** Relaunch after a successful install; overridable for tests. */
-+  readonly relaunch?: () => void
-+}
-+
-+/**
-+ * @returns The Release segment of the installed rpm, or undefined when the rpm database cannot be queried.
-+ */
-+export async function installedRpmRelease(): Promise<string | undefined> {
-+  try {
-+    const { stdout } = await run('rpm', ['-q', '--qf', '%{RELEASE}', 'dsh-desktop'], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-+    const value = stdout.trim()
-+    return /^\d+$/.test(value) ? value : undefined
-+  } catch {
-+    return undefined
-+  }
-+}
-+
-+/** Sync variant for the coordinator's `currentVersion` provider; the rpm query is a single local read. */
-+export function installedRpmReleaseSync(): string | undefined {
-+  try {
-+    const value = execFileSync('rpm', ['-q', '--qf', '%{RELEASE}', 'dsh-desktop'], {
-+      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },
-+    }).trim()
-+    return /^\d+$/.test(value) ? value : undefined
-+  } catch {
-+    return undefined
-+  }
-+}
-+
-+/** electron's getPath has no 'cache' key in this typings version; XDG wins, then ~/.cache. */
-+export function defaultCacheDir(): string {
-+  const xdg = process.env.XDG_CACHE_HOME
-+  return join(xdg !== undefined && xdg.length > 0 ? xdg : join(homedir(), '.cache'), 'dsh-desktop')
-+}
-+
-+export class LinuxPackageUpdater extends EventEmitter {
-+  autoDownload = false
-+  autoInstallOnAppQuit = false
-+  channel = 'nightly'
-+  allowPrerelease = true
-+  allowDowngrade = false
-+
-+  private feed: DesktopReleaseFeed | undefined
-+  private packagePath: string | undefined
-+
-+  private readonly options: LinuxUpdaterOptions
-+
-+  constructor(options: LinuxUpdaterOptions) {
-+    super()
-+    this.options = options
-+  }
-+
-+  /** @returns Whether the helper this stack depends on is installed. */
-+  available(): boolean {
-+    const helper = this.options.helperPath
-+    return helper !== undefined && existsSync(helper)
-+  }
-+
-+  /**
-+   * @returns The published release; the coordinator decides whether it is newer than this build.
-+   * @throws When the manifest cannot be fetched or validated.
-+   */
-+  async checkForUpdates(): Promise<LinuxCheckResult> {
-+    const feed = await fetchReleaseFeed(this.options.feedUrl, this.options.timeoutMs ?? 20_000)
-+    this.feed = feed
-+    return { updateInfo: { version: feed.version }, isUpdateAvailable: true }
-+  }
-+
-+  /**
-+   * Downloads and verifies the checked release.
-+   * @throws When no check ran, the hash does not match, or the signature is invalid.
-+   */
-+  async downloadUpdate(): Promise<void> {
-+    const feed = this.feed
-+    if (feed === undefined) throw new Error('desktop update: 没有已检查的更新')
-+    const path = await downloadRelease(this.options.cacheDir, feed, (percent) => {
-+      this.emit('download-progress', { percent, transferred: 0, total: feed.bytes, bytesPerSecond: 0 })
-+    })
-+    const keyPath = this.options.keyPath
-+    if (keyPath === undefined) throw new Error('desktop update: 没有随包签名公钥')
-+    if (!await verifySignedPackage(path, keyPath)) {
-+      throw new Error('desktop update: 更新包签名校验未通过')
-+    }
-+    this.packagePath = path
-+    this.emit('update-downloaded', { version: feed.version })
-+  }
-+
-+  /**
-+   * Hands the verified package to the polkit helper, then relaunches on success.
-+   * Errors after this point are emitted rather than thrown; the caller has already returned.
-+   */
-+  quitAndInstall(): void {
-+    const path = this.packagePath
-+    if (path === undefined) {
-+      this.emit('error', new Error('desktop update: 没有已下载的更新包'))
-+      return
-+    }
-+    const helper = this.options.helperPath
-+    if (helper === undefined) {
-+      this.emit('error', new Error('desktop update: 没有 polkit helper'))
-+      return
-+    }
-+    const child = execFile('pkexec', [helper, path], (error) => {
-+      if (error !== null) {
-+        this.emit('error', new Error(`desktop update: 安装失败：${error.message}`))
-+        return
-+      }
-+      this.emit('installed', { version: this.feed?.version, path })
-+      if (this.options.relaunch !== undefined) this.options.relaunch()
-+      else {
-+        app.relaunch()
-+        app.exit(0)
-+      }
-+    })
-+    child.on('error', (error) => { this.emit('error', error) })
-+  }
-+
-+  /** @returns Cache path used by this instance; exposed for the CI upgrade case. */
-+  static cacheDirectory(): string {
-+    return defaultCacheDir()
-+  }
-+}
-diff --git a/apps/desktop/src/update-schedule.ts b/apps/desktop/src/update-schedule.ts
-index 7c08e56..d6a0561 100644
---- a/apps/desktop/src/update-schedule.ts
-+++ b/apps/desktop/src/update-schedule.ts
-@@ -17,7 +17,7 @@ export interface DesktopUpdateScheduleConfig {
-  * @returns Validated durations and fractional jitter.
-  */
- export function resolveDesktopUpdateScheduleConfig(env: NodeJS.ProcessEnv): DesktopUpdateScheduleConfig {
--  const intervalMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS', 600_000)
-+  const intervalMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS', 21_600_000)
-   const maxBackoffMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_MAX_BACKOFF_MS', Math.max(intervalMs, 3_600_000))
-   const jitter = Number(env.DSH_DESKTOP_UPDATE_CHECK_JITTER ?? 0.2)
-   if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/src/web-document.ts b/apps/desktop/src/web-document.ts
 index a74ea7c..476658e 100644
 --- a/apps/desktop/src/web-document.ts
@@ -1489,259 +830,6 @@ index 735b77f..cc055f0 100644
  })
  
  it('synchronizes live language and palette changes and stops observing a closed document', async () => {
-diff --git a/apps/desktop/tests/settings.spec.ts b/apps/desktop/tests/settings.spec.ts
-index b285bb9..2d91b42 100644
---- a/apps/desktop/tests/settings.spec.ts
-+++ b/apps/desktop/tests/settings.spec.ts
-@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
- import { tmpdir } from 'node:os'
- import { join } from 'node:path'
- import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
--import { readDesktopSettings } from '../src/settings.ts'
-+import { readDesktopSettings, saveDesktopWindowSize } from '../src/settings.ts'
- 
- vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }))
- 
-@@ -81,3 +81,20 @@ it('continues with defaults even when warning output fails', () => {
-   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
-   expect(readFileSync(path, 'utf8')).toBe('{')
- })
-+
-+it('round-trips the frameless window size without touching other preferences', () => {
-+  const { userData, path } = fixture()
-+  writeFileSync(path, '{"updates":{"allowTestAuthPopupWindow":true},"custom":"preserve"}')
-+  saveDesktopWindowSize(userData, { width: 1100.7, height: 700, maximized: true })
-+  expect(readDesktopSettings(userData).desktopWindowSize).toEqual({ width: 1100, height: 700, maximized: true })
-+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
-+  expect(raw.custom).toBe('preserve')
-+  expect(raw.updates).toEqual({ allowTestAuthPopupWindow: true })
-+})
-+
-+it('ignores a malformed stored window size and reports it', () => {
-+  const { userData, path } = fixture()
-+  writeFileSync(path, '{"desktopWindowSize":{"width":"1100","height":700,"maximized":false}}')
-+  expect(readDesktopSettings(userData).desktopWindowSize).toBeUndefined()
-+  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(path), expect.any(Error))
-+})
-diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a48..42e2706 100644
---- a/apps/desktop/tests/tray.spec.ts
-+++ b/apps/desktop/tests/tray.spec.ts
-@@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM
- function setup(locale = 'en') {
-   let current = resolveDesktopLocale(locale)
-   const open = vi.fn()
-+  const restart = vi.fn()
-   const quit = vi.fn()
--  const tray = new DesktopTray({ iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, quit })
--  return { tray, open, quit, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
-+  const checkUpdate = vi.fn()
-+  const about = vi.fn()
-+  const tray = new DesktopTray({
-+    iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, restart, quit, checkUpdate, about,
-+  })
-+  return { tray, open, restart, quit, checkUpdate, about, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
- }
- 
- function labels(menu: MenuItemConstructorOptions[]): (string | undefined)[] {
-   return menu.map(item => item.type === 'separator' ? 'separator' : item.label)
- }
- 
--it('shows the application icon with its name as the tooltip and an Open / Quit menu', () => {
-+it('shows the icon with its name as tooltip and the full menu, including the always-present update entry', () => {
-   const f = setup()
-   expect(native.createFromPath).toHaveBeenCalledWith('C:/app/resources/tray.ico')
-   expect(f.native.image).toEqual({ path: 'C:/app/resources/tray.ico' })
-   expect(f.native.setToolTip).toHaveBeenCalledWith('DeepSeek Harness')
--  expect(labels(native.menus[0]!)).toEqual(['Open DeepSeek Harness', 'separator', 'Quit DeepSeek Harness'])
-+  expect(labels(native.menus[0]!)).toEqual([
-+    'Show Main Window', 'Check for Updates', 'separator', 'Restart', 'Quit', 'separator', 'About',
-+  ])
-   expect(f.native.setContextMenu).toHaveBeenCalledWith({ template: native.menus[0] })
- })
- 
--it('opens the window on a single click and routes menu entries to the open and quit actions', () => {
-+it('routes the update and about entries to their handlers', () => {
-+  const f = setup()
-+  const menu = native.menus[0]!
-+  ;(menu[1] as { click: () => void }).click()
-+  ;(menu[6] as { click: () => void }).click()
-+  expect(f.checkUpdate).toHaveBeenCalledOnce()
-+  expect(f.about).toHaveBeenCalledOnce()
-+})
-+
-+it('opens the window on a single click and routes open, restart and quit', () => {
-   const f = setup()
-   f.native.emit('click')
-   expect(f.open).toHaveBeenCalledOnce()
-   const menu = native.menus[0]!
-   ;(menu[0] as { click: () => void }).click()
--  ;(menu[2] as { click: () => void }).click()
-+  ;(menu[3] as { click: () => void }).click()
-+  ;(menu[4] as { click: () => void }).click()
-   expect(f.open).toHaveBeenCalledTimes(2)
-+  expect(f.restart).toHaveBeenCalledOnce()
-   expect(f.quit).toHaveBeenCalledOnce()
- })
- 
-@@ -63,7 +81,9 @@ it('relabels the menu in the current locale and ignores relabel after disposal',
-   const f = setup()
-   f.setLocale('zh')
-   f.tray.relabel()
--  expect(labels(native.menus[1]!)).toEqual(['打开 DeepSeek Harness', 'separator', '退出 DeepSeek Harness'])
-+  expect(labels(native.menus[1]!)).toEqual([
-+    '显示主窗', '检查更新', 'separator', '重启', '退出', 'separator', '关于',
-+  ])
-   f.tray.dispose()
-   f.tray.dispose()
-   expect(f.native.destroy).toHaveBeenCalledOnce()
-diff --git a/apps/desktop/tests/update-download.spec.ts b/apps/desktop/tests/update-download.spec.ts
-new file mode 100644
-index 0000000..1c0da5a
---- /dev/null
-+++ b/apps/desktop/tests/update-download.spec.ts
-@@ -0,0 +1,79 @@
-+import { createHash } from 'node:crypto'
-+import { mkdtemp, readFile, rm } from 'node:fs/promises'
-+import { tmpdir } from 'node:os'
-+import { join } from 'node:path'
-+import { afterEach, expect, it, vi } from 'vitest'
-+import type { DesktopReleaseFeed } from '../src/update-feed.ts'
-+import { downloadRelease, releaseAssetUrl } from '../src/update-download.ts'
-+
-+const body = Buffer.from('signed rpm bytes')
-+const feed: DesktopReleaseFeed = {
-+  version: '0.2.2-alpha.2.2',
-+  tag: 'v0.2.2-alpha.2-2',
-+  rpmVersion: '0.2.2~alpha.2',
-+  rpmRelease: '2',
-+  package: 'dsh-desktop-0.2.2-alpha.2-x86_64.rpm',
-+  sha256: createHash('sha256').update(body).digest('hex'),
-+  bytes: body.length,
-+}
-+
-+const dirs: string[] = []
-+async function cacheDir(): Promise<string> {
-+  const dir = await mkdtemp(join(tmpdir(), 'dsh-update-test-'))
-+  dirs.push(dir)
-+  return dir
-+}
-+
-+afterEach(async () => {
-+  vi.unstubAllGlobals()
-+  await Promise.all(dirs.splice(0).map(async dir => rm(dir, { recursive: true, force: true })))
-+})
-+
-+function stubFetch(payload: Buffer, status = 200, length = payload.length) {
-+  // Buffer is a view over ArrayBufferLike; Response wants an ArrayBuffer of its own.
-+  const bytes = payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength) as ArrayBuffer
-+  const fetchMock = vi.fn(async () => new Response(bytes, {
-+    status,
-+    headers: length > 0 ? { 'content-length': String(length) } : {},
-+  }))
-+  vi.stubGlobal('fetch', fetchMock)
-+  return fetchMock
-+}
-+
-+it('points at the asset of the published tag', () => {
-+  expect(releaseAssetUrl(feed)).toBe(`https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/download/${feed.tag}/${feed.package}`)
-+})
-+
-+it('downloads, hashes and reuses the package', async () => {
-+  const dir = await cacheDir()
-+  const fetchMock = stubFetch(body)
-+  const progress: number[] = []
-+  const path = await downloadRelease(dir, feed, percent => progress.push(percent))
-+  expect(await readFile(path)).toEqual(body)
-+  expect(progress.at(-1)).toBe(100)
-+  expect(fetchMock).toHaveBeenCalledTimes(1)
-+
-+  const again = await downloadRelease(dir, feed, () => undefined)
-+  expect(again).toBe(path)
-+  expect(fetchMock).toHaveBeenCalledTimes(1)
-+})
-+
-+it('deletes a payload whose digest does not match the manifest', async () => {
-+  const dir = await cacheDir()
-+  // Same length as the manifest claims, different bytes: only the digest can catch this.
-+  stubFetch(Buffer.alloc(body.length, 0x78), 200, feed.bytes)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/sha256 不符/)
-+  expect(await readFile(join(dir, `${feed.package}.part`), 'utf8').catch(() => 'missing')).toBe('missing')
-+})
-+
-+it('refuses a response whose length disagrees with the manifest', async () => {
-+  const dir = await cacheDir()
-+  stubFetch(body, 200, body.length + 5)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/长度不符/)
-+})
-+
-+it('refuses an http error', async () => {
-+  const dir = await cacheDir()
-+  stubFetch(body, 404)
-+  await expect(downloadRelease(dir, feed, () => undefined)).rejects.toThrow(/HTTP 404/)
-+})
-diff --git a/apps/desktop/tests/update-feed.spec.ts b/apps/desktop/tests/update-feed.spec.ts
-new file mode 100644
-index 0000000..2fc99dc
---- /dev/null
-+++ b/apps/desktop/tests/update-feed.spec.ts
-@@ -0,0 +1,43 @@
-+import { expect, it } from 'vitest'
-+import { parseReleaseFeed } from '../src/update-feed.ts'
-+
-+const manifest = {
-+  version: '0.2.2-alpha.2.2',
-+  tag: 'v0.2.2-alpha.2-2',
-+  rpmVersion: '0.2.2~alpha.2',
-+  rpmRelease: '2',
-+  package: 'dsh-desktop-0.2.2-alpha.2-x86_64.rpm',
-+  sha256: 'a'.repeat(64),
-+  bytes: 238565069,
-+  publishedAt: '2026-10-30T19:19:52Z',
-+  signingKeyId: '428be141c85f90ee',
-+}
-+
-+it('accepts the manifest published by scripts/make-version-json.sh', () => {
-+  expect(parseReleaseFeed(manifest)).toEqual(manifest)
-+})
-+
-+it('keeps optional fields away when they are absent', () => {
-+  const required: Record<string, unknown> = { ...manifest }
-+  delete required.publishedAt
-+  delete required.signingKeyId
-+  const parsed = parseReleaseFeed(required)
-+  expect(parsed).not.toHaveProperty('publishedAt')
-+  expect(parsed).not.toHaveProperty('signingKeyId')
-+})
-+
-+it.each([
-+  ['bytes', { ...manifest, bytes: 0 }],
-+  ['package', { ...manifest, package: 'dsh-desktop.rpm.sh' }],
-+  ['sha256', { ...manifest, sha256: 'XYZ' }],
-+  ['version', { ...manifest, version: '0.2.2-alpha.2-2' }],
-+  ['tag', { ...manifest, tag: 'v0.2.2' }],
-+  ['rpmRelease', { ...manifest, rpmRelease: 'alpha' }],
-+])('rejects a manifest whose %s is not publishable', (_field, value) => {
-+  expect(() => parseReleaseFeed(value)).toThrow(/更新清单的/)
-+})
-+
-+it('rejects values that are not an object', () => {
-+  expect(() => parseReleaseFeed([])).toThrow(/不是对象/)
-+  expect(() => parseReleaseFeed(null)).toThrow(/不是对象/)
-+})
-diff --git a/apps/desktop/tests/update-schedule.spec.ts b/apps/desktop/tests/update-schedule.spec.ts
-index 9d481f2..cd5a2b3 100644
---- a/apps/desktop/tests/update-schedule.spec.ts
-+++ b/apps/desktop/tests/update-schedule.spec.ts
-@@ -171,7 +171,7 @@ describe('ordinary update polling disposal', () => {
- 
- describe('ordinary update polling configuration', () => {
-   it('resolves defaults and supports an explicit interval longer than the default backoff cap', () => {
--    expect(resolveDesktopUpdateScheduleConfig({})).toEqual({ intervalMs: 600_000, maxBackoffMs: 3_600_000, jitter: 0.2 })
-+    expect(resolveDesktopUpdateScheduleConfig({})).toEqual({ intervalMs: 21_600_000, maxBackoffMs: 21_600_000, jitter: 0.2 })
-     expect(resolveDesktopUpdateScheduleConfig({ DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS: '7200000' }))
-       .toEqual({ intervalMs: 7_200_000, maxBackoffMs: 7_200_000, jitter: 0.2 })
-   })
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
 index 2fb4f55..3a45e85 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts

@@ -1,3 +1,4 @@
+变化理由：LibreOffice 引擎在 asar 下误判已安装时回退 wasm，保证 office 预览可用。
 diff --git a/apps/desktop/scripts/linux-hotfix-libreoffice-kit.ts b/apps/desktop/scripts/linux-hotfix-libreoffice-kit.ts
 new file mode 100644
 index 00000000..84d9cc0c
@@ -43,28 +44,3 @@ index 00000000..84d9cc0c
 +  }
 +  writeFileSync(path, source.replace(OFFICE_ENGINE_EXISTENCE_CHECK, OFFICE_ENGINE_EXISTENCE_FIX))
 +}
-diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
-index 1ea25ced..582bab42 100644
---- a/apps/desktop/scripts/prepare-dsh.ts
-+++ b/apps/desktop/scripts/prepare-dsh.ts
-@@ -35,6 +35,7 @@ import {
- import { desktopElectronExecutablePath, desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
- import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
- import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
-+import { fixLibreOfficeEngineFallback } from './linux-hotfix-libreoffice-kit.ts'
- 
- const APP_ROOT = resolve(import.meta.dirname, '..')
- const BUILD_PATHS = resolveDesktopTargetBuildPaths()
-@@ -156,6 +157,12 @@ async function main(): Promise<void> {
-       name: '@deepseek-ai/dsh-desktop-runtime', private: true, version: release.version, type: 'module',
-       dependencies: Object.fromEntries(packageSet.packages.map(entry => [entry.name, entry.version])),
-     }, undefined, 2)}\n`)
-+    // Electron 的 ASAR 文件系统让 lstatSync 对缺失项返回 null 而不是 undefined；不修就会把
-+    // 未安装的原生 LibreOfficeKit 引擎当成已安装，Linux 永远退不到随包携带的 WASM 引擎。
-+    if (target.platform === 'linux') {
-+      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:linux-adjustments',
-+        async () => { fixLibreOfficeEngineFallback(DSH_OUTPUT_ROOT) })
-+    }
-     for (const file of DESKTOP_HOST_RUNTIME_FILES) {
-       if (!existsSync(join(DSH_OUTPUT_ROOT, 'node_modules', DESKTOP_HOST_PACKAGE, file))) {
-         throw new Error(`desktop runtime: missing private Host file ${file}`)
