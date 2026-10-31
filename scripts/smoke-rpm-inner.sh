@@ -117,10 +117,9 @@ log "验证更新链 helper 与 dnf 仓库"
 rpm -qa --qf '%{NAME} %{VERSION}\n' \
   | awk '$1 == "gpg-pubkey" && substr($2, length($2) - 7) == "c85f90ee"' | grep -q . \
   || { log "公钥没有导入 rpmdb"; exit 1; }
-/usr/libexec/dsh-update-helper \
-  || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
-grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
-# M4：系统侧文件现在由 rpm 自己拥有，安装后不应出现校验差异。
+# M4：系统侧文件必须由 rpm 拥有、且安装后无校验差异。这些断言放在 helper 之前：
+# helper 会 `dnf5 upgrade` 到仓库里的最新版，而仓库里的版本可能早于 M4（那时 helper 还是 %post 复制的），
+# 升级后再断言归属就不再是在验证本次构建的包了。
 rpm -q --whatprovides /usr/libexec/dsh-update-helper >/dev/null || { log "helper 不属于任何包"; exit 1; }
 rpm -q --whatprovides /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy >/dev/null \
   || { log "polkit 策略不属于任何包"; exit 1; }
@@ -133,6 +132,12 @@ sandbox_drift="$(rpm -V dsh-desktop | grep 'chrome-sandbox' || true)"
 unexpected="$(rpm -V dsh-desktop | grep -v 'chrome-sandbox' || true)"
 [[ -n "$sandbox_drift" ]] && log "chrome-sandbox 权限由 %post 调整（预期内）：$sandbox_drift"
 [[ -z "$unexpected" ]] || { echo "$unexpected" >&2; log "rpm -V dsh-desktop 报告了预期之外的差异"; exit 1; }
+# helper 不接受参数，跑一次 `dnf5 upgrade dsh-desktop`；它可能把包换成仓库里的发布版，
+# 所以这条放在归属断言之后。
+/usr/libexec/dsh-update-helper \
+  || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
+grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
+rpm -q dsh-desktop >/dev/null || { log "helper 跑完后 dsh-desktop 不在 rpmdb"; exit 1; }
 log "更新链 helper 安装 OK"
 
 export DSH_HOME=/tmp/dsh-home
