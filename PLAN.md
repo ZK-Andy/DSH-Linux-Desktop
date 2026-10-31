@@ -212,7 +212,9 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
   - 窗口尺寸记忆：`settings.ts` 中的尺寸逻辑移到自己的新文件；
   - 更新渠道：`linux-updates.ts`（协调器接线），实现见 M5。
   `main.ts` 每个模块只留一两行挂钩。
-- 验收：`patch-surface.sh` 报告每个补丁 `main.ts` 净增 ≤15 行且无例外行；`0026` 不再存在。
+- 验收：分两步，各自单独提交；M5、M7 是行为或结构变更，不混进这两步。
+  1. 重组补丁（按变化重新分组，不搬代码）：在干净上游 tag 树上重放，`diff -r` 与现状一致（`apply-patches.sh` 放置的资产除外）；
+  2. 搬实现（在新分组内把实现移到新文件）：`diff -r` 只出现在本模块拥有的文件上；`main-startup.spec.ts`、`tray.spec.ts`、`settings.spec.ts` 等单测通过；`verify.sh` 与 `smoke-install-rpm.sh` 通过；`patch-surface.sh` 报告每个补丁 `main.ts` 净增 ≤15 行且无例外行；`0026` 不再存在。
 - 负责补丁：`0026` → 上述四个模块补丁。
 
 ### M2 收拢 `electron-builder-config.mjs`
@@ -264,7 +266,8 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 - 验收：
   1. `grep -r 'version.json\|update-feed\|update-download' patches scripts .github` 无结果；
   2. 检查命令退出码 `100` → 有更新，`0` → 无更新，其他 → 原样展示错误；
-  3. helper 不接受参数，只执行 `dnf5 upgrade -y --refresh dsh-desktop`。
+  3. helper 不接受参数，只执行 `dnf5 upgrade -y --refresh dsh-desktop`；
+  4. 文档同步：README（version.json、应用内下载、sha256、`rpm -Kv` 相关段落）与 PLAN.md R4、§3.4、§6（「不做应用内自更新」「暂不建 dnf 仓库」）按 dnf-only 改写；`grep -n 'version.json' README.md PLAN.md` 只命中本节。
 - 负责补丁：更新渠道补丁。
 
 ### M6 补丁内嵌的资源副本
@@ -277,14 +280,18 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 ### M7 `WindowControls` 多份实现
 
 - 现状：`ui-conversation`、`ui-layout`、`ui-sidebar-right` 各有一份 `WindowControls.tsx`（`0026` 新增）。
-- 目标：保留一份，其他位置 import；放在哪个包实施时定。
-- 验收：`patches/` 中新增的 `WindowControls.tsx` 只有一个。
+- 目标：移到 `packages/client/ui-primitives`，三处引用它。上游 `packages/client/AGENTS.md` 规定 feature plugin 之间不得 runtime import，共享运行时代码只能放静态库。`ui-primitives` 不用 cordis，组件只用 props 与 preload 暴露在 `window` 上的桥，不碰 ctx。
+- 验收：`patches/` 中新增的 `WindowControls.tsx` 只有一份，且位于 `packages/client/ui-primitives/` 下。
 - 负责补丁：窗口外观模块补丁。
 
 ### M8 补丁首行与门禁
 
-- 现状：没有补丁首行写 `变化理由：`；`scripts/patch-surface.sh` 不存在。
-- 目标：新建 `patch-surface.sh`，只读 `patches/` 做静态检查（解析 `diff --git` 统计每补丁碰的文件，解析 `@@` 算 `main.ts` 净增），在重放补丁之前运行，CI 失败即停：
+- 现状：没有补丁首行写 `变化理由：`；补丁用 `git diff` 直接重生成，会丢掉首行；`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 不存在。
+- 目标：
+  - 首行（`变化理由：`、`例外：` 行）是 `diff --git` 之前的 preamble。先在 CI runner 的 git 版本上复验 `git apply --check` 通过（本地 git 2.47.3 已通过）；不通过再改用 `patches/manifest.tsv`。
+  - 新建 `regen-patch.sh <补丁名> <base> <head> [--reason "…"] -- <路径…>`：读出现有补丁的 preamble，用 `git diff` 生成正文，拼接写回。补丁不存在时用 `--reason` 写首行；已存在时传 `--reason` 报错（改理由直接改文件首行）；两者都缺或 preamble 无 `变化理由：` 时报错退出。理由只存在补丁文件里，不另设存储。
+  - `patches/` 只经 `regen-patch.sh` 生成和重生成，不直接 `git diff > patches/…`。
+  - 新建 `patch-surface.sh`，只读 `patches/` 做静态检查（解析 `diff --git` 统计每补丁碰的文件，解析 `@@` 算 `main.ts` 净增），在重放补丁之前运行，CI 失败即停：
   - 每个补丁首行为 `变化理由：…`；
   - 除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；
   - 单补丁 `main.ts` 净增 ≤15 行，或有 `例外：规则 4` 行；
