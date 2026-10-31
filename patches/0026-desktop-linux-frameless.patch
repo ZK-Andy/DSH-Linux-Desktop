@@ -283,10 +283,16 @@ index 0000000..d74c314
 +</style>`
 +}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 7cb338b..f2bf229 100644
+index 7cb338b..6095e11 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
-@@ -39,6 +39,7 @@ export const en = {
+@@ -34,11 +34,13 @@ export const en = {
+   aboutMenu: 'About DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'Version V{version}',
++  aboutUpstreamVersion: 'DSH version: V{version}',
+   hideApplication: 'Hide DeepSeek Harness',
+   hideOtherApplications: 'Hide Others',
    showAllApplications: 'Show All',
    quitApplication: 'Quit',
    openApplication: 'Show Main Window',
@@ -294,7 +300,13 @@ index 7cb338b..f2bf229 100644
    quit: 'Quit',
    cancel: 'Cancel',
    quitTitle: 'Quit DeepSeek Harness?',
-@@ -218,6 +219,7 @@ export const zh = {
+@@ -213,11 +215,13 @@ export const zh = {
+   aboutMenu: '关于 DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: '版本 V{version}',
++  aboutUpstreamVersion: 'DSH 版本：V{version}',
+   hideApplication: '隐藏 DeepSeek Harness',
+   hideOtherApplications: '隐藏其他',
    showAllApplications: '显示全部',
    quitApplication: '退出',
    openApplication: '显示主窗',
@@ -302,7 +314,13 @@ index 7cb338b..f2bf229 100644
    quit: '退出',
    cancel: '取消',
    quitTitle: '退出 DeepSeek Harness？',
-@@ -395,6 +397,7 @@ export const ja = {
+@@ -390,11 +394,13 @@ export const ja = {
+   aboutMenu: 'DeepSeek Harness について',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'バージョン V{version}',
++  aboutUpstreamVersion: 'DSH バージョン: V{version}',
+   hideApplication: 'DeepSeek Harness を隠す',
+   hideOtherApplications: 'ほかを隠す',
    showAllApplications: 'すべて表示',
    quitApplication: '終了',
    openApplication: 'メインウィンドウを表示',
@@ -310,7 +328,13 @@ index 7cb338b..f2bf229 100644
    quit: '終了',
    cancel: 'キャンセル',
    quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -572,6 +575,7 @@ export const es = {
+@@ -567,11 +573,13 @@ export const es = {
+   aboutMenu: 'Acerca de DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'Versión V{version}',
++  aboutUpstreamVersion: 'Versión de DSH: V{version}',
+   hideApplication: 'Ocultar DeepSeek Harness',
+   hideOtherApplications: 'Ocultar otros',
    showAllApplications: 'Mostrar todo',
    quitApplication: 'Salir',
    openApplication: 'Mostrar ventana principal',
@@ -318,7 +342,13 @@ index 7cb338b..f2bf229 100644
    quit: 'Salir',
    cancel: 'Cancelar',
    quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -749,6 +753,7 @@ export const fr = {
+@@ -744,11 +752,13 @@ export const fr = {
+   aboutMenu: 'À propos de DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'VersionV{version}',
++  aboutUpstreamVersion: 'Version de DSH : V{version}',
+   hideApplication: 'Masquer DeepSeek Harness',
+   hideOtherApplications: 'Masquer les autres',
    showAllApplications: 'Afficher tout',
    quitApplication: 'Quitter',
    openApplication: 'Afficher la fenêtre principale',
@@ -326,7 +356,13 @@ index 7cb338b..f2bf229 100644
    quit: 'Quitter',
    cancel: 'Annuler',
    quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -926,6 +931,7 @@ export const de = {
+@@ -921,11 +931,13 @@ export const de = {
+   aboutMenu: 'Über DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'Version V{version}',
++  aboutUpstreamVersion: 'DSH-Version: V{version}',
+   hideApplication: 'DeepSeek Harness ausblenden',
+   hideOtherApplications: 'Andere ausblenden',
    showAllApplications: 'Alle einblenden',
    quitApplication: 'Beenden',
    openApplication: 'Hauptfenster anzeigen',
@@ -334,7 +370,13 @@ index 7cb338b..f2bf229 100644
    quit: 'Beenden',
    cancel: 'Abbrechen',
    quitTitle: 'DeepSeek Harness beenden?',
-@@ -1103,6 +1109,7 @@ export const ru = {
+@@ -1098,11 +1110,13 @@ export const ru = {
+   aboutMenu: 'О DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'Версия V{version}',
++  aboutUpstreamVersion: 'Версия DSH: V{version}',
+   hideApplication: 'Скрыть DeepSeek Harness',
+   hideOtherApplications: 'Скрыть других',
    showAllApplications: 'Показать все',
    quitApplication: 'Выход',
    openApplication: 'Показать главное окно',
@@ -342,7 +384,13 @@ index 7cb338b..f2bf229 100644
    quit: 'Выйти',
    cancel: 'Отмена',
    quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1280,6 +1287,7 @@ export const pt = {
+@@ -1275,11 +1289,13 @@ export const pt = {
+   aboutMenu: 'Sobre DeepSeek Harness',
+   aboutProduct: 'DeepSeek Harness',
+   aboutVersion: 'Versão V{version}',
++  aboutUpstreamVersion: 'Versão do DSH: V{version}',
+   hideApplication: 'Ocultar DeepSeek Harness',
+   hideOtherApplications: 'Ocultar outros',
    showAllApplications: 'Mostrar tudo',
    quitApplication: 'Sair',
    openApplication: 'Mostrar janela principal',
@@ -351,7 +399,7 @@ index 7cb338b..f2bf229 100644
    cancel: 'Cancelar',
    quitTitle: 'Sair de DeepSeek Harness?',
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4854d44..13cb870 100644
+index 4854d44..9626d23 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -2,6 +2,7 @@ import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-prod
@@ -540,7 +588,21 @@ index 4854d44..13cb870 100644
    return window
  }
  
-@@ -680,6 +784,21 @@ async function main(): Promise<void> {
+@@ -459,8 +563,12 @@ async function main(): Promise<void> {
+   // Copy comes from the same locale as the update prompts so the dialog
+   // chrome and its content never mix languages.
+   const showAbout = async (): Promise<void> => {
++    // Two lines, both from authoritative sources: the packaged rpm (version + release) and the
++    // upstream client version the shell was built from.
++    const release = process.platform === 'linux' ? installedRpmReleaseSync() : undefined
++    const packaged = release === undefined ? app.getVersion() : `${app.getVersion().replace('-', '~')}-${release}`
+     await ordinaryMessageBox({ type: 'info', title: locale.messages.aboutMenu, message: locale.messages.aboutProduct,
+-      detail: formatDesktopMessage(locale.messages.aboutVersion, { version: app.getVersion() }),
++      detail: `${formatDesktopMessage(locale.messages.aboutVersion, { version: packaged })}\n${formatDesktopMessage(locale.messages.aboutUpstreamVersion, { version: app.getVersion() })}`,
+       buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
+   }
+   const commandManager = new DesktopCommandManager({
+@@ -680,6 +788,21 @@ async function main(): Promise<void> {
  
    const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
    const updateChannel = desktopUpdateChannel(manifest)
@@ -562,7 +624,7 @@ index 4854d44..13cb870 100644
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
      async () => {
-@@ -735,7 +854,11 @@ async function main(): Promise<void> {
+@@ -735,7 +858,11 @@ async function main(): Promise<void> {
        }
        return true
      },
@@ -575,7 +637,7 @@ index 4854d44..13cb870 100644
      (success, reason) => { void track('desktop_upgrade_download_result', { is_success: success, ...reason === undefined ? {} : { error_reason: reason } }) },
      updateChannel,
    )
-@@ -769,8 +892,10 @@ async function main(): Promise<void> {
+@@ -769,8 +896,10 @@ async function main(): Promise<void> {
        url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
@@ -588,19 +650,22 @@ index 4854d44..13cb870 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1099,7 +1224,10 @@ async function main(): Promise<void> {
+@@ -1099,7 +1228,13 @@ async function main(): Promise<void> {
      // menu on a left click instead of forwarding one.
      try {
        tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
 -        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
 +        open: () => { focusPrimaryWindow() },
++        // Same entry point as the application menu; a manual check reports "already current" when there is nothing newer.
++        checkUpdate: () => { void openUpdatePrompt(true) },
 +        // Restart keeps the same argv and skips the quit confirmation the user just answered by choosing it.
 +        restart: () => { app.relaunch(); quitWithoutConfirmation() },
-+        quit: () => { app.quit() } })
++        quit: () => { app.quit() },
++        about: () => { void showAbout() } })
      } catch (error) { console.warn('desktop tray: unavailable', error) }
    }
    // The confirmation sends the user to the tray, so it covers exactly the platforms that create one.
-@@ -1167,6 +1295,24 @@ async function main(): Promise<void> {
+@@ -1167,6 +1302,24 @@ async function main(): Promise<void> {
      })
    }
  
@@ -625,7 +690,7 @@ index 4854d44..13cb870 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1177,11 +1323,12 @@ async function main(): Promise<void> {
+@@ -1177,11 +1330,12 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -816,40 +881,41 @@ index a4bb67b..1032a9d 100644
 +  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
 +}
 diff --git a/apps/desktop/src/tray.ts b/apps/desktop/src/tray.ts
-index 1764a25..bd934dc 100644
+index 1764a25..a2a986a 100644
 --- a/apps/desktop/src/tray.ts
 +++ b/apps/desktop/src/tray.ts
-@@ -11,6 +11,10 @@ export interface DesktopTrayOptions {
+@@ -11,8 +11,14 @@ export interface DesktopTrayOptions {
    readonly locale: () => DesktopLocale
    /** Show and focus the primary window. */
    readonly open: () => void
 +  /** System menu restart: relaunch the shell without going through the quit confirmation twice. */
 +  readonly restart: () => void
-+  /** Check for updates; omitted when this build cannot install them, which also removes the menu entry. */
-+  readonly checkUpdate?: () => void
++  /** Check for updates; always present so the entry never disappears with the update stack. */
++  readonly checkUpdate: () => void
    /** Request quit through the same confirmation as every other quit entry. */
    readonly quit: () => void
++  /** About dialog: the packaged version and the upstream client version. */
++  readonly about: () => void
  }
-@@ -33,11 +37,21 @@ export class DesktopTray {
+ 
+ /** Tray icon present for the whole run, not only while the window is hidden. */
+@@ -33,11 +39,18 @@ export class DesktopTray {
      if (tray === undefined) return
      const { messages } = this.options.locale()
      tray.setToolTip(messages.aboutProduct)
 -    tray.setContextMenu(Menu.buildFromTemplate([
-+    // Entry order and grouping mirror the reference shell's tray model: the update entry only exists when
-+    // the update stack is loaded, and the separator keeps restart/quit grouped at the bottom.
++    // Entry order: open, update check, then the restart/quit group, and About alone at the bottom.
++    // The update entry is unconditional; the handler reports "already current" when there is nothing newer.
 +    const template: Parameters<typeof Menu.buildFromTemplate>[0] = [
        { label: messages.openApplication, click: () => { this.options.open() } },
-+    ]
-+    const checkUpdate = this.options.checkUpdate
-+    if (checkUpdate !== undefined) {
-+      template.push({ label: messages.checkForUpdates, click: () => { checkUpdate() } })
-+    }
-+    template.push(
++      { label: messages.checkForUpdates, click: () => { this.options.checkUpdate() } },
        { type: 'separator' },
 +      { label: messages.restartApplication, click: () => { this.options.restart() } },
        { label: messages.quitApplication, click: () => { this.options.quit() } },
 -    ]))
-+    )
++      { type: 'separator' },
++      { label: messages.aboutMenu, click: () => { this.options.about() } },
++    ]
 +    tray.setContextMenu(Menu.buildFromTemplate(template))
    }
  
@@ -1219,6 +1285,19 @@ index 0000000..271f31d
 +    return defaultCacheDir()
 +  }
 +}
+diff --git a/apps/desktop/src/update-schedule.ts b/apps/desktop/src/update-schedule.ts
+index 7c08e56..d6a0561 100644
+--- a/apps/desktop/src/update-schedule.ts
++++ b/apps/desktop/src/update-schedule.ts
+@@ -17,7 +17,7 @@ export interface DesktopUpdateScheduleConfig {
+  * @returns Validated durations and fractional jitter.
+  */
+ export function resolveDesktopUpdateScheduleConfig(env: NodeJS.ProcessEnv): DesktopUpdateScheduleConfig {
+-  const intervalMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS', 600_000)
++  const intervalMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS', 21_600_000)
+   const maxBackoffMs = resolveDurationMs(env, 'DSH_DESKTOP_UPDATE_CHECK_MAX_BACKOFF_MS', Math.max(intervalMs, 3_600_000))
+   const jitter = Number(env.DSH_DESKTOP_UPDATE_CHECK_JITTER ?? 0.2)
+   if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/src/web-document.ts b/apps/desktop/src/web-document.ts
 index a74ea7c..476658e 100644
 --- a/apps/desktop/src/web-document.ts
@@ -1385,28 +1464,23 @@ index b285bb9..2d91b42 100644
 +  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(path), expect.any(Error))
 +})
 diff --git a/apps/desktop/tests/tray.spec.ts b/apps/desktop/tests/tray.spec.ts
-index 11c3a48..c2c8974 100644
+index 11c3a48..8728e3c 100644
 --- a/apps/desktop/tests/tray.spec.ts
 +++ b/apps/desktop/tests/tray.spec.ts
-@@ -27,35 +27,50 @@ vi.mock('electron', () => ({
- 
- afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllMocks() })
- 
--function setup(locale = 'en') {
-+function setup(locale = 'en', withUpdater = false) {
+@@ -30,32 +30,50 @@ afterEach(() => { native.trays.length = 0; native.menus.length = 0; vi.clearAllM
+ function setup(locale = 'en') {
    let current = resolveDesktopLocale(locale)
    const open = vi.fn()
 +  const restart = vi.fn()
    const quit = vi.fn()
 -  const tray = new DesktopTray({ iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, quit })
 -  return { tray, open, quit, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
-+  const checkUpdate = withUpdater ? vi.fn() : undefined
-+  // exactOptionalPropertyTypes: omit the key instead of passing an explicit undefined.
++  const checkUpdate = vi.fn()
++  const about = vi.fn()
 +  const tray = new DesktopTray({
-+    iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, restart, quit,
-+    ...checkUpdate === undefined ? {} : { checkUpdate },
++    iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, restart, quit, checkUpdate, about,
 +  })
-+  return { tray, open, restart, quit, checkUpdate, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
++  return { tray, open, restart, quit, checkUpdate, about, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
  }
  
  function labels(menu: MenuItemConstructorOptions[]): (string | undefined)[] {
@@ -1414,43 +1488,50 @@ index 11c3a48..c2c8974 100644
  }
  
 -it('shows the application icon with its name as the tooltip and an Open / Quit menu', () => {
-+it('shows the application icon with its name as the tooltip and a show / restart / quit menu', () => {
++it('shows the icon with its name as tooltip and the full menu, including the always-present update entry', () => {
    const f = setup()
    expect(native.createFromPath).toHaveBeenCalledWith('C:/app/resources/tray.ico')
    expect(f.native.image).toEqual({ path: 'C:/app/resources/tray.ico' })
    expect(f.native.setToolTip).toHaveBeenCalledWith('DeepSeek Harness')
 -  expect(labels(native.menus[0]!)).toEqual(['Open DeepSeek Harness', 'separator', 'Quit DeepSeek Harness'])
-+  expect(labels(native.menus[0]!)).toEqual(['Show Main Window', 'separator', 'Restart', 'Quit'])
++  expect(labels(native.menus[0]!)).toEqual([
++    'Show Main Window', 'Check for Updates', 'separator', 'Restart', 'Quit', 'separator', 'About DeepSeek Harness',
++  ])
    expect(f.native.setContextMenu).toHaveBeenCalledWith({ template: native.menus[0] })
  })
  
 -it('opens the window on a single click and routes menu entries to the open and quit actions', () => {
-+it('adds the update entry only when the update stack is loaded', () => {
-+  const f = setup('en', true)
-+  expect(labels(native.menus[0]!)).toEqual(['Show Main Window', 'Check for Updates', 'separator', 'Restart', 'Quit'])
-+  ;(native.menus[0]![1] as { click: () => void }).click()
++it('routes the update and about entries to their handlers', () => {
++  const f = setup()
++  const menu = native.menus[0]!
++  ;(menu[1] as { click: () => void }).click()
++  ;(menu[6] as { click: () => void }).click()
 +  expect(f.checkUpdate).toHaveBeenCalledOnce()
++  expect(f.about).toHaveBeenCalledOnce()
 +})
 +
-+it('opens the window on a single click and routes menu entries to the open, restart and quit actions', () => {
++it('opens the window on a single click and routes open, restart and quit', () => {
    const f = setup()
    f.native.emit('click')
    expect(f.open).toHaveBeenCalledOnce()
    const menu = native.menus[0]!
    ;(menu[0] as { click: () => void }).click()
-   ;(menu[2] as { click: () => void }).click()
+-  ;(menu[2] as { click: () => void }).click()
 +  ;(menu[3] as { click: () => void }).click()
++  ;(menu[4] as { click: () => void }).click()
    expect(f.open).toHaveBeenCalledTimes(2)
 +  expect(f.restart).toHaveBeenCalledOnce()
    expect(f.quit).toHaveBeenCalledOnce()
  })
  
-@@ -63,7 +78,7 @@ it('relabels the menu in the current locale and ignores relabel after disposal',
+@@ -63,7 +81,9 @@ it('relabels the menu in the current locale and ignores relabel after disposal',
    const f = setup()
    f.setLocale('zh')
    f.tray.relabel()
 -  expect(labels(native.menus[1]!)).toEqual(['打开 DeepSeek Harness', 'separator', '退出 DeepSeek Harness'])
-+  expect(labels(native.menus[1]!)).toEqual(['显示主窗', 'separator', '重启', '退出'])
++  expect(labels(native.menus[1]!)).toEqual([
++    '显示主窗', '检查更新', 'separator', '重启', '退出', 'separator', '关于 DeepSeek Harness',
++  ])
    f.tray.dispose()
    f.tray.dispose()
    expect(f.native.destroy).toHaveBeenCalledOnce()
@@ -1588,6 +1669,19 @@ index 0000000..2fc99dc
 +  expect(() => parseReleaseFeed([])).toThrow(/不是对象/)
 +  expect(() => parseReleaseFeed(null)).toThrow(/不是对象/)
 +})
+diff --git a/apps/desktop/tests/update-schedule.spec.ts b/apps/desktop/tests/update-schedule.spec.ts
+index 9d481f2..cd5a2b3 100644
+--- a/apps/desktop/tests/update-schedule.spec.ts
++++ b/apps/desktop/tests/update-schedule.spec.ts
+@@ -171,7 +171,7 @@ describe('ordinary update polling disposal', () => {
+ 
+ describe('ordinary update polling configuration', () => {
+   it('resolves defaults and supports an explicit interval longer than the default backoff cap', () => {
+-    expect(resolveDesktopUpdateScheduleConfig({})).toEqual({ intervalMs: 600_000, maxBackoffMs: 3_600_000, jitter: 0.2 })
++    expect(resolveDesktopUpdateScheduleConfig({})).toEqual({ intervalMs: 21_600_000, maxBackoffMs: 21_600_000, jitter: 0.2 })
+     expect(resolveDesktopUpdateScheduleConfig({ DSH_DESKTOP_UPDATE_CHECK_INTERVAL_MS: '7200000' }))
+       .toEqual({ intervalMs: 7_200_000, maxBackoffMs: 7_200_000, jitter: 0.2 })
+   })
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
 index 2fb4f55..3a45e85 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts
