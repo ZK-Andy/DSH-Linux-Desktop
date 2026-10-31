@@ -11,7 +11,7 @@ index 3cb86ce8..de74baa8 100644
  apps/desktop/*.p12
  node_modules/
  lib/
-@@ -47,3 +48,11 @@ worktrees/
+@@ -47,3 +48,10 @@ worktrees/
  .agents/worktrees/
  .typert-*/
  native/system/test/bin/
@@ -22,7 +22,6 @@ index 3cb86ce8..de74baa8 100644
 +apps/desktop/resources/org.deepseek.harness.desktop.update.policy
 +apps/desktop/resources/rpm-post-install.sh
 +apps/desktop/resources/rpm-post-remove.sh
-+node_modules
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
 index 081a90ea..faeba5bd 100644
 --- a/apps/desktop/package.json
