@@ -29,9 +29,9 @@
 - 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
 - 补丁序列 `0001–0008`，每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
   - `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径；
-  - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
+  - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数，全部落在 `scripts/electron-builder-linux.mjs`，上游 builder 配置只留一处展开）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
   - `0003-sharp-isolation`：sharp 隔离（§3.6）；`0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退；
-  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）。`main.ts` 只留各模块的挂钩（净增为负）。
+  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）。`main.ts` 只留各模块的挂钩（净增为负）。
 - **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
 - 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
@@ -203,28 +203,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
 
-执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M6、M7 已完成，条目已删除；对应断言已转为 `patch-surface.sh` 的常规检查。
-
-### M2 收拢 `electron-builder-config.mjs`
-
-- 现状：`apps/desktop/scripts/electron-builder-config.mjs` 现由 `0002-packaging.patch` 单独触碰；M1 第一步已把原先分散在 6 个补丁里的 builder 片段合并进来。
-- 目标：新文件 `apps/desktop/scripts/electron-builder-linux.mjs` 持有全部 Linux builder 配置（target、图标、包身份、rpm 硬化、asarUnpack、extraResources、fpm 参数），由打包配置补丁拥有；上游文件只留一处展开。
-- 验收：`patch-surface.sh` 报告该文件补丁数 = 1（现状已满足）；拆分后新文件仍只由 `0002` 拥有。
-- 负责补丁：`0002-packaging.patch`。
-
-### M3 其他多补丁触碰的上游文件
-
-- 现状（模块重组与实现迁移后，下列上游文件都只剩一个补丁）：
-  - `apps/desktop/scripts/package-target.ts`：`0001`；
-  - `apps/desktop/scripts/prepare-dsh.ts`：`0001`；
-  - `apps/desktop/.env.linux.example`：`0002`；
-  - `apps/desktop/src/locale.ts`：`0005`；
-  - `apps/desktop/src/tray.ts`：`0005`；
-  - `apps/desktop/src/preload-windows.ts` 及测试 `apps/desktop/tests/main-startup.spec.ts`、`apps/desktop/tests/preload-windows.client.spec.ts`、`apps/desktop/tests/welcome-startup.spec.ts`：`0006`；
-  - `apps/desktop/src/main.ts`：`0006`（规则 3 豁免 `main.ts`，只受规则 4 约束；实现搬走后净增已为负，不再需要例外行）。
-- 目标：剩下的结构性收尾——`locale.ts` 各模块文案放各自的新文件，`locale.ts` 只留一处展开；`prepare-dsh.ts` 里 `0004` 的接入方式（并入构建链的一处调用，或登记为规则 3 例外）尚未定；`main.ts` 的模块挂钩已拆完。
-- 验收：`patch-surface.sh` 报告除 `main.ts` 外每个上游文件补丁数 = 1（现状已满足）。
-- 负责补丁：`0001`、`0002`、`0005`、`0006`。
+执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M2、M3、M6、M7 已完成，条目已删除；对应断言（每文件单补丁、Linux 文案与 builder 配置的归属）已转为 `patch-surface.sh` 的常规检查。
 
 ### M4 系统文件由 rpm 拥有
 

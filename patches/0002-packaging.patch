@@ -39,20 +39,21 @@ index 00000000..3dfb1af6
 +# DOWNLOAD_PROD_COS_SECRET_ID=
 +# DOWNLOAD_PROD_COS_SECRET_KEY=
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index cf0c19e8..82999f4a 100644
+index cf0c19e8..01876090 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
-@@ -23,7 +23,8 @@ import {
+@@ -23,7 +23,9 @@ import {
  import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
  import { resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
  import { resolveDesktopBuildVersion } from './desktop-build-version.mjs'
 -import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
 +import { desktopPlatformEmbedsPolicy, resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
 +import { resolveDesktopLinuxFormats, resolveDesktopLinuxPackageMetadata } from './desktop-linux-packages.mjs'
++import { withLinuxTargets } from './electron-builder-linux.mjs'
  import { desktopArtifactOutput, desktopTargetBuildPaths, resolveDesktopBuildTarget } from './desktop-build-paths.mjs'
  import { installWindowsDirectoryInstaller } from './windows-directory-installer.mjs'
  import { preserveWindowsRuntimeSignature, signWindowsCode } from './windows-runtime-signature.mjs'
-@@ -66,7 +67,13 @@ export function createElectronBuilderConfig(
+@@ -66,7 +68,13 @@ export function createElectronBuilderConfig(
    if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
    const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
    const packagesWindows = resolvedPlatform === 'win32'
@@ -67,7 +68,7 @@ index cf0c19e8..82999f4a 100644
    if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
    const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
    if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
-@@ -76,7 +83,13 @@ export function createElectronBuilderConfig(
+@@ -76,7 +84,13 @@ export function createElectronBuilderConfig(
    let dshDestination
    let windowsCode = []
    const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
@@ -82,7 +83,15 @@ index cf0c19e8..82999f4a 100644
    const windowsSigner = packagesWindows && !unsigned
      ? createWindowsTokenSigner({
          certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
-@@ -111,15 +124,26 @@ export function createElectronBuilderConfig(
+@@ -104,22 +118,33 @@ export function createElectronBuilderConfig(
+   const buildVersion = resolveDesktopBuildVersion(env, productVersion)
+   if (update?.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop package: latest requires a stable version')
+   const packaged = resolveDesktopBuildCommit(env)
+-  return {
++  return withLinuxTargets({
+     appId,
+     protocols: [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
+     extraMetadata: {
        dshDesktopAppId: appId,
        dshDesktopUpdateChannel: update?.channel ?? 'nightly',
        ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
@@ -111,38 +120,81 @@ index cf0c19e8..82999f4a 100644
      asar: true,
      electronDist: buildPaths.electron,
      electronFuses: { runAsNode: true },
-@@ -158,8 +182,21 @@ export function createElectronBuilderConfig(
+@@ -158,7 +183,8 @@ export function createElectronBuilderConfig(
      extraResources: [
        { from: buildPaths.runtime, to: 'runtime' },
        { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
 -      // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
-+      // Windows and Linux tray bitmaps; macOS keeps the Dock and ships no menu bar icon. Linux gets the single
-+      // PNG its StatusNotifierItem host scales to the panel instead of the multi-size ICO Windows picks from.
++      // Windows tray bitmap; macOS keeps the Dock and ships no menu bar icon. The Linux payload
++      // (tray PNG, Sharp worker, window icon, update-chain files) is added by electron-builder-linux.mjs.
        ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)), to: 'tray-linux.png' }] : []),
-+      // The Sharp worker is spawned by path; it must live outside the archive and be copied verbatim.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/sharp-worker.cjs', import.meta.url)), to: 'sharp-worker.cjs' }] : []),
-+      // The frameless Linux window hands this bitmap to BrowserWindow for X11 task switching.
-+      ...(resolvedPlatform === 'linux' ? [{ from: fileURLToPath(new URL('../resources/icons-linux/256x256.png', import.meta.url)), to: 'app-icon.png' }] : []),
-+      // Update chain: the polkit helper, its policy and the signing key are installed by the rpm
-+      // %post from these copies; the application never writes to /usr itself.
-+      ...(resolvedPlatform === 'linux' ? [
-+        { from: fileURLToPath(new URL('../resources/dsh-update-helper', import.meta.url)), to: 'dsh-update-helper' },
-+        { from: fileURLToPath(new URL('../resources/org.deepseek.harness.desktop.update.policy', import.meta.url)), to: 'org.deepseek.harness.desktop.update.policy' },
-+        { from: fileURLToPath(new URL('../resources/RPM-GPG-KEY-dsh-desktop', import.meta.url)), to: 'RPM-GPG-KEY-dsh-desktop' },
-+      ] : []),
      ],
      mac: {
-       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
-@@ -253,8 +290,64 @@ export function createElectronBuilderConfig(
+@@ -252,10 +278,6 @@ export function createElectronBuilderConfig(
+       },
        target: ['nsis'],
      },
-     linux: {
+-    linux: {
+-      category: 'Development',
+-      target: ['AppImage'],
+-    },
+     nsis: {
+       uninstallDisplayName: '${productName}',
+       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
+@@ -270,5 +292,5 @@ export function createElectronBuilderConfig(
+     },
+     detectUpdateChannel: false,
+     publish: update === undefined ? null : [{ provider: 'generic', url: update.publicUrl, channel: update.channel }],
+-  }
++  }, { platform: resolvedPlatform, formats: linuxFormats, packages: linuxPackages })
+ }
+diff --git a/apps/desktop/scripts/electron-builder-linux.mjs b/apps/desktop/scripts/electron-builder-linux.mjs
+new file mode 100644
+index 00000000..45daa75d
+--- /dev/null
++++ b/apps/desktop/scripts/electron-builder-linux.mjs
+@@ -0,0 +1,114 @@
++/**
++ * Linux packaging decisions: the target options, the package identity and the rpm hardening all live
++ * here, so `electron-builder-config.mjs` keeps a single expansion point for them (see PLAN.md §3.2).
++ * `withLinuxTargets` is a no-op on other platforms.
++ */
++import { fileURLToPath } from 'node:url'
++
++/** Path to a file under `apps/desktop/resources`. */
++function resource(name) {
++  return fileURLToPath(new URL(`../resources/${name}`, import.meta.url))
++}
++
++/** Files the rpm installs or the application reads at runtime; they must exist outside the archive. */
++function linuxExtraResources() {
++  return [
++    // Linux gets the single PNG its StatusNotifierItem host scales to the panel instead of the
++    // multi-size ICO Windows picks from.
++    { from: resource('tray-linux.png'), to: 'tray-linux.png' },
++    // The Sharp worker is spawned by path, and a plain-Node process cannot read inside app.asar.
++    { from: resource('sharp-worker.cjs'), to: 'sharp-worker.cjs' },
++    // The frameless window hands this bitmap to BrowserWindow for X11 task switching.
++    { from: resource('icons-linux/256x256.png'), to: 'app-icon.png' },
++    // Update chain: the rpm %post installs these copies; the application never writes to /usr itself.
++    { from: resource('dsh-update-helper'), to: 'dsh-update-helper' },
++    { from: resource('org.deepseek.harness.desktop.update.policy'), to: 'org.deepseek.harness.desktop.update.policy' },
++    { from: resource('RPM-GPG-KEY-dsh-desktop'), to: 'RPM-GPG-KEY-dsh-desktop' },
++  ]
++}
++
++/**
++ * Package sections for the Linux targets. `formats` is present only when this build targets Linux;
++ * the same sections are emitted for every platform because electron-builder ignores the ones it does
++ * not build, and keeping them unconditional keeps the shape stable across platforms.
++ */
++function linuxTargets({ formats, packages }) {
++  return {
++    linux: {
 +      // The Linux package ships its own hicolor size set (16-512): the macOS squircle plate reads
 +      // poorly in a Linux application grid, and a single PNG only lands at its own pixel size.
-+      icon: fileURLToPath(new URL('../resources/icons-linux', import.meta.url)),
-       category: 'Development',
--      target: ['AppImage'],
++      icon: resource('icons-linux'),
++      category: 'Development',
 +      // electron-builder otherwise derives the command from the scoped package name.
 +      executableName: 'deepseek-harness',
 +      // Electron derives the window app_id from desktopName, and StartupWMClass has to match it for a
@@ -154,8 +206,8 @@ index cf0c19e8..82999f4a 100644
 +      // productName 是路径安全的 token（/opt 目录跟着它走），菜单里显示的名字在这里单独覆盖。
 +      desktop: { entry: { Name: 'DeepSeek Harness' } },
 +      // fpm records the maintainer in the Debian control file and the RPM header; AppImage carries none.
-+      ...(linuxPackages === undefined ? {} : { maintainer: linuxPackages.maintainer }),
-+      target: linuxFormats ?? ['AppImage'],
++      ...(packages === undefined ? {} : { maintainer: packages.maintainer }),
++      target: formats ?? ['AppImage'],
 +    },
 +    // The legacy AppImage toolset otherwise writes "Exec=AppRun --no-sandbox %U", which turns off the
 +    // Chromium sandbox for every launch from the desktop menu. An explicitly empty argument list keeps
@@ -187,9 +239,12 @@ index cf0c19e8..82999f4a 100644
 +        'alsa-lib', 'libdrm', 'mesa-libgbm', 'mesa-libGL', 'libxkbcommon', 'cups-libs',
 +        'expat', 'glib2', 'pango', 'cairo', 'gdk-pixbuf2', 'dbus-libs', 'systemd-libs',
 +        'libX11', 'libXcomposite', 'libXdamage', 'libXext', 'libXfixes', 'libXrandr', 'libxcb',
++        // 应用内更新链直接依赖：helper 执行 `dnf5 upgrade`，安装经 pkexec（polkit）。
++        // 最小安装/纯净容器里缺任一个，更新按钮就是坏的。
++        'dnf5', 'polkit',
 +      ],
-+      afterInstall: fileURLToPath(new URL('../resources/rpm-post-install.sh', import.meta.url)),
-+      afterRemove: fileURLToPath(new URL('../resources/rpm-post-remove.sh', import.meta.url)),
++      afterInstall: resource('rpm-post-install.sh'),
++      afterRemove: resource('rpm-post-remove.sh'),
 +      fpm: [
 +        '--rpm-rpmbuild-define', '_build_id_links none',
 +        '--rpm-rpmbuild-define', '__os_install_post %{nil}',
@@ -197,6 +252,19 @@ index cf0c19e8..82999f4a 100644
 +        '--rpm-rpmbuild-define', '__brp_strip /bin/true',
 +        '--rpm-rpmbuild-define', '_binary_payload w19.zstdio',
 +      ],
-     },
-     nsis: {
-       uninstallDisplayName: '${productName}',
++    },
++  }
++}
++
++/**
++ * Adds the Linux package sections and payload entries to a builder config. On other platforms the
++ * config is returned untouched, so Windows and macOS builds never see the Linux resources.
++ */
++export function withLinuxTargets(config, { platform, formats, packages }) {
++  if (platform !== 'linux') return config
++  return {
++    ...config,
++    ...linuxTargets({ formats, packages }),
++    extraResources: [...config.extraResources, ...linuxExtraResources()],
++  }
++}
