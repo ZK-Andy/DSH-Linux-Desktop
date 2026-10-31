@@ -189,3 +189,115 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 | 2026-10-30 | asar 保持开启，sharp 走子进程 + `asarUnpack` | 官方形态 + 隔离；关 asar 是独立 Node 路线的前提，本项目不采用 |
 | 2026-10-30 | `productName` 用路径安全 token，菜单名用 `linux.desktop.entry.Name` 覆盖 | 路径（`/opt`、`Exec`）不能有空格；显示名不该反过来决定路径 |
 | 2026-10-30 | verify.sh 重写为 rpm 静态验收，与冒烟分工 | 参考版的 Arch/PKGBUILD 断言与 RPM 无关；静态看包、冒烟看启动，互不重叠 |
+
+## 10. 待迁移
+
+现状与 AGENTS.md 不一致、已知且计划收拢的项。AGENTS.md 1.3 规则 9 按名字引用本节；格式只在这里定义。
+
+每条四项：
+
+- **现状**：文件、触碰它的补丁及数量，或不一致的事实；
+- **目标**：新文件或归属；
+- **验收**：怎么断言（命令或 `patch-surface.sh` 检查项）；
+- **负责补丁**：由哪个补丁（或合并后的模块补丁）完成。
+
+条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
+
+执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ M1 第一步（重组，各补丁首行随之经 `regen-patch.sh` 补齐）→ M1 第二步 → 其余条目。M6 的断言随 `patch-surface.sh` 一起写，清理随 M1 拆分一起做。
+
+### M1 拆分 0026
+
+- 现状：`0026` 一个补丁含 44 个文件，混合窗口外观、托盘菜单、窗口尺寸记忆、更新渠道与 Web 端窗口控件；`main.ts` 净增 154 行（+171/−17），大部分是实现，不是挂钩。
+- 目标：按变化拆入模块补丁，各自拥有新文件：
+  - 窗口外观（与 `0016` 合并）：`linux-window.ts`（窗口 IPC、状态）；
+  - 托盘（与 `0013`、`0024` 合并）：`linux-tray.ts`（托盘 + 关于）；
+  - 窗口尺寸记忆：`settings.ts` 中的尺寸逻辑移到自己的新文件；
+  - 更新渠道：`linux-updates.ts`（协调器接线），实现见 M5。
+  `main.ts` 每个模块只留一两行挂钩。
+- 验收：分两步，各自单独提交；M5、M7 是行为或结构变更，不混进这两步。
+  1. 重组补丁（按变化重新分组，不搬代码）：在干净上游 tag 树上重放，`diff -r` 与现状一致（`apply-patches.sh` 放置的资产除外）；
+  2. 搬实现（在新分组内把实现移到新文件）：`diff -r` 只出现在本模块拥有的文件上；`main-startup.spec.ts`、`tray.spec.ts`、`settings.spec.ts` 等单测通过；`verify.sh` 与 `smoke-install-rpm.sh` 通过；`patch-surface.sh` 报告每个补丁 `main.ts` 净增 ≤15 行且无例外行；`0026` 不再存在。
+- 负责补丁：`0026` → 上述四个模块补丁。
+
+### M2 收拢 `electron-builder-config.mjs`
+
+- 现状：被 6 个补丁触碰：`0003`、`0013`、`0020`、`0021`、`0023`、`0026`。
+- 目标：新文件 `apps/desktop/scripts/electron-builder-linux.mjs` 持有全部 Linux builder 配置（target、图标、包身份、rpm 硬化、asarUnpack、extraResources、fpm 参数），由打包配置补丁拥有；上游文件只留一处展开。
+- 验收：`patch-surface.sh` 报告该文件补丁数 = 1。
+- 负责补丁：打包配置补丁（收拢 `0003`、`0020`、`0023` 及其他补丁里的 builder 片段）。
+
+### M3 其他多补丁触碰的上游文件
+
+- 现状：
+  - `package-target.ts`：`0002`、`0025`；
+  - `prepare-dsh.ts`：`0004`、`0022`；
+  - `locale.ts`：`0024`、`0026`；
+  - `tray.ts`：`0013`、`0026`；
+  - `preload-windows.ts` 及测试 `main-startup.spec.ts`、`preload-windows.client.spec.ts`、`welcome-startup.spec.ts`：`0016`、`0026`；
+  - `main.ts`：`0013`、`0016`、`0026`（规则 3 豁免 `main.ts`，只受规则 4 约束）。
+- 目标：
+  - `package-target.ts`：随构建链合并（`0002`、`0025` 并入构建链补丁）消除；
+  - `tray.ts`：随托盘模块合并消除；
+  - `preload-windows.ts` 及三个测试：随窗口外观模块合并消除；
+  - `locale.ts`：各模块文案放各自的新文件，`locale.ts` 只留一处展开，由托盘模块拥有挂钩；
+  - `prepare-dsh.ts`：构建链拥有；`0022` 的接入方式（并入构建链的一处调用，或登记为规则 3 例外）在实施时定，定后改写本条。
+- 验收：`patch-surface.sh` 报告除 `main.ts` 外每个上游文件补丁数 = 1。
+- 负责补丁：构建链、托盘、窗口外观模块补丁；`0022`。
+
+### M4 系统文件由 rpm 拥有
+
+- 现状：`assets/rpm-post-install.sh` 在 `%post` 中用 `install` 把 `dsh-update-helper` 和 polkit 策略从 `resources/` 复制到 `/usr`；`%postun` 删除。rpm 文件清单不拥有它们。
+- 目标：通过 electron-builder 的 `fpm` 参数（dir 源的 `源=目标` 映射）让 rpm 直接拥有 `/usr/libexec/dsh-update-helper`、`/usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy`、`/etc/yum.repos.d/dsh-desktop.repo`；`%post` 不再复制。
+- 验收：
+  1. 先在 electron-builder 26.17 上实测映射是否生效；不生效则回到评审讨论是否改为「幂等安装 + `verify.sh` 断言 + `%postun` 删除」；
+  2. `rpm -qlp` 列出上述三个路径；
+  3. `.repo` 标 `%config(noreplace)`（用户会改镜像地址或 proxy）；
+  4. 安装后 `rpm -V dsh-desktop` 无输出；
+  5. `rpm-post-install.sh` 中无对 `/usr`、`/etc` 的复制。
+- 负责补丁：打包配置补丁（映射）、更新渠道补丁（helper、策略、`.repo` 内容）。
+
+### M5 更新收敛为 dnf-only
+
+- 现状：应用内仍有自行下载、校验 rpm 的链路；Releases 侧仍生成 `version.json`。
+- 目标：按 AGENTS.md 2.6 删除应用内下载/校验实现，`update-linux.ts` 收敛为 `dnf5 check-upgrade` + 无参 helper。删除：
+  - `apps/desktop/src/update-feed.ts`；
+  - `apps/desktop/src/update-download.ts` 的下载/校验，及对应测试；
+  - `scripts/make-version-json.sh` 与 `release.yml` 中对应步骤；
+  - `scripts/release-preflight.sh` 对 `version.json` 的核对。
+  `.repo`：`metadata_expire=1h`、`skip_if_unavailable=1`、`gpgcheck=1`、`repo_gpgcheck=1`；应用内检查加 `--setopt=dsh-desktop.skip_if_unavailable=0`。
+- 验收：
+  1. `grep -r 'version.json\|update-feed\|update-download' patches scripts .github` 无结果；
+  2. 检查命令退出码 `100` → 有更新，`0` → 无更新，其他 → 原样展示错误；
+  3. helper 不接受参数，只执行 `dnf5 upgrade -y --refresh dsh-desktop`；
+  4. 文档同步：README（version.json、应用内下载、sha256、`rpm -Kv` 相关段落）与 PLAN.md R4、§3.4、§6（「不做应用内自更新」「暂不建 dnf 仓库」）按 dnf-only 改写；`grep -n 'version.json' README.md PLAN.md` 只命中本节。
+- 负责补丁：更新渠道补丁。
+
+### M6 补丁内嵌的资源副本
+
+- 现状：`0026` 以新文件形式内嵌 `RPM-GPG-KEY-dsh-desktop`、`dsh-update-helper`、polkit 策略、`rpm-post-install.sh`、`rpm-post-remove.sh`；`scripts/apply-patches.sh` 已从 `assets/`、`packaging/` 放置同名文件。
+- 目标：补丁不含这些文件，只由 `apply-patches.sh` 放置。
+- 验收：`patch-surface.sh` 断言 `patches/` 新增文件的目标路径不与 `apply-patches.sh` 的 `ASSETS` 表重合。
+- 负责补丁：随 M1 拆分一并删除。
+
+### M7 `WindowControls` 多份实现
+
+- 现状：`ui-conversation`、`ui-layout`、`ui-sidebar-right` 各有一份 `WindowControls.tsx`（`0026` 新增）。
+- 目标：移到 `packages/client/ui-primitives`，三处引用它。上游 `packages/client/AGENTS.md` 规定 feature plugin 之间不得 runtime import，共享运行时代码只能放静态库。`ui-primitives` 不用 cordis，组件只用 props 与 preload 暴露在 `window` 上的桥，不碰 ctx。
+- 验收：`patches/` 中新增的 `WindowControls.tsx` 只有一份，且位于 `packages/client/ui-primitives/` 下。
+- 负责补丁：窗口外观模块补丁。
+
+### M8 补丁首行与门禁
+
+- 现状：没有补丁首行写 `变化理由：`；补丁用 `git diff` 直接重生成，会丢掉首行；`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 不存在。
+- 目标：
+  - 首行（`变化理由：`、`例外：` 行）是 `diff --git` 之前的 preamble。先在 CI runner 的 git 版本上复验 `git apply --check` 通过（本地 git 2.47.3 已通过）；不通过再改用 `patches/manifest.tsv`。
+  - 新建 `regen-patch.sh <补丁名> <base> <head> [--reason "…"] -- <路径…>`：读出现有补丁的 preamble，用 `git diff` 生成正文，拼接写回。补丁不存在时用 `--reason` 写首行；已存在时传 `--reason` 报错（改理由直接改文件首行）；两者都缺或 preamble 无 `变化理由：` 时报错退出。理由只存在补丁文件里，不另设存储。
+  - `patches/` 只经 `regen-patch.sh` 生成和重生成，不直接 `git diff > patches/…`。
+  - 新建 `patch-surface.sh`，只读 `patches/` 做静态检查（解析 `diff --git` 统计每补丁碰的文件，解析 `@@` 算 `main.ts` 净增），在重放补丁之前运行，CI 失败即停：
+  - 每个补丁首行为 `变化理由：…`；
+  - 除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；
+  - 单补丁 `main.ts` 净增 ≤15 行，或有 `例外：规则 4` 行；
+  - 本节每条引用的补丁存在；
+  - 补丁新增文件不与 `ASSETS` 表重合（M6）。
+- 验收：CI 在 `apply-patches.sh` 之前运行该脚本；对现状输出的违规恰好是本节登记的项。
+- 负责补丁：不涉及补丁（`scripts/`）；首行随各模块补丁重写补齐。
