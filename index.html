@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DSH Linux Desktop RPM 仓库</title>
+<h1>DSH Linux Desktop RPM 仓库</h1>
+<p>这是 dnf5 仓库的 repodata 目录，rpm 本体在 <a href="https://github.com/ZK-Andy/DSH-Linux-Desktop/releases">GitHub Releases</a>。</p>
+<p>安装：</p>
+<pre>sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop
+sudo curl -fsSL https://zk-andy.github.io/DSH-Linux-Desktop/dsh-desktop.repo -o /etc/yum.repos.d/dsh-desktop.repo
+sudo dnf5 install dsh-desktop</pre>
