@@ -1183,10 +1183,30 @@ index b3b07c2b..e8f17cdf 100644
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index ac6cb69f..a68a8e46 100644
+index ac6cb69f..703d0aff 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-@@ -628,3 +628,12 @@
+@@ -486,6 +486,19 @@
+   scrollbar-gutter: stable;
+ }
+ 
++/* Linux frameless: rows scrolled out of this scrollport keep their layout
++   boxes above it, and Electron composes app-regions from geometry, ignoring
++   clipping — an interactive transcript row (a DisclosureRow) under the header
++   band punches a no-drag hole into the header's drag surface, and a double
++   click there reaches the page instead of the window. Paint containment
++   declares this subtree's ink to live inside the box, so the window's drag
++   rects skip those escaped boxes. The fixed-position chrome inside (the
++   context meter panel, dialogs) portals to document.body, so containment
++   re-anchors nothing. */
++:global(html[data-desktop-frame]) .scrollBody {
++  contain: paint;
++}
++
+ /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
+    offset. WebKit-only: the Firefox path has no track to inset. */
+ .scrollBody::-webkit-scrollbar-track {
+@@ -628,3 +641,12 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
