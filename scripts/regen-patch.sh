@@ -43,8 +43,9 @@ bare=${name#patches/}; bare=${bare%.patch}; name="patches/${bare}.patch"
 
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT
-# core.abbrev=7：与现有补丁的 index 缩写一致，重生成结果可直接与旧正文逐字节比较。
-git -C "$repo" -c core.abbrev=7 diff --no-ext-diff --no-color --binary "$base" "$head" -- "${paths[@]}" > "$body"
+# core.abbrev=8：与现有补丁的 index 缩写一致，重生成结果可直接与旧正文逐字节比较。
+# （PR #8 重生成后各补丁的 index 段为 8 位缩写，7 位会改写全部 index 行。）
+git -C "$repo" -c core.abbrev=8 diff --no-ext-diff --no-color --binary "$base" "$head" -- "${paths[@]}" > "$body"
 if [[ ! -s "$body" ]]; then
   echo "regen-patch: ${base}..${head} 在给定路径上没有差异，拒绝写出空补丁" >&2
   exit 1
