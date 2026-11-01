@@ -1,6 +1,6 @@
 name: patch-gate
 
-# 只做补丁门禁：几十秒内跑完，不做构建、不打 rpm。
+# 只做补丁门禁：静态断言 + 干净树试打 + 补丁触及的上游测试（约两分钟），不做构建、不打 rpm。
 # M8 要求 patch-surface.sh 在重放补丁之前运行；这里同时把「补丁在干净上游树上试打通过」
 # 一起验证，PR 2 起补丁带 preamble 后，这一步也在验证 git apply 接受 preamble。
 on:
@@ -34,3 +34,30 @@ jobs:
       # 干净克隆上真打，效果等同打包流程里的同一步。
       - name: Apply patches
         run: scripts/apply-patches.sh
+
+      # 补丁改到的上游测试在 CI 里真跑一遍（本 PR 起：recall 监听器的安装门用例）。
+      # node/pnpm 版本与 package.yml 一致；缓存 key 同款（lockfile 在打完补丁后取）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+          run_install: false
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-store-${{ hashFiles('upstream/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: upstream
+
+      - name: Run touched upstream tests
+        run: pnpm exec vitest run packages/client/web/tests/window-drag-recall.client.spec.ts
+        working-directory: upstream
