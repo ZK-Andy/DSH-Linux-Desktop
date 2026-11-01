@@ -41,14 +41,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends rpm xz-utils cpio
           rpmbuild --version
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.9.0
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.28.5
-          run_install: false
+      - uses: ./.github/actions/setup-node-pnpm
 
       # 缓存放在 fetch 之后：key 要用上游的 pnpm-lock.yaml，而它只有克隆完才存在。
       # 之前在 fetch 之前算 hashFiles 得到空串，key 退化成常量，缓存永远不更新。

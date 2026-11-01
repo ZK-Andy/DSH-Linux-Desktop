@@ -18,7 +18,10 @@ jobs:
   gate:
     runs-on: ubuntu-24.04
     steps:
+      # fetch-depth 0：测试推导要和 base 分支比对改动了哪些补丁文件。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Shell syntax
         run: bash -n scripts/*.sh
@@ -35,16 +38,10 @@ jobs:
       - name: Apply patches
         run: scripts/apply-patches.sh
 
-      # 补丁改到的上游测试在 CI 里真跑一遍（本 PR 起：recall 监听器的安装门用例）。
-      # node/pnpm 版本与 package.yml 一致；缓存 key 同款（lockfile 在打完补丁后取）。
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.9.0
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.28.5
-          run_install: false
+      # 补丁改到的上游测试在 CI 里真跑一遍：从本 PR 改动的补丁文件里提取它新增/修改的
+      # 测试路径，交给 vitest；没有触及测试文件就跳过。node/pnpm 版本与 package.yml
+      # 同源（composite action）；缓存 key 同款（lockfile 在打完补丁后取）。
+      - uses: ./.github/actions/setup-node-pnpm
 
       - name: Cache pnpm store
         uses: actions/cache@v4
@@ -58,6 +55,29 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: upstream
 
+      - name: Collect touched upstream tests
+        id: specs
+        run: |
+          specs=$(
+            for p in $(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- patches/); do
+              grep '^diff --git ' "$p" 2>/dev/null || true
+            done \
+            | sed 's|diff --git a/.* b/||' \
+            | grep -E '(^|/)tests/.*\.spec\.tsx?$' | sort -u)
+          if [ -z "$specs" ]; then
+            echo "本 PR 未触及上游测试文件，跳过 vitest。"
+            echo "specs=skip" >> "$GITHUB_OUTPUT"
+          else
+            echo "本 PR 触及的上游测试："
+            echo "$specs"
+            {
+              echo "specs<<EOF"
+              echo "$specs"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run touched upstream tests
-        run: pnpm exec vitest run packages/client/web/tests/window-drag-recall.client.spec.ts
+        if: steps.specs.outputs.specs != 'skip'
+        run: pnpm exec vitest run ${{ steps.specs.outputs.specs }}
         working-directory: upstream
