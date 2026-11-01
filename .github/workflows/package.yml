@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The Electron payload plus the unpacked build tree needs more room than the runner image leaves.
       - name: Free disk space
@@ -54,7 +54,7 @@ jobs:
           echo "UPSTREAM_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-store-${{ hashFiles('upstream/pnpm-lock.yaml') }}
@@ -65,7 +65,7 @@ jobs:
       # the fpm/appimage toolchains it unpacks. Both are content-addressed by version, so keying on the
       # lockfile is enough and a stale entry only costs one miss.
       - name: Cache Electron and builder toolchains
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
@@ -143,7 +143,7 @@ jobs:
       # 先传产物再验收：验收脚本自己出问题时，失败的那次 run 里也拿得到 rpm 复现。
       - name: Upload rpm
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-x64-rpm
           path: |
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload smoke screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-shot-linux-x64
           path: shots/
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload smoke log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-log-linux-x64
           path: smoke-logs/

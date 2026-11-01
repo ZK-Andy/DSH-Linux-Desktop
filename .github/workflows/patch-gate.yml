@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       # fetch-depth 0：测试推导要和 base 分支比对改动了哪些补丁文件。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -44,7 +44,7 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-store-${{ hashFiles('upstream/pnpm-lock.yaml') }}
