@@ -1817,6 +1817,69 @@ index af74988c..3c3150f8 100644
  ) {
    -webkit-app-region: no-drag;
  }
+diff --git a/packages/client/web/src/window-drag/recall.ts b/packages/client/web/src/window-drag/recall.ts
+index b7f35fc8..9b03dc4c 100644
+--- a/packages/client/web/src/window-drag/recall.ts
++++ b/packages/client/web/src/window-drag/recall.ts
+@@ -53,14 +53,20 @@ export interface WindowDragRecallOptions {
+ 
+ /**
+  * Watch the window's marked drag rows and pulse the recall mark whenever their
+- * geometry can have moved. Installs nothing outside the darwin platform, where no
+- * app-region rule exists.
++ * geometry can have moved. Installs nothing on a surface without an app-region
++ * rule: darwin, and the Linux frameless shell that gates the same rules on its
++ * own frame attribute.
+  * @param options - the document to watch and the two scheduling seams.
+  * @returns a disposer that stops watching, drops any pending frame, and clears the mark.
+  */
+ export function installWindowDragRecall(options: WindowDragRecallOptions): () => void {
+   const doc = options.document
+-  if (doc.documentElement.dataset.platform !== 'darwin') return () => {}
++  // The gate follows the CSS condition, not the platform name: the Linux
++  // frameless shell extends the same app-region rules to its frame
++  // (`packages/client/web/src/base.css`), so a stale rect there is as
++  // unreachable as on darwin.
++  if (doc.documentElement.dataset.platform !== 'darwin'
++    && !doc.documentElement.hasAttribute('data-desktop-frame')) return () => {}
+   const scheduleFrame = options.scheduleFrame ?? defaultScheduleFrame
+   const watchBox = options.watchBox ?? defaultWatchBox
+   /** The last frame's measurement per row, the baseline a change is read against. */
+diff --git a/packages/client/web/tests/window-drag-recall.client.spec.ts b/packages/client/web/tests/window-drag-recall.client.spec.ts
+index de7832d1..3a689399 100644
+--- a/packages/client/web/tests/window-drag-recall.client.spec.ts
++++ b/packages/client/web/tests/window-drag-recall.client.spec.ts
+@@ -105,6 +105,7 @@ beforeEach(() => {
+ 
+ afterEach(() => {
+   delete document.documentElement.dataset.platform
++  document.documentElement.removeAttribute('data-desktop-frame')
+   document.body.innerHTML = ''
+   vi.unstubAllGlobals()
+ })
+@@ -126,6 +127,22 @@ describe('window drag watcher installation', () => {
+     stop()
+   })
+ 
++  it('installs on the Linux frameless shell, which gates the same app-region rules on its frame', async () => {
++    delete document.documentElement.dataset.platform
++    document.documentElement.setAttribute('data-desktop-frame', '')
++    const seams = harness()
++    const stop = installWindowDragRecall({
++      document, scheduleFrame: seams.scheduleFrame, watchBox: seams.watchBox,
++    })
++    row()
++    expect(seams.frames()).toBe(1)
++    seams.runFrames()
++    expect(marked()).toBe(true)
++    expect(seams.watched()).toHaveLength(1)
++    stop()
++    expect(seams.disposedWatchers()).toBe(1)
++  })
++
+   it('collects the surface once when it is installed', () => {
+     const seams = harness()
+     const stop = installWindowDragRecall({
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
 index 3bb5b2fd..58601cf0 100644
 --- a/pnpm-lock.yaml
