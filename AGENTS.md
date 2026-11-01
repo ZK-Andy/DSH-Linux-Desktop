@@ -99,7 +99,7 @@
 - 包名 `dsh-desktop`，可执行名 `deepseek-harness`，仓库名 `DSH-Linux-Desktop`。
 - 不做及原因：
   - 不做透明窗口：旧合成器逐帧 alpha 混合导致内存暴涨。
-  - Host 不换独立 Node：插件市场 hot-mount 报 409。
+  - Host 不换独立 Node：Electron 自带 Node 够用，独立 Node 只增打包与运行时组合的维护面，无对应收益。插件市场 hot-mount 409 卡死是上游 HMR 缺陷（ffyfox/dsh-desktop-linux#8 插桩定位：缓存 miss 时同内容换 inode 被判已改 → 市场被停 → dispose 等自己的操作成环），官方客户端 macOS/Windows 原生即有，与 Host 运行时无关，等上游修复。
   - 不做开机自启：用户明确不要。
   - 应用不自行下载、安装 rpm：文件归 rpm 所有，更新只有 dnf 一个来源。
 
