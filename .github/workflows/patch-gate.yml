@@ -70,11 +70,8 @@ jobs:
           else
             echo "本 PR 触及的上游测试："
             echo "$specs"
-            {
-              echo "specs<<EOF"
-              echo "$specs"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+            # 单行空格分隔：多行输出会在脚本展开后变成逐行命令。
+            echo "specs=$(printf '%s ' $specs)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run touched upstream tests
