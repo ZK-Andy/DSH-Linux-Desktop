@@ -1818,7 +1818,7 @@ index af74988c..3c3150f8 100644
    -webkit-app-region: no-drag;
  }
 diff --git a/packages/client/web/src/window-drag/recall.ts b/packages/client/web/src/window-drag/recall.ts
-index b7f35fc8..9b03dc4c 100644
+index b7f35fc8..9bd2b970 100644
 --- a/packages/client/web/src/window-drag/recall.ts
 +++ b/packages/client/web/src/window-drag/recall.ts
 @@ -53,14 +53,20 @@ export interface WindowDragRecallOptions {
@@ -1827,8 +1827,8 @@ index b7f35fc8..9b03dc4c 100644
   * Watch the window's marked drag rows and pulse the recall mark whenever their
 - * geometry can have moved. Installs nothing outside the darwin platform, where no
 - * app-region rule exists.
-+ * geometry can have moved. Installs nothing on a surface without an app-region
-+ * rule: darwin, and the Linux frameless shell that gates the same rules on its
++ * geometry can have moved. Installs only where an app-region rule exists: the
++ * darwin shell, and the Linux frameless shell that gates the same rules on its
 + * own frame attribute.
   * @param options - the document to watch and the two scheduling seams.
   * @returns a disposer that stops watching, drops any pending frame, and clears the mark.
