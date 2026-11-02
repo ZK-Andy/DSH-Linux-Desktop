@@ -1,0 +1,53 @@
+变化理由：启动前回收历史端口签发的 dsh-auth-* cookie：随机端口每次铸一条 30 天有效的 cookie，累计约 70 条后请求头越过 Node 默认 16 KB 上限，Host 回 431，壳层误报 Web 认证失败。
+diff --git a/apps/desktop/src/host-auth-cookies.ts b/apps/desktop/src/host-auth-cookies.ts
+new file mode 100644
+index 00000000..ad356b24
+--- /dev/null
++++ b/apps/desktop/src/host-auth-cookies.ts
+@@ -0,0 +1,26 @@
++/** Host authentication cookies kept in the Chromium session jar. */
++
++import type { Cookies } from 'electron'
++
++/**
++ * Prefix every Host authentication cookie shares; the Host appends the launch
++ * authority so simultaneous ports never collide
++ * (`packages/client/connection/src/browser-auth.ts`, `COOKIE_PREFIX`).
++ */
++const HOST_COOKIE_PREFIX = 'dsh-auth-'
++
++/**
++ * Retire Host authentication cookies minted for ports earlier launches used.
++ * The jar outlives the process while every launch listens on a new random port,
++ * so leaving them behind grows the request header until the Host's header size
++ * limit answers `431` and the launch reports a Web authentication failure.
++ * @param cookies - Session cookie jar Chromium attaches to `net.fetch`.
++ * @param url - Launch URL of the Host that just started.
++ * @returns after every cookie left by an earlier Host port is removed.
++ */
++export async function retireStaleHostCookies(cookies: Cookies, url: string): Promise<void> {
++  const jar = await cookies.get({ url })
++  for (const cookie of jar) {
++    if (cookie.name.startsWith(HOST_COOKIE_PREFIX)) await cookies.remove(url, cookie.name)
++  }
++}
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index d6e2a3f4..facecd43 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -24,6 +24,7 @@ import {
+ import { resolveDesktopPaths } from './paths.ts'
+ import { DesktopProjectManager } from './project-manager.ts'
+ import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
++import { retireStaleHostCookies } from './host-auth-cookies.ts'
+ import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
+ import { installDesktopFileDrag } from './file-drag.ts'
+ import { installDesktopDirectoryPicker } from './directory-picker.ts'
+@@ -434,6 +435,7 @@ async function main(): Promise<void> {
+     return {
+       start: async () => {
+         const ready = await host.start()
++        await retireStaleHostCookies(session.defaultSession.cookies, ready.url)
+         hostCookie = await authenticateWebHost(ready.url)
+         hostUrl = ready.url
+         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
