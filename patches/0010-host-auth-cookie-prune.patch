@@ -1,34 +1,49 @@
 变化理由：启动前回收历史端口签发的 dsh-auth-* cookie：随机端口每次铸一条 30 天有效的 cookie，累计约 70 条后请求头越过 Node 默认 16 KB 上限，Host 回 431，壳层误报 Web 认证失败。
 diff --git a/apps/desktop/src/host-auth-cookies.ts b/apps/desktop/src/host-auth-cookies.ts
 new file mode 100644
-index 00000000..ad356b24
+index 00000000..88e84781
 --- /dev/null
 +++ b/apps/desktop/src/host-auth-cookies.ts
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,41 @@
 +/** Host authentication cookies kept in the Chromium session jar. */
 +
 +import type { Cookies } from 'electron'
 +
 +/**
-+ * Prefix every Host authentication cookie shares; the Host appends the launch
-+ * authority so simultaneous ports never collide
++ * Prefix every Host authentication cookie shares; the Host appends
++ * `base64url(sha256(authority))` so simultaneous ports never collide
 + * (`packages/client/connection/src/browser-auth.ts`, `COOKIE_PREFIX`).
 + */
 +const HOST_COOKIE_PREFIX = 'dsh-auth-'
++
++/**
++ * Loopback spellings a Host can bind to; a cookie stored for one spelling is
++ * never sent to another, so each spelling keeps its own family of Host cookies.
++ */
++const LOOPBACK_ORIGINS = ['http://127.0.0.1', 'http://localhost', 'http://[::1]']
 +
 +/**
 + * Retire Host authentication cookies minted for ports earlier launches used.
 + * The jar outlives the process while every launch listens on a new random port,
 + * so leaving them behind grows the request header until the Host's header size
 + * limit answers `431` and the launch reports a Web authentication failure.
++ * Removal is best-effort: a jar that refuses a cookie must not replace a launch
++ * that could still succeed with a different error.
 + * @param cookies - Session cookie jar Chromium attaches to `net.fetch`.
 + * @param url - Launch URL of the Host that just started.
 + * @returns after every cookie left by an earlier Host port is removed.
 + */
 +export async function retireStaleHostCookies(cookies: Cookies, url: string): Promise<void> {
-+  const jar = await cookies.get({ url })
-+  for (const cookie of jar) {
-+    if (cookie.name.startsWith(HOST_COOKIE_PREFIX)) await cookies.remove(url, cookie.name)
++  for (const origin of new Set([new URL(url).origin, ...LOOPBACK_ORIGINS])) {
++    const jar = await cookies.get({ url: origin })
++    for (const cookie of jar) {
++      if (!cookie.name.startsWith(HOST_COOKIE_PREFIX)) continue
++      try {
++        await cookies.remove(origin, cookie.name)
++      } catch {
++        // Leftover cookies only cost header bytes; aborting here would fail a launch that may still work.
++      }
++    }
 +  }
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
