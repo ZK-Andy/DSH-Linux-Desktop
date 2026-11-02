@@ -50,3 +50,7 @@ smoke-logs/
 # CI 日志临时文件（不要提交）
 .fail*.log
 .ok*.log
+
+# 临时工作目录与外部工具状态（不属于仓库）
+.tmp-*/
+.zcode/
