@@ -37,10 +37,10 @@ index 00000000..03f987b8
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..88512125
+index 00000000..67a81724
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,283 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -65,6 +65,12 @@ index 00000000..88512125
 +
 +/** How many helper output lines survive for the failure dialog. */
 +export const INSTALL_LOG_LINES = 10
++
++/** Wall-clock budget for one dnf query: dnf can block on prompts, locks, or a stalled mirror. */
++export const QUERY_TIMEOUT_MS = 120_000
++
++/** Wall-clock budget for the polkit helper: a dnf upgrade can take minutes, but not forever. */
++export const INSTALL_TIMEOUT_MS = 10 * 60_000
 +
 +/** Strips ANSI control sequences and the carriage-return progress tail dnf redraws in place. */
 +export function stripProgress(line: string): string {
@@ -230,12 +236,35 @@ index 00000000..88512125
 +        this.emit('install-progress', { line: latest })
 +      }
 +    }
-+    const child = spawn('pkexec', [helper], { env: { ...process.env, LC_ALL: 'C' } })
++    let settled = false
++    let timer: ReturnType<typeof setTimeout> | undefined
++    const failOnce = (error: Error, code: number | null): void => {
++      if (settled) return
++      settled = true
++      clearTimeout(timer)
++      this.fail(error, lines, code)
++    }
++    const child = spawn('pkexec', [helper], {
++      env: { ...process.env, LC_ALL: 'C' },
++      // polkit prompts through the desktop agent, not stdin; the helper inherits this pipe, and
++      // a pipe nobody writes to or closes can block a prompt exactly like it blocks dnf5.
++      stdio: ['ignore', 'pipe', 'pipe'],
++    })
++    timer = setTimeout(() => {
++      // SIGKILL reaps the helper only: pkexec keeps the pid, but the dnf5 transaction the helper
++      // started may outlive it, so this budget bounds the wait in the UI, not the upgrade itself.
++      // When that orphan finishes, the next check sees the new rpm release and clears the update.
++      child.kill('SIGKILL')
++      failOnce(new Error(`dnf5 upgrade 超过 ${INSTALL_TIMEOUT_MS / 1000} 秒未返回，已终止`), null)
++    }, INSTALL_TIMEOUT_MS)
 +    child.stdout.on('data', consume)
 +    child.stderr.on('data', consume)
-+    child.on('error', (error) => { this.fail(error, lines, null) })
++    child.on('error', (error) => { failOnce(error, null) })
 +    child.on('close', (code) => {
++      if (settled) return
 +      if (code === 0) {
++        settled = true
++        clearTimeout(timer)
 +        this.emit('installed', { version: this.candidate })
 +        if (this.options.relaunch !== undefined) this.options.relaunch()
 +        else {
@@ -244,7 +273,7 @@ index 00000000..88512125
 +        }
 +        return
 +      }
-+      this.fail(new Error(`desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`), lines, code)
++      failOnce(new Error(`desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`), code)
 +    })
 +  }
 +
@@ -262,17 +291,35 @@ index 00000000..88512125
 +  private queryUpgrades(refresh: boolean): Promise<string> {
 +    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades(refresh)
 +    return new Promise((resolve, reject) => {
-+      const args = ['repoquery', '--upgrades', ...refresh ? ['--refresh'] : [],
++      const args = ['repoquery', '--upgrades', '--assumeyes', ...refresh ? ['--refresh'] : [],
 +        '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME]
-+      const child = spawn('dnf5', args, { env: { ...process.env, LC_ALL: 'C' } })
++      const child = spawn('dnf5', args, {
++        env: { ...process.env, LC_ALL: 'C' },
++        // dnf5 asks on stdin before importing repository OpenPGP keys, and a pipe nobody writes
++        // to would block that question forever; the prompt must see EOF instead.
++        stdio: ['ignore', 'pipe', 'pipe'],
++      })
 +      let stdout = ''
 +      let stderr = ''
++      let settled = false
++      let timer: ReturnType<typeof setTimeout> | undefined
++      const settle = (error?: Error): void => {
++        if (settled) return
++        settled = true
++        clearTimeout(timer)
++        if (error === undefined) resolve(stdout)
++        else reject(error)
++      }
++      timer = setTimeout(() => {
++        child.kill('SIGKILL')
++        const tail = stderr.trim().split('\n').slice(-3).join('\n')
++        settle(new Error(`dnf5 repoquery 超过 ${QUERY_TIMEOUT_MS / 1000} 秒未返回，已终止${tail.length > 0 ? `\n${tail}` : ''}`))
++      }, QUERY_TIMEOUT_MS)
 +      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
 +      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
-+      child.on('error', reject)
++      child.on('error', settle)
 +      child.on('close', (code) => {
-+        if (code === 0) resolve(stdout)
-+        else reject(new Error(stderr.trim().length > 0 ? stderr.trim() : `dnf5 repoquery 退出码 ${code ?? 'unknown'}`))
++        settle(code === 0 ? undefined : new Error(stderr.trim().length > 0 ? stderr.trim() : `dnf5 repoquery 退出码 ${code ?? 'unknown'}`))
 +      })
 +    })
 +  }
@@ -292,42 +339,54 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..bb7e661d
+index 00000000..e1faf22b
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,246 @@
 +import { gt } from 'semver'
 +import { describe, expect, it, vi } from 'vitest'
 +import {
-+  LinuxPackageUpdater, currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
++  INSTALL_TIMEOUT_MS, LinuxPackageUpdater, QUERY_TIMEOUT_MS, currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
 +} from '../src/update-linux.ts'
 +
 +vi.mock('electron', () => ({
 +  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn() },
 +}))
 +
++type Emitter = { on: (event: string, cb: (code: number | null) => void) => void }
++
 +const spawned = await vi.hoisted(async () => {
-+  type Emitter = { on: (event: string, cb: (code: number | null) => void) => void }
-+  return { calls: [] as string[][], child: undefined as undefined | {
-+    stdout: Emitter, stderr: Emitter, on: (event: string, cb: (code: number | null) => void) => void,
-+  } }
++  return {
++    calls: [] as string[][],
++    options: [] as unknown[],
++    child: undefined as undefined | {
++      stdout: Emitter
++      stderr: Emitter
++      kill: (signal?: string) => void
++      on: (event: string, cb: (code: number | null) => void) => void
++    },
++  }
 +})
 +vi.mock('node:child_process', async (importOriginal) => {
 +  const actual = await importOriginal<typeof import('node:child_process')>()
 +  const { EventEmitter } = await import('node:events')
 +  return {
 +    ...actual,
-+    spawn: vi.fn((program: string, args: string[]) => {
++    spawn: vi.fn((program: string, args: string[], options?: unknown) => {
 +      spawned.calls.push([program, ...args])
++      spawned.options.push(options)
 +      const stdout = new EventEmitter()
 +      const stderr = new EventEmitter()
-+      const listeners = new Map<string, ((code: number) => void)[]>()
++      const listeners = new Map<string, ((code: number | null) => void)[]>()
++      const kill = vi.fn()
 +      spawned.child = {
-+        stdout, stderr,
++        stdout: stdout as unknown as Emitter,
++        stderr: stderr as unknown as Emitter,
++        kill,
 +        on: (event, cb) => { listeners.set(event, [...listeners.get(event) ?? [], cb]) },
 +      }
 +      Object.assign(spawned.child, {
-+        emitClose: (code: number) => { for (const cb of listeners.get('close') ?? []) cb(code) },
++        emitClose: (code: number | null) => { for (const cb of listeners.get('close') ?? []) cb(code) },
 +      })
 +      return spawned.child
 +    }),
@@ -342,6 +401,11 @@ index 00000000..bb7e661d
 +    relaunch: vi.fn(),
 +    ...overrides,
 +  })
++}
++
++/** Updater wired exactly like production: no `queryUpgrades` override, so the real dnf runner runs. */
++function realUpdater() {
++  return new LinuxPackageUpdater({ currentVersion: () => '0.2.2-alpha.2' })
 +}
 +
 +describe('encodeVersion', () => {
@@ -449,6 +513,35 @@ index 00000000..bb7e661d
 +    expect(details).not.toContain('第一条')
 +  })
 +
++  it('installs through pkexec with a closed stdin', () => {
++    const u = updater()
++    const installed = vi.fn()
++    u.on('installed', installed)
++    u.quitAndInstall()
++    expect(spawned.calls.at(-1)).toEqual(['pkexec', '/bin/sh'])
++    expect(spawned.options.at(-1)).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] })
++    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++    child.emitClose(0)
++    expect(installed).toHaveBeenCalledTimes(1)
++  })
++
++  it('kills a polkit helper that never returns', () => {
++    vi.useFakeTimers()
++    try {
++      const u = updater()
++      const errors: Error[] = []
++      u.on('error', (error) => errors.push(error as Error))
++      u.quitAndInstall()
++      const child = spawned.child as unknown as { kill: (signal?: string) => void }
++      vi.advanceTimersByTime(INSTALL_TIMEOUT_MS)
++      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
++      expect(errors).toHaveLength(1)
++      expect(errors[0]?.message).toContain('未返回')
++    } finally {
++      vi.useRealTimers()
++    }
++  })
++
 +  it('is unavailable without the helper', () => {
 +    expect(updater({ helperPath: '' }).available()).toBe(false)
 +    expect(updater().available()).toBe(true)
@@ -456,6 +549,44 @@ index 00000000..bb7e661d
 +
 +  it('encodes the installed version with its rpm release', () => {
 +    expect(currentLinuxVersion()).toMatch(/^0\.2\.2(?:-alpha\.2|-z\.|$)/)
++  })
++
++  it('runs dnf5 with a closed stdin and auto-confirms repository key imports', async () => {
++    const u = realUpdater()
++    const pending = u.checkForUpdates()
++    const child = spawned.child as unknown as {
++      stdout: { emit: (event: string, chunk: Buffer) => void }
++      emitClose: (code: number) => void
++    }
++    child.stdout.emit('data', Buffer.from('0.2.2~alpha.2-9\n'))
++    child.emitClose(0)
++    await expect(pending).resolves.toEqual({
++      updateInfo: { version: '0.2.2-alpha.2.9' }, isUpdateAvailable: true,
++    })
++    expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes',
++      '--queryformat', '%{evr}\n', '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
++    expect(spawned.options.at(-1)).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] })
++  })
++
++  it('kills a dnf5 query that never returns instead of leaving the check pending', async () => {
++    vi.useFakeTimers()
++    try {
++      const u = realUpdater()
++      const pending = u.checkForUpdates().catch((error: Error) => error)
++      const child = spawned.child as unknown as {
++        stderr: { emit: (event: string, chunk: Buffer) => void }
++        kill: (signal?: string) => void
++      }
++      child.stderr.emit('data', Buffer.from('等待仓库锁：另一个进程正在使用 dnf5\n'))
++      await vi.advanceTimersByTimeAsync(QUERY_TIMEOUT_MS)
++      const error = await pending
++      expect(error).toBeInstanceOf(Error)
++      expect((error as Error).message).toContain('未返回')
++      expect((error as Error).message).toContain('等待仓库锁')
++      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
++    } finally {
++      vi.useRealTimers()
++    }
 +  })
 +})
 diff --git a/apps/desktop/tests/update-schedule.spec.ts b/apps/desktop/tests/update-schedule.spec.ts
