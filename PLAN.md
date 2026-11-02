@@ -27,11 +27,11 @@
 
 - fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
 - 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
-- 补丁序列 `0001–0008`，每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
+- 补丁序列 `0001–0010`，每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
   - `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径；
   - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数，全部落在 `scripts/electron-builder-linux.mjs`，上游 builder 配置只留一处展开）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
   - `0003-sharp-isolation`：sharp 隔离（§3.6）；`0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退；
-  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）。`main.ts` 只留各模块的挂钩（净增为负）。
+  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）；`0009-update-ui`：应用内更新的对话框与设置页指示器（`update-coordinator.ts`、`update-presentation.ts`、`ui-settings-general`，含对应测试）；`0010-host-auth-cookie-prune`：启动前回收历史端口签发的 Host 认证 cookie（实现落在 `host-auth-cookies.ts`），避免累计约 70 条后请求头越过 Host 的 16 KB 上限、431 被误报为 Web 认证失败。`main.ts` 只留各模块的挂钩（净增为负）。
 - **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
 - 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
@@ -106,7 +106,7 @@
 DSH-Linux-Desktop/
 ├── PLAN.md
 ├── upstream-tag             # 钉住的上游 tag（fetch 与 CI 的唯一真源）
-├── patches/                 # 0001–0008，每个补丁一个模块，按编号顺序 git apply
+├── patches/                 # 0001–0010，每个补丁一个模块，按编号顺序 git apply
 ├── assets/tray-linux.png    # 二进制托盘图标（apply-patches.sh 放到位）
 ├── scripts/
 │   ├── fetch-upstream.sh    # 按 upstream-tag 浅克隆到 upstream/
