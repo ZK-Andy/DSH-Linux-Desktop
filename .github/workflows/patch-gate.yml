@@ -58,12 +58,17 @@ jobs:
       - name: Collect touched upstream tests
         id: specs
         run: |
-          specs=$(
+          changed=$(
             for p in $(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- patches/); do
               grep '^diff --git ' "$p" 2>/dev/null || true
             done \
-            | sed 's|diff --git a/.* b/||' \
-            | grep -E '(^|/)tests/.*\.spec\.tsx?$' | sort -u)
+            | sed 's|diff --git a/.* b/||' | sort -u)
+          specs=$(printf '%s\n' "$changed" | grep -E '(^|/)tests/.*\.spec\.tsx?$' || true)
+          # main.ts 的每处挂钩都改变 main 入口的启动/更新流程，由 main-startup.spec.ts 覆盖。
+          if printf '%s\n' "$changed" | grep -qx 'apps/desktop/src/main.ts'; then
+            specs=$(printf '%s\n%s\n' "$specs" 'apps/desktop/tests/main-startup.spec.ts')
+          fi
+          specs=$(printf '%s\n' "$specs" | sed '/^$/d' | sort -u)
           if [ -z "$specs" ]; then
             echo "本 PR 未触及上游测试文件，跳过 vitest。"
             echo "specs=skip" >> "$GITHUB_OUTPUT"
