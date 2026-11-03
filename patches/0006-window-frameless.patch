@@ -1,10 +1,10 @@
 变化理由：Linux 无边框窗口：自绘标题栏与窗口按钮、窗口状态 IPC、尺寸持久化接线，以及相关 main.ts 挂钩。
 diff --git a/apps/desktop/src/desktop-window.ts b/apps/desktop/src/desktop-window.ts
 new file mode 100644
-index 00000000..e194d369
+index 00000000..ef76a501
 --- /dev/null
 +++ b/apps/desktop/src/desktop-window.ts
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,147 @@
 +import { BrowserWindow, Menu, nativeTheme, shell } from 'electron'
 +import type { MenuItemConstructorOptions } from 'electron'
 +import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
@@ -152,7 +152,6 @@ index 00000000..e194d369
 +  }
 +  return window
 +}
-+
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
 index a3c5f5d9..c45a9816 100644
 --- a/apps/desktop/src/ipc.ts
@@ -1209,7 +1208,7 @@ index c1e4862f..a164e3ea 100644
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index cfe09530..4b4dc707 100644
+index cfe09530..e83be9fb 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 @@ -479,6 +479,19 @@
@@ -1232,7 +1231,7 @@ index cfe09530..4b4dc707 100644
  /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
     offset. WebKit-only: the Firefox path has no track to inset. */
  .scrollBody::-webkit-scrollbar-track {
-@@ -625,3 +638,12 @@
+@@ -625,3 +638,11 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
@@ -1244,7 +1243,6 @@ index cfe09530..4b4dc707 100644
 +  justify-content: flex-end;
 +  width: 100%;
 +}
-+
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 index 14602cbc..a5963c17 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
@@ -1291,7 +1289,7 @@ index 411c1296..9b54e59d 100644
    "files": [
      "locale/*.json",
 diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
-index fa1065dc..7da0dd65 100644
+index fa1065dc..4308bd2c 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.module.css
 +++ b/packages/client/ui-layout/src/client/AppFrame.module.css
 @@ -8,6 +8,19 @@
@@ -1354,7 +1352,7 @@ index fa1065dc..7da0dd65 100644
  .leadingSeat {
    position: absolute;
    top: 11px;
-@@ -386,3 +425,32 @@
+@@ -386,3 +425,31 @@
  .overlayLayer > * {
    pointer-events: auto;
  }
@@ -1386,7 +1384,6 @@ index fa1065dc..7da0dd65 100644
 +  top: 16px;
 +  bottom: 16px;
 +}
-+
 diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
 index 23e71c9c..4a20aad2 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.tsx
