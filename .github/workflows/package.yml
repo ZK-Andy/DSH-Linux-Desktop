@@ -74,7 +74,7 @@ jobs:
           restore-keys: |
             electron-
 
-      # Release 段从 tag 推：v0.2.2-alpha.2-2 → 2；分支/定时触发的包沿用默认 2。
+      # Release 段从 tag 推：v0.2.2-alpha.3-2 → 2；分支/定时触发的包沿用默认 2。
       - name: Resolve rpm release
         run: |
           release=$(printf '%s' "${GITHUB_REF_NAME:-}" | sed -n 's/^v.*-\([0-9][0-9]*\)$/\1/p')
