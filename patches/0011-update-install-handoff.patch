@@ -92,10 +92,10 @@ index 7c8ddc1a..7145bb30 100644
          requireCleanStop = false
 diff --git a/apps/desktop/src/update-install-handoff.ts b/apps/desktop/src/update-install-handoff.ts
 new file mode 100644
-index 00000000..22045bf6
+index 00000000..ae776c2f
 --- /dev/null
 +++ b/apps/desktop/src/update-install-handoff.ts
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,52 @@
 +/**
 + * Install handoff rules for the dnf-only update chain.
 + *
@@ -111,6 +111,8 @@ index 00000000..22045bf6
 +export type InstallChain = 'embedded' | 'linux-package'
 +
 +export interface InstallHandoff {
++  /** The chain these rules belong to; makes the two booleans below self-explanatory. */
++  readonly chain: InstallChain
 +  /** Whether the Host must stop (and lock its tasks) before the updater installs. */
 +  readonly stopsHost: boolean
 +  /** Whether a failed install must release the Host task lock it took. */
@@ -127,9 +129,9 @@ index 00000000..22045bf6
 + */
 +export function installHandoff(runtime: Pick<LinuxUpdateRuntime, 'enabled'> | undefined): InstallHandoff {
 +  if (runtime?.enabled?.() === true) {
-+    return { stopsHost: false, unlockOnFailure: () => false }
++    return { chain: 'linux-package', stopsHost: false, unlockOnFailure: () => false }
 +  }
-+  return { stopsHost: true, unlockOnFailure: (updateStoppedHost: boolean): boolean => !updateStoppedHost }
++  return { chain: 'embedded', stopsHost: true, unlockOnFailure: (updateStoppedHost: boolean): boolean => !updateStoppedHost }
 +}
 +
 +export interface LinuxInstallRelaunch {
@@ -148,10 +150,10 @@ index 00000000..22045bf6
 +}
 diff --git a/apps/desktop/tests/update-install-handoff.spec.ts b/apps/desktop/tests/update-install-handoff.spec.ts
 new file mode 100644
-index 00000000..b1230581
+index 00000000..74f3e446
 --- /dev/null
 +++ b/apps/desktop/tests/update-install-handoff.spec.ts
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,44 @@
 +import { describe, expect, it, vi } from 'vitest'
 +import {
 +  createLinuxInstallRelaunch, installHandoff,
@@ -160,6 +162,7 @@ index 00000000..b1230581
 +describe('install handoff', () => {
 +  it('keeps the Host running for the Linux package chain', () => {
 +    const handoff = installHandoff({ enabled: () => true })
++    expect(handoff.chain).toBe('linux-package')
 +    expect(handoff.stopsHost).toBe(false)
 +    expect(handoff.unlockOnFailure(false)).toBe(false)
 +    expect(handoff.unlockOnFailure(true)).toBe(false)
@@ -168,6 +171,7 @@ index 00000000..b1230581
 +  it('stops the Host and releases its lock for the embedded chain', () => {
 +    for (const runtime of [{ enabled: () => false }, {}, undefined]) {
 +      const handoff = installHandoff(runtime)
++      expect(handoff.chain).toBe('embedded')
 +      expect(handoff.stopsHost).toBe(true)
 +      expect(handoff.unlockOnFailure(false)).toBe(true)
 +      expect(handoff.unlockOnFailure(true)).toBe(false)
