@@ -1,13 +1,13 @@
-变化理由：更新安装交接：helper 在应用运行中执行，成功才停 Host 重启，失败保持运行并释放任务锁
+变化理由：更新安装交接——Linux 链全程不取 Host 任务锁，helper 在应用运行中执行，成功才重启；嵌入式链保持原有的取锁 / 停机 / 失败解锁语义。
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 7c8ddc1a..da2e66a5 100644
+index 7c8ddc1a..7145bb30 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -42,6 +42,7 @@ import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLoc
  import { claimDesktopSingleInstance } from './single-instance.ts'
  import { desktopUpdateChannel } from './update-channel.ts'
  import { DesktopUpdateCoordinator } from './update-coordinator.ts'
-+import { createLinuxInstallRelaunch, installStopsHost, installUnlocksHost } from './update-install-handoff.ts'
++import { createLinuxInstallRelaunch, installHandoff } from './update-install-handoff.ts'
  import { installedRpmReleaseSync } from './update-linux.ts'
  import { prepareDesktopUpdateWindow } from './update-window.ts'
  import { DesktopCommandManager } from './command-management.ts'
@@ -25,7 +25,7 @@ index 7c8ddc1a..da2e66a5 100644
 +    isQuitting: () => quitting,
 +  })
 +  const linuxUpdates = linuxUpdateRuntime({ relaunch: finishLinuxInstall })
-+  const linuxInstaller = linuxUpdates.enabled?.() === true
++  const linuxInstall = installHandoff(linuxUpdates)
 +
    const updateErrors = new WeakMap<DesktopUpdateState, Promise<void>>()
    const showUpdateFailure = (state: DesktopUpdateState): Promise<void> => {
@@ -63,7 +63,7 @@ index 7c8ddc1a..da2e66a5 100644
 -        const stopFailure = updateStopFailure as DesktopHostUncleanExitError | undefined
 -        if (stopFailure !== undefined) throw new DesktopUpdatePreparationError('stop-failed', locale.messages.updateStopFailed, stopFailure.message)
 -        await operationJournal?.drain(500)
-+        if (installStopsHost(linuxInstaller)) {
++        if (linuxInstall.stopsHost) {
 +          const stillActive = await host.updateTasks('lock')
 +          if (stillActive && !active) throw new DesktopUpdatePreparationError('tasks-changed', locale.messages.updateTasksChanged)
 +          mandatoryUI?.preparingRestart(stillActive)
@@ -86,16 +86,16 @@ index 7c8ddc1a..da2e66a5 100644
          operationReportsStopping = shuttingDown
          operationReportStop = undefined
 -        if (!updateStoppedHost) await host.updateTasks('unlock').catch((unlockError: unknown) => { console.error(unlockError) })
-+        if (installUnlocksHost(linuxInstaller, updateStoppedHost)) await host.updateTasks('unlock').catch((unlockError: unknown) => { console.error(unlockError) })
++        if (linuxInstall.unlockOnFailure(updateStoppedHost)) await host.updateTasks('unlock').catch((unlockError: unknown) => { console.error(unlockError) })
          throw error
        } finally {
          requireCleanStop = false
 diff --git a/apps/desktop/src/update-install-handoff.ts b/apps/desktop/src/update-install-handoff.ts
 new file mode 100644
-index 00000000..3cc8a08a
+index 00000000..22045bf6
 --- /dev/null
 +++ b/apps/desktop/src/update-install-handoff.ts
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,50 @@
 +/**
 + * Install handoff rules for the dnf-only update chain.
 + *
@@ -105,14 +105,31 @@ index 00000000..3cc8a08a
 + * Keeping the rules here lets `main.ts` stay a wiring site.
 + */
 +
-+/** Whether the Host must stop (and lock its tasks) before the updater installs. */
-+export function installStopsHost(linuxInstaller: boolean): boolean {
-+  return !linuxInstaller
++import type { LinuxUpdateRuntime } from './linux-updates.ts'
++
++/** The install chain this process runs. */
++export type InstallChain = 'embedded' | 'linux-package'
++
++export interface InstallHandoff {
++  /** Whether the Host must stop (and lock its tasks) before the updater installs. */
++  readonly stopsHost: boolean
++  /** Whether a failed install must release the Host task lock it took. */
++  readonly unlockOnFailure: (updateStoppedHost: boolean) => boolean
 +}
 +
-+/** Whether a failed install must release the Host task lock it took. */
-+export function installUnlocksHost(linuxInstaller: boolean, updateStoppedHost: boolean): boolean {
-+  return !linuxInstaller && !updateStoppedHost
++/**
++ * Derives the handoff rules from the runtime the wiring site built.
++ *
++ * Taking the runtime instead of a boolean keeps `main.ts` free of an inversion that tests could
++ * not see: the Linux runtime carries `enabled`, the embedded one does not.
++ * @param runtime - Updater runtime returned by `linuxUpdateRuntime`.
++ * @returns Rules for this process's install chain.
++ */
++export function installHandoff(runtime: Pick<LinuxUpdateRuntime, 'enabled'> | undefined): InstallHandoff {
++  if (runtime?.enabled?.() === true) {
++    return { stopsHost: false, unlockOnFailure: () => false }
++  }
++  return { stopsHost: true, unlockOnFailure: (updateStoppedHost: boolean): boolean => !updateStoppedHost }
 +}
 +
 +export interface LinuxInstallRelaunch {
@@ -131,25 +148,30 @@ index 00000000..3cc8a08a
 +}
 diff --git a/apps/desktop/tests/update-install-handoff.spec.ts b/apps/desktop/tests/update-install-handoff.spec.ts
 new file mode 100644
-index 00000000..6dca8b81
+index 00000000..b1230581
 --- /dev/null
 +++ b/apps/desktop/tests/update-install-handoff.spec.ts
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,42 @@
 +import { describe, expect, it, vi } from 'vitest'
 +import {
-+  createLinuxInstallRelaunch, installStopsHost, installUnlocksHost,
++  createLinuxInstallRelaunch, installHandoff,
 +} from '../src/update-install-handoff.ts'
 +
 +describe('install handoff', () => {
-+  it('stops the Host only for the embedded update chain', () => {
-+    expect(installStopsHost(true)).toBe(false)
-+    expect(installStopsHost(false)).toBe(true)
++  it('keeps the Host running for the Linux package chain', () => {
++    const handoff = installHandoff({ enabled: () => true })
++    expect(handoff.stopsHost).toBe(false)
++    expect(handoff.unlockOnFailure(false)).toBe(false)
++    expect(handoff.unlockOnFailure(true)).toBe(false)
 +  })
 +
-+  it('unlocks tasks only on the chain that took the lock and did not stop the Host', () => {
-+    expect(installUnlocksHost(true, false)).toBe(false)
-+    expect(installUnlocksHost(false, false)).toBe(true)
-+    expect(installUnlocksHost(false, true)).toBe(false)
++  it('stops the Host and releases its lock for the embedded chain', () => {
++    for (const runtime of [{ enabled: () => false }, {}, undefined]) {
++      const handoff = installHandoff(runtime)
++      expect(handoff.stopsHost).toBe(true)
++      expect(handoff.unlockOnFailure(false)).toBe(true)
++      expect(handoff.unlockOnFailure(true)).toBe(false)
++    }
 +  })
 +
 +  it('relaunches the upgraded build before quitting', () => {
