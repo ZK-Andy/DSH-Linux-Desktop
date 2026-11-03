@@ -1,0 +1,77 @@
+变化理由：更新安装交接：helper 在应用运行中执行，成功才停 Host 重启，失败保持运行并释放任务锁
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 7c8ddc1a..46712969 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -502,6 +502,14 @@ async function main(): Promise<void> {
+     else if (!shuttingDown) backendReady = state.phase === 'ready'
+   })
+ 
++  // Linux installs through the package manager, so the coordinator talks to a release-manifest
++  // updater whose install step is a polkit-authorized helper; the embedded updater is never used.
++  // The helper upgrades the installed rpm while the application keeps running: only a successful
++  // helper stops the application for the restart, a failed one must leave it running.
++  const finishLinuxInstall = (): void => { app.relaunch(); quitWithoutConfirmation() }
++  const linuxUpdates = linuxUpdateRuntime({ relaunch: finishLinuxInstall })
++  const linuxInstaller = linuxUpdates.enabled?.() === true
++
+   const updateErrors = new WeakMap<DesktopUpdateState, Promise<void>>()
+   const showUpdateFailure = (state: DesktopUpdateState): Promise<void> => {
+     if (state.phase !== 'error') return Promise.resolve()
+@@ -528,6 +536,12 @@ async function main(): Promise<void> {
+         fileDragStopped = false
+       }
+       const restoreHost = state.failedOperation === 'install' && updateStoppedHost && !quitting
++      if (state.failedOperation === 'install' && linuxInstaller) {
++        // The helper failed before any installer handshake: the Host still runs and holds the
++        // admission lock this flow took, so release it instead of recovering a stopped Host.
++        const host = backend.host
++        if (host !== undefined) void host.updateTasks('unlock').catch((error: unknown) => { console.error(error) })
++      }
+       if (state.failedOperation === 'install' && !quitting) {
+         operationReportsStopping = shuttingDown
+         operationReportStop = undefined
+@@ -585,9 +599,6 @@ async function main(): Promise<void> {
+ 
+   const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
+   const updateChannel = desktopUpdateChannel(manifest)
+-  // Linux installs through the package manager, so the coordinator talks to a release-manifest
+-  // updater whose install step is a polkit-authorized helper; the embedded updater is never used.
+-  const linuxUpdates = linuxUpdateRuntime()
+ 
+   const updates = new DesktopUpdateCoordinator(
+     publishUpdate,
+@@ -621,19 +632,21 @@ async function main(): Promise<void> {
+         const stillActive = await host.updateTasks('lock')
+         if (stillActive && !active) throw new DesktopUpdatePreparationError('tasks-changed', locale.messages.updateTasksChanged)
+         mandatoryUI?.preparingRestart(stillActive)
+-        // The embedded Platform document holds credentials issued by the Host that is about to stop.
+-        await platformView.closeAndWait()
+-        await disposeFileDrag().catch((error: unknown) => { console.error(error) })
+-        requireCleanStop = true
+-        updateStopFailure = undefined
+-        await Promise.all([backend.stop(), stopOperationReports()])
+-        updateStoppedHost = true
+-        // The backend's async cleanup callback can assign this after the reset above.
+-        const stopFailure = updateStopFailure as DesktopHostUncleanExitError | undefined
+-        if (stopFailure !== undefined) throw new DesktopUpdatePreparationError('stop-failed', locale.messages.updateStopFailed, stopFailure.message)
+-        await operationJournal?.drain(500)
++        if (!linuxInstaller) {
++          // The embedded Platform document holds credentials issued by the Host that is about to stop.
++          await platformView.closeAndWait()
++          await disposeFileDrag().catch((error: unknown) => { console.error(error) })
++          requireCleanStop = true
++          updateStopFailure = undefined
++          await Promise.all([backend.stop(), stopOperationReports()])
++          updateStoppedHost = true
++          // The backend's async cleanup callback can assign this after the reset above.
++          const stopFailure = updateStopFailure as DesktopHostUncleanExitError | undefined
++          if (stopFailure !== undefined) throw new DesktopUpdatePreparationError('stop-failed', locale.messages.updateStopFailed, stopFailure.message)
++          await operationJournal?.drain(500)
++          shellInstallerOwnsQuit = true
++        }
+         updateJournal?.action('install-confirmed')
+-        shellInstallerOwnsQuit = true
+       } catch (error) {
+         operationReportsStopping = shuttingDown
+         operationReportStop = undefined
