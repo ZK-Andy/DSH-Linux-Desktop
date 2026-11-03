@@ -154,10 +154,10 @@ index 00000000..e194d369
 +}
 +
 diff --git a/apps/desktop/src/ipc.ts b/apps/desktop/src/ipc.ts
-index e62a84f0..8cbde91b 100644
+index a3c5f5d9..c45a9816 100644
 --- a/apps/desktop/src/ipc.ts
 +++ b/apps/desktop/src/ipc.ts
-@@ -36,6 +36,9 @@ export const DESKTOP_IPC = {
+@@ -39,6 +39,9 @@ export const DESKTOP_IPC = {
    windowFullscreen: 'dsh-desktop:window-fullscreen',
    windowsAppearance: 'dsh-desktop:windows-appearance',
    windowsMenu: 'dsh-desktop:windows-menu',
@@ -167,7 +167,7 @@ index e62a84f0..8cbde91b 100644
  } as const
  
  /** Desktop release update state rendered by desktop-owned UI. */
-@@ -71,9 +74,29 @@ export interface DesktopUpdatePresentation {
+@@ -74,9 +77,29 @@ export interface DesktopUpdatePresentation {
    readonly phase: DesktopUpdateState['phase']
    readonly version?: string
    readonly percent?: number
@@ -196,8 +196,8 @@ index e62a84f0..8cbde91b 100644
 +
  /** Product documents cannot supply update versions, package URLs, or installation authorization. */
  export interface DshDesktopProductApi {
-   readonly protocolVersion: 1
-@@ -81,6 +104,8 @@ export interface DshDesktopProductApi {
+   readonly fileActions: DesktopFileActions
+@@ -85,6 +108,8 @@ export interface DshDesktopProductApi {
    readonly fileDrag: DesktopFileDrag
    readonly keyboard: DesktopKeyboardApi
    readonly shortcuts: DesktopShortcutsApi
@@ -336,16 +336,17 @@ index 00000000..97ddbcaa
 +  })
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 4770fe83..d6e2a3f4 100644
+index d8d0e30c..5e6956eb 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
-@@ -1,5 +1,4 @@
+@@ -1,6 +1,5 @@
+ import { installFileActions } from './file-actions.ts'
  import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/types'
 -import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
  /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
  
  import { access, readFile, writeFile } from 'node:fs/promises'
-@@ -32,10 +31,16 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
+@@ -33,10 +32,16 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
  import { DesktopBackendController } from './backend-controller.ts'
  import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
  import { readDeviceInfo } from './device-info.ts'
@@ -362,7 +363,7 @@ index 4770fe83..d6e2a3f4 100644
  import { prepareDesktopUpdateWindow } from './update-window.ts'
  import { DesktopCommandManager } from './command-management.ts'
  import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
-@@ -256,112 +261,7 @@ function platformLoginUrl(authorizeUrl: string): string {
+@@ -257,112 +262,7 @@ function platformLoginUrl(authorizeUrl: string): string {
  }
  
  function createWindow(preload: string, show = false, primary = false): BrowserWindow {
@@ -476,7 +477,7 @@ index 4770fe83..d6e2a3f4 100644
  }
  
  async function main(): Promise<void> {
-@@ -455,8 +355,14 @@ async function main(): Promise<void> {
+@@ -456,8 +356,14 @@ async function main(): Promise<void> {
    // Copy comes from the same locale as the update prompts so the dialog
    // chrome and its content never mix languages.
    const showAbout = async (): Promise<void> => {
@@ -492,7 +493,7 @@ index 4770fe83..d6e2a3f4 100644
        buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
    }
    const commandManager = new DesktopCommandManager({
-@@ -676,6 +582,10 @@ async function main(): Promise<void> {
+@@ -677,6 +583,10 @@ async function main(): Promise<void> {
  
    const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
    const updateChannel = desktopUpdateChannel(manifest)
@@ -503,7 +504,7 @@ index 4770fe83..d6e2a3f4 100644
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
      async () => {
-@@ -731,7 +641,9 @@ async function main(): Promise<void> {
+@@ -732,7 +642,9 @@ async function main(): Promise<void> {
        }
        return true
      },
@@ -514,7 +515,7 @@ index 4770fe83..d6e2a3f4 100644
      (success, reason) => { void track('desktop_upgrade_download_result', { is_success: success, ...reason === undefined ? {} : { error_reason: reason } }) },
      updateChannel,
    )
-@@ -765,8 +677,10 @@ async function main(): Promise<void> {
+@@ -766,8 +678,10 @@ async function main(): Promise<void> {
        url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
@@ -527,7 +528,7 @@ index 4770fe83..d6e2a3f4 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -900,6 +814,9 @@ async function main(): Promise<void> {
+@@ -902,6 +816,9 @@ async function main(): Promise<void> {
        policyAuth?.focus(); updateDialog.focus()
      }
      let failedOperation: 'check' | 'download' | 'install' = 'check'
@@ -537,7 +538,7 @@ index 4770fe83..d6e2a3f4 100644
      promptOperation ??= Promise.resolve().then(async () => {
        if (manual) updateJournal?.action('check-requested')
        const joinedPolicyAuthentication = authenticationOperation !== undefined
-@@ -1084,15 +1001,26 @@ async function main(): Promise<void> {
+@@ -1089,15 +1006,26 @@ async function main(): Promise<void> {
      tray?.relabel()
    }
    refreshApplicationMenu()
@@ -569,7 +570,7 @@ index 4770fe83..d6e2a3f4 100644
      ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
        locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
      : undefined
-@@ -1106,10 +1034,11 @@ async function main(): Promise<void> {
+@@ -1111,10 +1039,11 @@ async function main(): Promise<void> {
      focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
      // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
      // size directly, where the 1024 px PNG would be scaled down by GDI.
@@ -583,7 +584,7 @@ index 4770fe83..d6e2a3f4 100644
      ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
        assertDesktopSender(event, ['app'])
        if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1150,10 +1079,16 @@ async function main(): Promise<void> {
+@@ -1155,10 +1084,16 @@ async function main(): Promise<void> {
        // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
        const validColor = (value: unknown): value is string => typeof value === 'string'
          && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
@@ -601,7 +602,7 @@ index 4770fe83..d6e2a3f4 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1164,11 +1099,13 @@ async function main(): Promise<void> {
+@@ -1169,11 +1104,13 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -617,7 +618,7 @@ index 4770fe83..d6e2a3f4 100644
      // Closing hides: the page and the Host keep running, and the next show resumes the same document.
      window.on('close', (event) => {
        if (quitting || shellInstallerOwnsQuit || sessionEnding) return
-@@ -1422,7 +1359,10 @@ async function main(): Promise<void> {
+@@ -1427,7 +1364,10 @@ async function main(): Promise<void> {
        preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
        allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
        policy: () => policy.state, update: () => updates.state,
@@ -630,10 +631,10 @@ index 4770fe83..d6e2a3f4 100644
      })
      void mandatoryPolicy.check('launch').then((state) => {
 diff --git a/apps/desktop/src/preload-app.ts b/apps/desktop/src/preload-app.ts
-index c9937a30..5e5b629f 100644
+index 26266b4f..96b6e7e9 100644
 --- a/apps/desktop/src/preload-app.ts
 +++ b/apps/desktop/src/preload-app.ts
-@@ -7,6 +7,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
+@@ -8,6 +8,8 @@ import { PLATFORM_IPC } from './platform-ipc.ts'
  import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
  import { syncNativeTheme } from './preload-theme.ts'
  import { syncWindowsAppearance } from './preload-windows.ts'
@@ -642,10 +643,10 @@ index c9937a30..5e5b629f 100644
  import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
  import { createDesktopBrowserBridge } from './preload-browser.ts'
  import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
-@@ -14,6 +16,9 @@ import type { FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
- function createProductApi(): DshDesktopProductApi {
-   return {
-     protocolVersion: 1,
+@@ -20,6 +22,9 @@ function createProductApi(): DshDesktopProductApi {
+       readClipboardImage: url => ipcRenderer.invoke(DESKTOP_IPC.clipboardImageRead, url) as
+         Promise<{ bytes: Uint8Array; mediaType: string }>,
+     },
 +    // Frameless Linux windows render their controls in the page; the API is the
 +    // command channel to the main process (main.ts validates every sender).
 +    ...(process.argv.includes(FRAME_ARGUMENT) ? { windowControls: createLinuxWindowControls() } : {}),
@@ -759,10 +760,10 @@ index 61fda9e3..364f5805 100644
    let active = true
    const disposeHandlers = (): void => {
 diff --git a/apps/desktop/tests/expected/application-menu-en-US.json b/apps/desktop/tests/expected/application-menu-en-US.json
-index 4e3c9819..ecd6dbd1 100644
+index 71b281c6..f7bd285c 100644
 --- a/apps/desktop/tests/expected/application-menu-en-US.json
 +++ b/apps/desktop/tests/expected/application-menu-en-US.json
-@@ -19,6 +19,6 @@
+@@ -39,6 +39,6 @@
    },
    {
      "role": "quit",
@@ -771,10 +772,10 @@ index 4e3c9819..ecd6dbd1 100644
    }
  ]
 diff --git a/apps/desktop/tests/expected/application-menu-zh-CN.json b/apps/desktop/tests/expected/application-menu-zh-CN.json
-index f39b2d88..e4801735 100644
+index 472aa48a..3e769ebb 100644
 --- a/apps/desktop/tests/expected/application-menu-zh-CN.json
 +++ b/apps/desktop/tests/expected/application-menu-zh-CN.json
-@@ -19,6 +19,6 @@
+@@ -39,6 +39,6 @@
    },
    {
      "role": "quit",
@@ -783,7 +784,7 @@ index f39b2d88..e4801735 100644
    }
  ]
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index 20325642..f27bc95c 100644
+index 3b1e63e0..df704c66 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -813,7 +814,7 @@ index 20325642..f27bc95c 100644
      getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
      setBounds() {}
      setTitle = vi.fn()
-@@ -323,6 +329,7 @@ vi.mock('electron', () => ({
+@@ -324,6 +330,7 @@ vi.mock('electron', () => ({
    powerMonitor: harness.powerMonitor,
    Tray: harness.FakeTray,
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -821,7 +822,7 @@ index 20325642..f27bc95c 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-@@ -587,7 +594,7 @@ describe('desktop main startup', () => {
+@@ -625,7 +632,7 @@ describe('desktop main startup', () => {
      const zh = locale === 'zh-CN'
      expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
        type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
@@ -830,7 +831,7 @@ index 20325642..f27bc95c 100644
      }))
      // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
      harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
-@@ -868,12 +875,40 @@ describe('desktop main startup', () => {
+@@ -906,12 +913,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
@@ -871,7 +872,7 @@ index 20325642..f27bc95c 100644
    it('serves packaged shell documents instead of rejecting the shell origin', async () => {
      const { serveWebDocument } = await import('../src/web-document.ts')
      vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))
-@@ -909,14 +944,18 @@ describe('desktop main startup', () => {
+@@ -947,14 +982,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
@@ -944,7 +945,7 @@ index e59b7ebb..cc055f0a 100644
    syncWindowsAppearance()
    expect(send).not.toHaveBeenCalled()
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
-index 79152482..3a45e85d 100644
+index 4ae8743e..d3411d57 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts
 +++ b/apps/desktop/tests/welcome-startup.spec.ts
 @@ -74,6 +74,7 @@ vi.mock('electron', () => ({
@@ -955,7 +956,7 @@ index 79152482..3a45e85d 100644
      isDestroyed() { return false }
      isMinimized() { return false }
      restore = vi.fn()
-@@ -97,12 +98,16 @@ vi.mock('electron', () => ({
+@@ -98,12 +99,16 @@ vi.mock('electron', () => ({
    dialog: { showErrorBox: vi.fn(), showMessageBox: vi.fn() },
    Menu: { buildFromTemplate: state.menu, setApplicationMenu: vi.fn() },
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -1163,7 +1164,7 @@ index 5f4786ac..6cc73a52 100644
  } catch (reason) {
    reportFailure(reason)
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
-index b3b07c2b..e8f17cdf 100644
+index c1e4862f..a164e3ea 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx
 @@ -1,5 +1,6 @@
@@ -1173,20 +1174,20 @@ index b3b07c2b..e8f17cdf 100644
  import type { ConversationHeaderProps } from '../contract/slots.ts'
  import { conversationPhase } from '../contract/snapshot.ts'
  import css from './ConversationRoot.module.css'
-@@ -20,7 +21,7 @@ export function ConversationHeader({ sessionId, useSession, useConversation, ren
-         {renderSlot('conversation.header.leading', {})}
-       </div>
+@@ -22,7 +23,7 @@ export function ConversationHeader({ sessionId, useSession, useConversation, ren
        {sessionId === undefined
+         // The empty title row keeps the blank-Session header height, so the
+         // Hero centers its input card at the same offset before a Session exists.
 -        ? <div className={css.titleRow} />
 +        ? <div className={css.titleRow}><span className={css.blankWindowControls}><WindowControls seat="header" /></span></div>
          : renderSlot('conversation.session.header', { hideChrome: blank })}
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index ac6cb69f..703d0aff 100644
+index cfe09530..4b4dc707 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-@@ -486,6 +486,19 @@
+@@ -479,6 +479,19 @@
    scrollbar-gutter: stable;
  }
  
@@ -1206,7 +1207,7 @@ index ac6cb69f..703d0aff 100644
  /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
     offset. WebKit-only: the Firefox path has no track to inset. */
  .scrollBody::-webkit-scrollbar-track {
-@@ -628,3 +641,12 @@
+@@ -625,3 +638,12 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
@@ -1220,7 +1221,7 @@ index ac6cb69f..703d0aff 100644
 +}
 +
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
-index deaddcf7..eee89220 100644
+index 14602cbc..a5963c17 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 @@ -3,6 +3,7 @@
@@ -1231,7 +1232,7 @@ index deaddcf7..eee89220 100644
  import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
  import type { SessionId } from '@deepseek-ai/dsh-session/types'
  import type {
-@@ -212,6 +213,7 @@ export function ConversationSessionHeader({
+@@ -213,6 +214,7 @@ export function ConversationSessionHeader({
          )}
          <div className={css.headerCorner} data-conversation-header-corner="">
            {renderSlot('conversation.session.header.corner', {})}
@@ -1240,7 +1241,7 @@ index deaddcf7..eee89220 100644
        </div>
        {showTabs && (
 diff --git a/packages/client/ui-layout/package.json b/packages/client/ui-layout/package.json
-index b0205ffa..9c2b64f0 100644
+index 411c1296..9b54e59d 100644
 --- a/packages/client/ui-layout/package.json
 +++ b/packages/client/ui-layout/package.json
 @@ -47,16 +47,17 @@
@@ -1265,10 +1266,10 @@ index b0205ffa..9c2b64f0 100644
    "files": [
      "locale/*.json",
 diff --git a/packages/client/ui-layout/src/client/AppFrame.module.css b/packages/client/ui-layout/src/client/AppFrame.module.css
-index 5b71ebec..1b2a1710 100644
+index fa1065dc..7da0dd65 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.module.css
 +++ b/packages/client/ui-layout/src/client/AppFrame.module.css
-@@ -7,6 +7,19 @@
+@@ -8,6 +8,19 @@
    background: var(--dsw-alias-bg-base);
  }
  
@@ -1285,11 +1286,11 @@ index 5b71ebec..1b2a1710 100644
 +  padding: 0 4px 4px 0;
 +}
 +
- /* Only a discrete collapse/expand toggle eases the tracks (the TSX holds
+ /* Only discrete collapse/expand and fold changes ease the tracks (the TSX holds
     data-animating across the toggle on the deepsuite sider curve). Steady-state
     tracks move only with the viewport, and those updates must land instantly:
-@@ -69,6 +82,12 @@
-   overflow: hidden;
+@@ -82,6 +95,12 @@
+   min-height: 0;
  }
  
 +/* Linux frameless drag strip above the content column (ZCode
@@ -1301,7 +1302,7 @@ index 5b71ebec..1b2a1710 100644
  /* macOS desktop: the frame goes transparent so window vibrancy reaches the
     sidebar column, which keeps only a translucent tint; the centre paints the
     base background itself to stay opaque. The sidebar/centre separator moves
-@@ -204,6 +223,26 @@
+@@ -217,6 +236,26 @@
     lights (centre y ≈ 24). Sits above column content, below frame overlays
     (20) and the fullscreen right panel (40). The box subtracts itself from any
     window drag row beneath (Electron app-regions are geometry, not stacking). */
@@ -1328,7 +1329,7 @@ index 5b71ebec..1b2a1710 100644
  .leadingSeat {
    position: absolute;
    top: 11px;
-@@ -288,3 +327,32 @@
+@@ -386,3 +425,32 @@
  .overlayLayer > * {
    pointer-events: auto;
  }
@@ -1362,33 +1363,38 @@ index 5b71ebec..1b2a1710 100644
 +}
 +
 diff --git a/packages/client/ui-layout/src/client/AppFrame.tsx b/packages/client/ui-layout/src/client/AppFrame.tsx
-index 56149474..01f884fc 100644
+index 23e71c9c..4a20aad2 100644
 --- a/packages/client/ui-layout/src/client/AppFrame.tsx
 +++ b/packages/client/ui-layout/src/client/AppFrame.tsx
-@@ -22,8 +22,12 @@ import type {
- import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
+@@ -22,6 +22,7 @@ import type {
+ import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_DRAWER_BREAKPOINT } from './columns.ts'
  import { DocumentTitle } from './DocumentTitle.tsx'
  import type { createLayoutStore } from './stores.ts'
 +import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
  import css from './AppFrame.module.css'
  
+ /** Browser posture supplied by the root registration. */
+@@ -29,6 +30,9 @@ export interface AppFrameInjected {
+   hooks: { foldedLandscape: HostObservable<boolean> }
+ }
+ 
 +/** Window event the desktop startup shell waits for (apps/web/index.html). */
 +const STARTUP_READY_EVENT = 'dsh-workspace-ready'
 +
- /** Full composed props: runtime share + child-slot render share + store share. */
+ /** Full composed props: runtime, child slots, store, locale, and injected posture. */
  export type AppFrameProps =
    & PropsRuntime<'root'>
-@@ -33,7 +37,16 @@ export type AppFrameProps =
+@@ -39,7 +43,16 @@ export type AppFrameProps =
  
  /** Center column grid item (session-body building block). */
- function CenterColumn(props: { children?: ReactNode }) {
--  return <div className={css.centerCol}>{props.children}</div>
+ function CenterColumn(props: { children?: ReactNode; inert: boolean }) {
+-  return <div className={css.centerCol} {...{ inert: props.inert ? '' : undefined }}>{props.children}</div>
 +  // Linux frameless: ZCode keeps a 4px drag strip above the content column
 +  // (WorkspaceShellLayout.tsx:2559). It is part of the column, not the window
 +  // chrome, so the header below it keeps its own layout.
 +  const frameless = document.documentElement.hasAttribute('data-desktop-frame')
 +  return (
-+    <div className={css.centerCol}>
++    <div className={css.centerCol} {...{ inert: props.inert ? '' : undefined }}>
 +      {frameless ? <div className={css.desktopDragStrip} data-window-drag /> : null}
 +      {props.children}
 +    </div>
@@ -1396,9 +1402,9 @@ index 56149474..01f884fc 100644
  }
  
  /** Subscribe to the main key without subscribing the column frame to each panel id. */
-@@ -130,6 +143,18 @@ export function AppFrame({
-   const frameRef = useRef<HTMLDivElement | null>(null)
+@@ -140,6 +153,18 @@ export function AppFrame({
    const viewport = layoutInfo.viewportWidth
+   const foldedLandscape = useFoldedLandscape(matches => matches)
  
 +  // The desktop startup shell (apps/web/index.html) lifts its logo cover only
 +  // after this frame painted its first commit: module boot finishing is not the
@@ -1415,30 +1421,25 @@ index 56149474..01f884fc 100644
    // Track the frame's own box (not the window): rAF-throttled ResizeObserver.
    useLayoutEffect(() => {
      const el = frameRef.current
-@@ -166,8 +191,13 @@ export function AppFrame({
+@@ -185,7 +210,11 @@ export function AppFrame({
    // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
    // the Windows caption row; neither platform keeps an icon rail.
    const darwin = document.documentElement.dataset.platform === 'darwin'
--  const collapsedWidth = darwin
--    || document.documentElement.hasAttribute('data-windows-titlebar') ? 0 : SIDEBAR_COLLAPSED
+-  const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : SIDEBAR_COLLAPSED
 +  // Linux frameless: the sidebar collapses into the shell's 4px inset instead
 +  // of keeping the icon rail (ZCode WorkspaceShellLayout.tsx:452 keeps 4px of
 +  // panel inset when the shell owns the inset).
 +  const desktopFrame = document.documentElement.hasAttribute('data-desktop-frame')
-+  const collapsedWidth = darwin || document.documentElement.hasAttribute('data-windows-titlebar')
-+    ? 0
-+    : desktopFrame ? 4 : SIDEBAR_COLLAPSED
++  const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : desktopFrame ? 4 : SIDEBAR_COLLAPSED
    // Opening on a narrow frame collapses the left sidebar. Eligibility must
    // include that space before the occupant's first shown report arrives.
-   const normal = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference, collapsedWidth)
-@@ -253,7 +283,23 @@ export function AppFrame({
-   // row (ui-sidebar). AppFrame.module.css publishes the matching
-   // --dsh-frame-leading-clearance under the same collapsed condition.
+   const normal = computeColumns(
+@@ -283,7 +312,21 @@ export function AppFrame({
+   // Windows native captions keep their controls in the caption row instead.
+   // AppFrame.module.css reserves clearance for the seat's rendered controls.
    const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
--  const leadingMounted = darwin && sidebarCollapsed
-+  // A collapsed Linux frame has no rail: the reopen controls take the same
-+  // leading seat macOS uses beside its traffic lights.
-+  const leadingMounted = (darwin || desktopFrame) && sidebarCollapsed
+-  const leadingMounted = drawer || darwin && sidebarCollapsed
++  const leadingMounted = drawer || (darwin || desktopFrame) && sidebarCollapsed
 +
 +  // The frameless shell has three control seats, mirroring ZCode: an open right
 +  // panel owns the window's top-right corner through its own strip chrome
@@ -1456,14 +1457,14 @@ index 56149474..01f884fc 100644
  
    return (
      <div
-@@ -277,6 +323,7 @@ export function AppFrame({
+@@ -309,6 +352,7 @@ export function AppFrame({
          useSessions={useSessions}
          usePanelInfo={usePanelInfo}
        />
 +      {desktopFrame ? <WindowControls seat="overlay" /> : null}
-       <div className={css.sidebarCol}>
-         {sidebar}
-       </div>
+       {drawer && <div className={css.drawerMask} data-sidebar-mask aria-hidden="true"
+         onClick={drawerOpen ? () => { actions.toggleSidebar() } : undefined} />}
+       <div className={css.sidebarCol}
 diff --git a/packages/client/ui-primitives/src/WindowControls.module.css b/packages/client/ui-primitives/src/WindowControls.module.css
 new file mode 100644
 index 00000000..2778ba03
@@ -1633,29 +1634,28 @@ index 00000000..9ca4c533
 +  )
 +}
 diff --git a/packages/client/ui-primitives/src/index.ts b/packages/client/ui-primitives/src/index.ts
-index 67b77dde..637da161 100644
+index 13f99869..1dfca319 100644
 --- a/packages/client/ui-primitives/src/index.ts
 +++ b/packages/client/ui-primitives/src/index.ts
-@@ -137,3 +137,6 @@ export type { ImageLightboxLabels } from './ImageLightbox.tsx'
- export { QuotePreview } from './QuotePreview.tsx'
- export type { QuotePreviewProps, QuotePreviewRemoval } from './QuotePreview.tsx'
+@@ -139,3 +139,5 @@ export type { QuotePreviewProps, QuotePreviewRemoval } from './QuotePreview.tsx'
  export { formatQuoteText } from './markdown/quote-text.ts'
-+
+ 
+ export type { MarkdownMenuTarget } from './markdown/MarkdownDelegate.tsx'
 +export { WindowControls } from './WindowControls.tsx'
 +export type { WindowControlsSeat } from './WindowControls.tsx'
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
-index 0f39af5d..9e406c4d 100644
+index e0182a61..5981d3f7 100644
 --- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 +++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
-@@ -50,6 +50,7 @@ import { canCloseTab } from '../stores.ts'
+@@ -51,6 +51,7 @@ import { canCloseTab } from '../stores.ts'
  import type { TabOccurrence } from '../tab-domain.ts'
  import type { SidebarRightTabNavigation } from '../contract/slots.ts'
  import type { TabHookContext } from '../tab-info.ts'
 +import { WindowControls } from '@deepseek-ai/dsh-client-ui-primitives'
+ import { flashPane } from './flash.ts'
  import css from './SidebarRight.module.css'
  
- /** The store share the seat receives. */
-@@ -293,6 +294,7 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
+@@ -301,6 +302,7 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
            <IconPanelLeftOutlineRegular className={css.collapseGlyph} />
          </button>
        </Tooltip>
@@ -1664,10 +1664,10 @@ index 0f39af5d..9e406c4d 100644
    )
  }
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
-index 2560e375..1b9b76d3 100644
+index 387b6f80..81f51426 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
-@@ -53,7 +53,13 @@
+@@ -57,7 +57,13 @@
    -webkit-app-region: no-drag;
  }
  
@@ -1682,7 +1682,7 @@ index 2560e375..1b9b76d3 100644
    height: 0;
  }
  
-@@ -204,6 +210,11 @@
+@@ -208,6 +214,11 @@
    justify-content: flex-start;
  }
  
@@ -1695,10 +1695,10 @@ index 2560e375..1b9b76d3 100644
     tucks 12px back under it, still clear of the toggle (28px control centered
     in the strip ends at y 40). */
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-index c4083d22..419585c6 100644
+index f03ecc32..46812b4a 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-@@ -239,6 +239,10 @@ export function SidebarRoot({
+@@ -253,6 +253,10 @@ export function SidebarRoot({
    }
  
    const darwinDesktop = isDarwinDesktop()
@@ -1709,18 +1709,24 @@ index c4083d22..419585c6 100644
    // Rail resting state is the whale mark; hovering swaps in the panel icon
    // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
    // panel icon.
-@@ -263,31 +267,7 @@ export function SidebarRoot({
+@@ -279,37 +283,7 @@ export function SidebarRoot({
      </Tooltip>
    )
  
 -  return (
 -    <div
 -      ref={column}
+-      onFocusCapture={(event) => { sidebarFocus.current = event.target }}
+-      role={drawer ? 'dialog' : undefined}
+-      data-shortcut-modal={drawer ? 'sidebar' : undefined}
+-      aria-modal={drawer && !collapsed ? true : undefined}
+-      aria-label={drawer ? t('navigation.label') : undefined}
+-      tabIndex={drawer ? -1 : undefined}
 -      className={clsx(
--        css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
--        collapsed && wide && css.fading, !pointerInside && css.quietBars,
+-        css.root, !wide && css.collapsed, !wide && animateRail.current && css.railIn,
+-        !drawer && collapsed && wide && css.fading, !pointerInside && css.quietBars,
 -      )}
--      style={wide ? { width: collapsed ? lastWideWidth.current : width } : undefined}
+-      style={wide ? { width: !drawer && collapsed ? lastWideWidth.current : width } : undefined}
 -      onPointerEnter={() => {
 -        cancelLinger()
 -        setPointerInside(true)
@@ -1742,7 +1748,7 @@ index c4083d22..419585c6 100644
            const identity = (
              <span className={css.brandIdentity} aria-hidden="true">
                <span className={css.brandMark}>
-@@ -327,9 +307,47 @@ export function SidebarRoot({
+@@ -349,9 +323,53 @@ export function SidebarRoot({
                  {identity}
                </button>
              )
@@ -1754,11 +1760,17 @@ index c4083d22..419585c6 100644
 +  return (
 +    <div
 +      ref={column}
++      onFocusCapture={(event) => { sidebarFocus.current = event.target }}
++      role={drawer ? 'dialog' : undefined}
++      data-shortcut-modal={drawer ? 'sidebar' : undefined}
++      aria-modal={drawer && !collapsed ? true : undefined}
++      aria-label={drawer ? t('navigation.label') : undefined}
++      tabIndex={drawer ? -1 : undefined}
 +      className={clsx(
-+        css.root, !wide && css.collapsed, !wide && everWide.current && css.railIn,
-+        collapsed && wide && css.fading, !pointerInside && css.quietBars,
++        css.root, !wide && css.collapsed, !wide && animateRail.current && css.railIn,
++        !drawer && collapsed && wide && css.fading, !pointerInside && css.quietBars,
 +      )}
-+      style={wide ? { width: collapsed ? lastWideWidth.current : width } : undefined}
++      style={wide ? { width: !drawer && collapsed ? lastWideWidth.current : width } : undefined}
 +      onPointerEnter={() => {
 +        cancelLinger()
 +        setPointerInside(true)
@@ -1794,7 +1806,7 @@ index c4083d22..419585c6 100644
        {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
        {canStartSession && (
 diff --git a/packages/client/web/src/base.css b/packages/client/web/src/base.css
-index af74988c..3c3150f8 100644
+index 3a556a98..1f3d2614 100644
 --- a/packages/client/web/src/base.css
 +++ b/packages/client/web/src/base.css
 @@ -52,7 +52,8 @@ html[data-platform='darwin'] body {
@@ -1962,10 +1974,10 @@ index de7832d1..2b504b27 100644
      const seams = harness()
      const element = row()
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
-index 3bb5b2fd..58601cf0 100644
+index d6ef3e50..4e1a91b6 100644
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
-@@ -4593,6 +4593,9 @@ importers:
+@@ -4704,6 +4704,9 @@ importers:
        '@deepseek-ai/cordis':
          specifier: workspace:~
          version: link:../../../vendor/cordis
