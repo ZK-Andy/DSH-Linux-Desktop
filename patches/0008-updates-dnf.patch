@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..67a81724
+index 00000000..1696fc94
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,286 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -61,8 +61,11 @@ index 00000000..67a81724
 +/** Root entry point installed by the rpm; it takes no arguments. */
 +export const LINUX_UPDATER_HELPER = '/usr/libexec/dsh-update-helper'
 +
++/** Repository id defined in packaging/dsh-desktop.repo. */
++const REPO_ID = 'dsh-desktop'
++
 +/** Repository defines this so a missing repository never blocks unrelated dnf transactions. */
-+const REPO_SKIP_OPTION = '--setopt=dsh-desktop.skip_if_unavailable=0'
++const REPO_SKIP_OPTION = `--setopt=${REPO_ID}.skip_if_unavailable=0`
 +
 +
 +/** How many helper output lines survive for the failure dialog. */
@@ -294,7 +297,7 @@ index 00000000..67a81724
 +    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades(refresh)
 +    return new Promise((resolve, reject) => {
 +      const args = ['repoquery', '--upgrades', '--assumeyes', ...refresh ? ['--refresh'] : [],
-+        '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME]
++        `--repo=${REPO_ID}`, '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME]
 +      const child = spawn('dnf5', args, {
 +        env: { ...process.env, LC_ALL: 'C' },
 +        // dnf5 asks on stdin before importing repository OpenPGP keys, and a pipe nobody writes
@@ -341,7 +344,7 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..e1faf22b
+index 00000000..ec7a8f7e
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
 @@ -0,0 +1,246 @@
@@ -566,7 +569,7 @@ index 00000000..e1faf22b
 +      updateInfo: { version: '0.2.2-alpha.2.9' }, isUpdateAvailable: true,
 +    })
 +    expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes',
-+      '--queryformat', '%{evr}\n', '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
++      '--repo=dsh-desktop', '--queryformat', '%{evr}\n', '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
 +    expect(spawned.options.at(-1)).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] })
 +  })
 +
