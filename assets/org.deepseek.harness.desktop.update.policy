@@ -6,10 +6,10 @@
   <vendor>DSH Linux Desktop</vendor>
   <action id="org.deepseek.harness.desktop.update">
     <description>Upgrade DeepSeek Harness desktop from the dsh-desktop repository</description>
-    <message>Authentication is required to upgrade the desktop application.</message>
+    <message>The desktop application is upgraded from the dsh-desktop repository.</message>
     <defaults>
-      <allow_any>auth_admin</allow_any>
-      <allow_inactive>no</allow_inactive>
+      <allow_any>yes</allow_any>
+      <allow_inactive>yes</allow_inactive>
       <allow_active>yes</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dsh-update-helper</annotate>

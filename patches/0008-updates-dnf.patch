@@ -1,10 +1,10 @@
 变化理由：更新收敛为 dnf-only：检查走 dnf5 repoquery --upgrades，安装走无参 polkit helper 的 dnf5 upgrade；应用内不再下载、校验或缓存 rpm。
 diff --git a/apps/desktop/src/linux-updates.ts b/apps/desktop/src/linux-updates.ts
 new file mode 100644
-index 00000000..03f987b8
+index 00000000..80ba3723
 --- /dev/null
 +++ b/apps/desktop/src/linux-updates.ts
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,32 @@
 +import { existsSync } from 'node:fs'
 +import {
 +  LINUX_UPDATER_HELPER, LinuxPackageUpdater, currentLinuxVersion,
@@ -20,14 +20,16 @@ index 00000000..03f987b8
 + * Linux updates go through the shipped dnf repository: the updater only asks dnf whether an
 + * upgrade exists, and the polkit helper installs it. The installed rpm release is part of the
 + * compared version, otherwise every start would offer the build that is already installed.
++ * @param options.relaunch - Stops the application before the upgraded build starts again.
 + * @returns updater plus the coordinator hooks; empty off Linux.
 + */
-+export function linuxUpdateRuntime(): LinuxUpdateRuntime {
++export function linuxUpdateRuntime(options: { readonly relaunch?: () => void } = {}): LinuxUpdateRuntime {
 +  if (process.platform !== 'linux') return {}
 +  const helperPath = existsSync(LINUX_UPDATER_HELPER) ? LINUX_UPDATER_HELPER : undefined
 +  const updater = new LinuxPackageUpdater({
 +    ...helperPath === undefined ? {} : { helperPath },
 +    currentVersion: currentLinuxVersion,
++    ...options.relaunch === undefined ? {} : { relaunch: options.relaunch },
 +  })
 +  return {
 +    updater,
