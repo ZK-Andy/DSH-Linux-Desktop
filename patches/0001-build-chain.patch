@@ -1,6 +1,6 @@
 变化理由：把上游仓库变成可构建的 Linux 桌面工程：下载与解包、补齐 workspace 入口、包骨架、运行时依赖、托盘图标生成、office 与 assets 放置。
 diff --git a/.gitignore b/.gitignore
-index 3cb86ce8..de74baa8 100644
+index 4d52487a..296a8ea3 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -2,6 +2,7 @@ CLAUDE.local.md
@@ -11,10 +11,10 @@ index 3cb86ce8..de74baa8 100644
  apps/desktop/*.p12
  node_modules/
  lib/
-@@ -47,3 +48,10 @@ worktrees/
- .agents/worktrees/
- .typert-*/
- native/system/test/bin/
+@@ -50,3 +51,10 @@ native/system/test/bin/
+ 
+ # Generated company-signed CUA release record.
+ /packages/experimental/cua-macos/cua-helper.json
 +
 +# 由 scripts/apply-patches.sh 从 assets/ 与 packaging/ 放置，不进补丁
 +apps/desktop/resources/RPM-GPG-KEY-dsh-desktop
@@ -23,7 +23,7 @@ index 3cb86ce8..de74baa8 100644
 +apps/desktop/resources/rpm-post-install.sh
 +apps/desktop/resources/rpm-post-remove.sh
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 081a90ea..faeba5bd 100644
+index 5d4f00eb..4bab4807 100644
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
 @@ -38,6 +38,8 @@
