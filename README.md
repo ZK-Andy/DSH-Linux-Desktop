@@ -10,7 +10,7 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 状态
 
-补丁序列 `0001–0010`（每个补丁一个模块）已在干净的上游 tag 树上重放验证（应用后与改编树逐字节一致）。已发版至 `v0.2.2-alpha.2-8`，托盘与更新链路已在装出来的 rpm 上实机验收通过。里程碑见 PLAN.md §5。
+补丁序列 `0001–0010`（每个补丁一个模块）已在上游 `dsh-v0.2.2-alpha.3` 的干净树上重放通过（`patch-surface.sh` 静态断言 + 逐补丁应用干净）。已发版至 `v0.2.2-alpha.2-8`，托盘与更新链路已在装出来的 rpm 上实机验收通过。里程碑见 PLAN.md §5。
 
 ## 需求（验收口径）
 
@@ -26,9 +26,9 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 版本号规则
 
-- `Version` 跟上游 tag：`0.2.2-alpha.2` 映射成 rpm 的 `0.2.2~alpha.2`（`~` 让预发布排在正式版之前）。
-- `Release` 是我们自己的打包序号，每次重新打包递增；同一个上游版本重新出包就是 `0.2.2~alpha.2-2`，dnf 据此判定升级。
-- git tag 用 `v<上游版本>-<Release>`（如 `v0.2.2-alpha.2-2`），Release 名与 tag 一致。
+- `Version` 跟上游 tag：`0.2.2-alpha.3` 映射成 rpm 的 `0.2.2~alpha.3`（`~` 让预发布排在正式版之前）。
+- `Release` 是我们自己的打包序号，每次重新打包递增；同一个上游版本重新出包就是 `0.2.2~alpha.3-2`，dnf 据此判定升级。
+- git tag 用 `v<上游版本>-<Release>`（如 `v0.2.2-alpha.3-2`），Release 名与 tag 一致。
 
 ## 安装
 
@@ -61,7 +61,7 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 - 包管理器是唯一真源，应用不写 `/usr`、不自更新、不自带下载器。
 - 检查更新：`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`。有输出即有新版本，空输出即已是最新，命令失败则原样展示错误；启动后延迟检查一次，托盘「检查更新」与设置页可手动触发（手动时带 `--refresh`）。
 - 安装：`pkexec /usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，`allow_active=yes` 放行一次）。helper 不接受任何参数，只执行 `dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`，日志写 `/var/log/dsh-desktop/update.log`；成功后应用自动重启。
-- 版本比较：应用把安装的 rpm `VERSION-RELEASE` 编码成 semver 再比（预发布 `0.2.2~alpha.2-6` → `0.2.2-alpha.2.6`，正式版 `0.2.3-1` → `0.2.3.z.1`），所以第 10 个 release 不会被当成比第 9 个旧。
+- 版本比较：应用把安装的 rpm `VERSION-RELEASE` 编码成 semver 再比（预发布 `0.2.2~alpha.3-6` → `0.2.2-alpha.3.6`，正式版 `0.2.3-1` → `0.2.3.z.1`），所以第 10 个 release 不会被当成比第 9 个旧。
 - helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与日志目录 `/var/log/dsh-desktop` 都由 rpm 文件清单直接拥有（fpm 的 `源=目标` 映射）；`.repo` 标 `%config(noreplace)`，`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载（参数 0）时删掉随包公钥。
 - dnf 仓库已维护：repodata 在 `gh-pages`（GitHub Pages），rpm 在版本 Release；每次发版用 `scripts/publish-repo.sh` 重生 repodata 并推上去，否则 `dnf5 check-update` 只看到旧版本。
 
@@ -77,8 +77,8 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 发版就是打 tag 并推送（tag 尾部的数字即 rpm Release 段）：
 
 ```bash
-git tag -a v0.2.2-alpha.2-2 -m "DSH Linux Desktop v0.2.2-alpha.2-2"
-git push origin v0.2.2-alpha.2-2
+git tag -a v0.2.2-alpha.3-2 -m "DSH Linux Desktop v0.2.2-alpha.3-2"
+git push origin v0.2.2-alpha.3-2
 ```
 
 

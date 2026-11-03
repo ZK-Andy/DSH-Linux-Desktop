@@ -40,7 +40,7 @@
 - electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
 - 构建配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
 - `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
-- 预发布版本映射：`dsh-v0.2.2-alpha.2` → rpm `0.2.2~alpha.2`。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。
+- 预发布版本映射：`dsh-v0.2.2-alpha.3` → rpm `0.2.2~alpha.3`。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。
 - GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
