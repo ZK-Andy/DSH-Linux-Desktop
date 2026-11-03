@@ -336,7 +336,7 @@ index 00000000..97ddbcaa
 +  })
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index d8d0e30c..5e6956eb 100644
+index d8d0e30c..84556456 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -1,6 +1,5 @@
@@ -538,8 +538,19 @@ index d8d0e30c..5e6956eb 100644
      promptOperation ??= Promise.resolve().then(async () => {
        if (manual) updateJournal?.action('check-requested')
        const joinedPolicyAuthentication = authenticationOperation !== undefined
-@@ -1089,15 +1006,26 @@ async function main(): Promise<void> {
-     tray?.relabel()
+@@ -1081,23 +998,36 @@ async function main(): Promise<void> {
+     devToolsF12Shortcut,
+   ]
+   const refreshApplicationMenu = (): void => {
++    // The tray carries a menu of its own and rebuilds it through Menu too; refresh it first so the
++    // application menu remains the template a refresh leaves behind.
++    tray?.relabel()
+     Menu.setApplicationMenu(Menu.buildFromTemplate(process.platform === 'win32'
+       ? windowsDevToolsShortcuts : [{
+         label: darwin ? app.name : currentDesktopLocale().messages.application,
+         submenu: [...applicationItems(), devToolsF12Shortcut],
+       }, ...platformMenus()]))
+-    tray?.relabel()
    }
    refreshApplicationMenu()
 -  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
@@ -570,7 +581,7 @@ index d8d0e30c..5e6956eb 100644
      ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
        locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
      : undefined
-@@ -1111,10 +1039,11 @@ async function main(): Promise<void> {
+@@ -1111,10 +1041,11 @@ async function main(): Promise<void> {
      focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
      // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
      // size directly, where the 1024 px PNG would be scaled down by GDI.
@@ -584,7 +595,7 @@ index d8d0e30c..5e6956eb 100644
      ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
        assertDesktopSender(event, ['app'])
        if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1155,10 +1084,16 @@ async function main(): Promise<void> {
+@@ -1155,10 +1086,16 @@ async function main(): Promise<void> {
        // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
        const validColor = (value: unknown): value is string => typeof value === 'string'
          && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
@@ -602,7 +613,7 @@ index d8d0e30c..5e6956eb 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1169,11 +1104,13 @@ async function main(): Promise<void> {
+@@ -1169,11 +1106,13 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -618,7 +629,7 @@ index d8d0e30c..5e6956eb 100644
      // Closing hides: the page and the Host keep running, and the next show resumes the same document.
      window.on('close', (event) => {
        if (quitting || shellInstallerOwnsQuit || sessionEnding) return
-@@ -1427,7 +1364,10 @@ async function main(): Promise<void> {
+@@ -1427,7 +1366,10 @@ async function main(): Promise<void> {
        preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
        allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
        policy: () => policy.state, update: () => updates.state,
@@ -784,7 +795,7 @@ index 472aa48a..3e769ebb 100644
    }
  ]
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index 3b1e63e0..df704c66 100644
+index 3b1e63e0..7fad61b2 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -814,7 +825,13 @@ index 3b1e63e0..df704c66 100644
      getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
      setBounds() {}
      setTitle = vi.fn()
-@@ -324,6 +330,7 @@ vi.mock('electron', () => ({
+@@ -319,11 +325,13 @@ vi.mock('electron', () => ({
+   session: { defaultSession: {
+     on: vi.fn(),
+     setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: harness.socketHeaders },
++    cookies: { get: async () => [], remove: async () => undefined },
+   } },
+   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: harness.protocolHandle },
    powerMonitor: harness.powerMonitor,
    Tray: harness.FakeTray,
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -822,7 +839,7 @@ index 3b1e63e0..df704c66 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-@@ -625,7 +632,7 @@ describe('desktop main startup', () => {
+@@ -625,7 +633,7 @@ describe('desktop main startup', () => {
      const zh = locale === 'zh-CN'
      expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
        type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
@@ -831,7 +848,7 @@ index 3b1e63e0..df704c66 100644
      }))
      // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
      harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
-@@ -906,12 +913,40 @@ describe('desktop main startup', () => {
+@@ -906,12 +914,40 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
@@ -872,7 +889,7 @@ index 3b1e63e0..df704c66 100644
    it('serves packaged shell documents instead of rejecting the shell origin', async () => {
      const { serveWebDocument } = await import('../src/web-document.ts')
      vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))
-@@ -947,14 +982,18 @@ describe('desktop main startup', () => {
+@@ -947,14 +983,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
@@ -945,7 +962,7 @@ index e59b7ebb..cc055f0a 100644
    syncWindowsAppearance()
    expect(send).not.toHaveBeenCalled()
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
-index 4ae8743e..d3411d57 100644
+index 4ae8743e..3f2e9481 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts
 +++ b/apps/desktop/tests/welcome-startup.spec.ts
 @@ -74,6 +74,7 @@ vi.mock('electron', () => ({
@@ -956,7 +973,15 @@ index 4ae8743e..d3411d57 100644
      isDestroyed() { return false }
      isMinimized() { return false }
      restore = vi.fn()
-@@ -98,12 +99,16 @@ vi.mock('electron', () => ({
+@@ -89,6 +90,7 @@ vi.mock('electron', () => ({
+   session: { defaultSession: {
+     on: vi.fn(),
+     setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: vi.fn() },
++    cookies: { get: async () => [], remove: async () => undefined },
+   } },
+   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
+   ipcMain: {
+@@ -98,12 +100,16 @@ vi.mock('electron', () => ({
    dialog: { showErrorBox: vi.fn(), showMessageBox: vi.fn() },
    Menu: { buildFromTemplate: state.menu, setApplicationMenu: vi.fn() },
    nativeImage: { createFromPath: (path: string) => ({ path }) },
