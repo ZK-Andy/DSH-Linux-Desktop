@@ -188,9 +188,9 @@ printf 'stub-dnf5 %s\n' "$*" >> /var/log/dsh-desktop/update.log
 exit 0
 STUB
 chmod 755 /usr/bin/dnf5
-# 与真机同形：应用侧白名单只给 pkexec 传 PATH/LANG/LC_ALL，这里用 env -i 复刻该形态，
-# 让「白名单环境下授权链通」成为持续回归，而不是只有一次手工验证。
-if su smokeuser -s /bin/sh -c 'env -i PATH=/usr/local/bin:/usr/bin:/bin LC_ALL=C pkexec /usr/libexec/dsh-update-helper'; then
+# 与真机同形：应用侧只给 pkexec 设 LC_ALL=C，这里用 env -i 复刻该形态（无 PATH/HOME/
+# 会话/DBus 变量），让「最小环境下授权链通」成为持续回归，而不是只有一次手工验证。
+if su smokeuser -s /bin/sh -c 'env -i LC_ALL=C pkexec /usr/libexec/dsh-update-helper'; then
   grep -q '开始升级 dsh-desktop' /var/log/dsh-desktop/update.log \
     || { log "pkexec 执行了 helper 但 helper 没写开始日志"; exit 1; }
   grep -q '调用者 uid=' /var/log/dsh-desktop/update.log \
