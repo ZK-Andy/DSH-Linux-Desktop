@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..1696fc94
+index 00000000..247e06bb
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,327 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -51,7 +51,8 @@ index 00000000..1696fc94
 + */
 +import { EventEmitter } from 'node:events'
 +import { execFileSync, spawn } from 'node:child_process'
-+import { existsSync } from 'node:fs'
++import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
++import { join } from 'node:path'
 +import { app } from 'electron'
 +
 +
@@ -77,6 +78,15 @@ index 00000000..1696fc94
 +/** Wall-clock budget for the polkit helper: a dnf upgrade can take minutes, but not forever. */
 +export const INSTALL_TIMEOUT_MS = 10 * 60_000
 +
++/**
++ * pkexec exits 127 when the authorization cannot be obtained or an error occurs; a dialog the user
++ * dismissed is 126. So 127 means the helper never ran and pkexec's stderr is the only witness.
++ */
++export const PKEXEC_NOT_AUTHORIZED = 127
++
++/** Appended file under the application logs directory; one record per failed install. */
++const FAILURE_LOG_NAME = 'update-failures.log'
++
 +/** Strips ANSI control sequences and the carriage-return progress tail dnf redraws in place. */
 +export function stripProgress(line: string): string {
 +  return line
@@ -100,6 +110,8 @@ index 00000000..1696fc94
 +  readonly relaunch?: () => void
 +  /** dnf runner; overridable for tests. Receives whether the query must bypass the cache. */
 +  readonly queryUpgrades?: (refresh: boolean) => Promise<string>
++  /** Receives one record per failed install; defaults to appending under the application logs. */
++  readonly failureSink?: (record: string) => void
 +}
 +
 +/**
@@ -278,14 +290,43 @@ index 00000000..1696fc94
 +        }
 +        return
 +      }
-+      failOnce(new Error(`desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`), code)
++      // 127 is pkexec itself, not the helper: the helper never ran. A poisoned process environment
++      // can break pkexec for one app instance only (2026-11-05 real machine), and the tray restart
++      // goes through app.relaunch(), which inherits that environment — so the guidance is a full
++      // quit followed by a fresh launch, not a restart.
++      const message = code === PKEXEC_NOT_AUTHORIZED
++        ? 'desktop update: 安装失败：helper 退出码 127（认证通道异常，彻底退出应用后重新打开再试）'
++        : `desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`
++      failOnce(new Error(message), code)
 +    })
 +  }
 +
 +  private fail(error: Error, lines: readonly string[], code: number | null): void {
 +    const details = [code === null ? '' : `退出码：${code}`, ...lines].filter((l) => l.length > 0).join('\n')
 +    const failure = Object.assign(error, { technicalDetails: details })
++    this.recordFailure(error, details)
 +    this.emit('error', failure)
++  }
++
++  /**
++   * Persists what the install actually reported. pkexec logs only its successes to the system
++   * journal — a failed authorization leaves nothing — and the failure toast dies with the session,
++   * so a recurring failure would leave no witness on disk. Best effort: a failed write must not
++   * shadow the install error being reported.
++   */
++  private recordFailure(error: Error, details: string): void {
++    const record = `${new Date().toISOString()} ${error.message}${details.length > 0 ? `\n${details}` : ''}\n\n`
++    if (this.options.failureSink !== undefined) {
++      this.options.failureSink(record)
++      return
++    }
++    try {
++      const directory = app.getPath('logs')
++      mkdirSync(directory, { recursive: true })
++      appendFileSync(join(directory, FAILURE_LOG_NAME), record)
++    } catch {
++      // Keep the install error as the only reported failure.
++    }
 +  }
 +
 +  private current(): string {
@@ -344,18 +385,27 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..ec7a8f7e
+index 00000000..e2e0c27d
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,291 @@
++import { readFileSync } from 'node:fs'
++import { join } from 'node:path'
 +import { gt } from 'semver'
 +import { describe, expect, it, vi } from 'vitest'
 +import {
 +  INSTALL_TIMEOUT_MS, LinuxPackageUpdater, QUERY_TIMEOUT_MS, currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
 +} from '../src/update-linux.ts'
 +
++const logsDirectory = await vi.hoisted(async () => {
++  const { mkdtempSync } = await import('node:fs')
++  const { tmpdir } = await import('node:os')
++  const { join } = await import('node:path')
++  return mkdtempSync(join(tmpdir(), 'dsh-update-logs-'))
++})
++
 +vi.mock('electron', () => ({
-+  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn() },
++  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn(), getPath: () => logsDirectory },
 +}))
 +
 +type Emitter = { on: (event: string, cb: (code: number | null) => void) => void }
@@ -528,6 +578,42 @@ index 00000000..ec7a8f7e
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
 +    child.emitClose(0)
 +    expect(installed).toHaveBeenCalledTimes(1)
++  })
++
++  it('names the self-healing path when pkexec reports an authorization failure', () => {
++    const u = updater()
++    const errors: Error[] = []
++    u.on('error', (error) => errors.push(error as Error))
++    u.quitAndInstall()
++    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++    child.emitClose(127)
++    expect(errors[0]?.message).toContain('彻底退出应用后重新打开再试')
++  })
++
++  it('appends the failure record to the application logs directory', () => {
++    const u = new LinuxPackageUpdater({ helperPath: '/bin/sh', queryUpgrades: async () => '' })
++    const errors: Error[] = []
++    u.on('error', (error) => errors.push(error as Error))
++    u.quitAndInstall()
++    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++    child.emitClose(127)
++    expect(errors).toHaveLength(1)
++    const log = readFileSync(join(logsDirectory, 'update-failures.log'), 'utf8')
++    expect(log).toContain('退出码：127')
++    expect(log).toContain('彻底退出应用后重新打开再试')
++  })
++
++  it('routes the failure record through the injected sink instead of the log file', () => {
++    const sink = vi.fn()
++    const u = updater({ failureSink: sink })
++    const errors: Error[] = []
++    u.on('error', (error) => errors.push(error as Error))
++    u.quitAndInstall()
++    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++    child.emitClose(1)
++    expect(errors).toHaveLength(1)
++    expect(sink).toHaveBeenCalledTimes(1)
++    expect(sink.mock.calls[0]?.[0]).toContain('退出码：1')
 +  })
 +
 +  it('kills a polkit helper that never returns', () => {
