@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..99cc0d71
+index 00000000..b3345ffb
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,345 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -77,6 +77,9 @@ index 00000000..99cc0d71
 +
 +/** Wall-clock budget for the polkit helper: a dnf upgrade can take minutes, but not forever. */
 +export const INSTALL_TIMEOUT_MS = 10 * 60_000
++
++/** Wall-clock budget for the synchronous rpm -q probe; its ETIMEDOUT falls back to app.getVersion(). */
++export const VERSION_PROBE_TIMEOUT_MS = 2_000
 +
 +/**
 + * pkexec exits 127 when the authorization cannot be obtained or an error occurs; a dialog the user
@@ -156,6 +159,9 @@ index 00000000..99cc0d71
 +  try {
 +    const value = execFileSync('rpm', ['-q', '--qf', '%{VERSION}-%{RELEASE}', LINUX_PACKAGE_NAME], {
 +      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },
++      // Bounded: rpm -q can wait on a transaction lock right after a failed upgrade, and this
++      // probe also feeds the failure record — it must never stall the error being reported.
++      timeout: VERSION_PROBE_TIMEOUT_MS,
 +    }).trim()
 +    return /^\S+-\d+$/.test(value) ? value : undefined
 +  } catch {
@@ -332,10 +338,11 @@ index 00000000..99cc0d71
 +      }
 +      const directory = app.getPath('logs')
 +      mkdirSync(directory, { recursive: true, mode: 0o700 })
-+      // mkdirSync's mode only applies to directories it creates; the logs directory usually exists
-+      // already (crash reports share it), so the chmod makes 0700 unconditional.
-+      chmodSync(directory, 0o700)
 +      appendFileSync(join(directory, FAILURE_LOG_NAME), record, { mode: 0o600 })
++      // Hardening runs after the record is on disk: mkdirSync's mode only applies to directories
++      // it creates (the logs directory usually exists, shared with crash reports), and a failing
++      // chmod (foreign owner, read-only mount) must not cost us the witness.
++      chmodSync(directory, 0o700)
 +    } catch {
 +      // Keep the install error as the only reported failure.
 +    }
@@ -396,10 +403,10 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..5d96e1a0
+index 00000000..57dfda96
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,356 @@
 +import { existsSync, readFileSync, rmSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
@@ -420,6 +427,19 @@ index 00000000..5d96e1a0
 +vi.mock('electron', () => ({
 +  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn(), getPath: () => logsDirectory },
 +}))
++
++const harden = await vi.hoisted(() => ({ throwOnChmod: false }))
++
++vi.mock('node:fs', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:fs')>()
++  return {
++    ...actual,
++    chmodSync: (path: string, mode: number) => {
++      if (harden.throwOnChmod) throw new Error('chmod denied')
++      return actual.chmodSync(path, mode)
++    },
++  }
++})
 +
 +type Emitter = { on: (event: string, cb: (code: number | null) => void) => void }
 +
@@ -645,6 +665,22 @@ index 00000000..5d96e1a0
 +    child.emitClose(1)
 +    expect(errors).toHaveLength(1)
 +    expect(errors[0]?.message).toContain('helper 退出码 1')
++  })
++
++  it('writes the record first and never lets directory hardening cost the witness', () => {
++    harden.throwOnChmod = true
++    try {
++      const u = updater()
++      const errors: Error[] = []
++      u.on('error', error => errors.push(error as Error))
++      u.quitAndInstall()
++      const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++      child.emitClose(1)
++      expect(errors).toHaveLength(1)
++      expect(readFileSync(join(logsDirectory, 'update-failures.log'), 'utf8')).toContain('helper 退出码 1')
++    } finally {
++      harden.throwOnChmod = false
++    }
 +  })
 +
 +  it('records the missing helper like any other install failure', () => {
