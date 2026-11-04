@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..247e06bb
+index 00000000..f3082d19
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,330 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -136,7 +136,7 @@ index 00000000..247e06bb
 +
 +/** @returns The first EVR reported for the package, or undefined when dnf reports no upgrade. */
 +export function parseUpgrade(evrOutput: string): string | undefined {
-+  return evrOutput.split('\n').map((line) => line.trim()).find((line) => line.length > 0)
++  return evrOutput.split('\n').map(line => line.trim()).find(line => line.length > 0)
 +}
 +
 +/** @returns The Release segment of the installed rpm, or undefined when the rpm database cannot be queried. */
@@ -238,7 +238,7 @@ index 00000000..247e06bb
 +  quitAndInstall(): void {
 +    const helper = this.options.helperPath
 +    if (helper === undefined || !existsSync(helper)) {
-+      this.emit('error', new Error('desktop update: 没有 polkit helper'))
++      this.fail(new Error('desktop update: 没有 polkit helper'), [], null)
 +      return
 +    }
 +    const lines: string[] = []
@@ -254,26 +254,25 @@ index 00000000..247e06bb
 +      }
 +    }
 +    let settled = false
-+    let timer: ReturnType<typeof setTimeout> | undefined
-+    const failOnce = (error: Error, code: number | null): void => {
-+      if (settled) return
-+      settled = true
-+      clearTimeout(timer)
-+      this.fail(error, lines, code)
-+    }
 +    const child = spawn('pkexec', [helper], {
 +      env: { ...process.env, LC_ALL: 'C' },
 +      // polkit prompts through the desktop agent, not stdin; the helper inherits this pipe, and
 +      // a pipe nobody writes to or closes can block a prompt exactly like it blocks dnf5.
 +      stdio: ['ignore', 'pipe', 'pipe'],
 +    })
-+    timer = setTimeout(() => {
++    const timer = setTimeout(() => {
 +      // SIGKILL reaps the helper only: pkexec keeps the pid, but the dnf5 transaction the helper
 +      // started may outlive it, so this budget bounds the wait in the UI, not the upgrade itself.
 +      // When that orphan finishes, the next check sees the new rpm release and clears the update.
 +      child.kill('SIGKILL')
 +      failOnce(new Error(`dnf5 upgrade 超过 ${INSTALL_TIMEOUT_MS / 1000} 秒未返回，已终止`), null)
 +    }, INSTALL_TIMEOUT_MS)
++    const failOnce = (error: Error, code: number | null): void => {
++      if (settled) return
++      settled = true
++      clearTimeout(timer)
++      this.fail(error, lines, code)
++    }
 +    child.stdout.on('data', consume)
 +    child.stderr.on('data', consume)
 +    child.on('error', (error) => { failOnce(error, null) })
@@ -290,19 +289,20 @@ index 00000000..247e06bb
 +        }
 +        return
 +      }
-+      // 127 is pkexec itself, not the helper: the helper never ran. A poisoned process environment
-+      // can break pkexec for one app instance only (2026-11-05 real machine), and the tray restart
-+      // goes through app.relaunch(), which inherits that environment — so the guidance is a full
-+      // quit followed by a fresh launch, not a restart.
++      // 127 is pkexec itself, not the helper: the helper never ran. It covers both a failed
++      // authorization and a failed exec of the helper (EACCES, noexec mount, SELinux), so the
++      // wording names both. A poisoned process environment can break pkexec for one app instance
++      // only (2026-11-05 real machine), and the tray restart goes through app.relaunch(), which
++      // inherits that environment — so the guidance is a full quit followed by a fresh launch.
 +      const message = code === PKEXEC_NOT_AUTHORIZED
-+        ? 'desktop update: 安装失败：helper 退出码 127（认证通道异常，彻底退出应用后重新打开再试）'
++        ? 'desktop update: 安装失败：helper 退出码 127（认证通道异常或 helper 无法执行，彻底退出应用后重新打开再试）'
 +        : `desktop update: 安装失败：helper 退出码 ${code ?? 'unknown'}`
 +      failOnce(new Error(message), code)
 +    })
 +  }
 +
 +  private fail(error: Error, lines: readonly string[], code: number | null): void {
-+    const details = [code === null ? '' : `退出码：${code}`, ...lines].filter((l) => l.length > 0).join('\n')
++    const details = [code === null ? '' : `退出码：${code}`, ...lines].filter(l => l.length > 0).join('\n')
 +    const failure = Object.assign(error, { technicalDetails: details })
 +    this.recordFailure(error, details)
 +    this.emit('error', failure)
@@ -311,19 +311,23 @@ index 00000000..247e06bb
 +  /**
 +   * Persists what the install actually reported. pkexec logs only its successes to the system
 +   * journal — a failed authorization leaves nothing — and the failure toast dies with the session,
-+   * so a recurring failure would leave no witness on disk. Best effort: a failed write must not
-+   * shadow the install error being reported.
++   * so a recurring failure would leave no witness on disk. Each record carries the versions that
++   * frame the attempt; every entry is bounded (two version lines plus the last helper lines), so
++   * the file grows by a few lines per failure and needs no rotation. Best effort: a failed write
++   * must not shadow the install error being reported, which is why the injected sink shares the
++   * try with the file write.
 +   */
 +  private recordFailure(error: Error, details: string): void {
-+    const record = `${new Date().toISOString()} ${error.message}${details.length > 0 ? `\n${details}` : ''}\n\n`
-+    if (this.options.failureSink !== undefined) {
-+      this.options.failureSink(record)
-+      return
-+    }
++    const context = `候选版本 ${this.candidate ?? '无'}，当前版本 ${this.current()}`
++    const record = `${new Date().toISOString()} ${error.message}\n${context}${details.length > 0 ? `\n${details}` : ''}\n\n`
 +    try {
++      if (this.options.failureSink !== undefined) {
++        this.options.failureSink(record)
++        return
++      }
 +      const directory = app.getPath('logs')
-+      mkdirSync(directory, { recursive: true })
-+      appendFileSync(join(directory, FAILURE_LOG_NAME), record)
++      mkdirSync(directory, { recursive: true, mode: 0o700 })
++      appendFileSync(join(directory, FAILURE_LOG_NAME), record, { mode: 0o600 })
 +    } catch {
 +      // Keep the install error as the only reported failure.
 +    }
@@ -348,7 +352,11 @@ index 00000000..247e06bb
 +      let stdout = ''
 +      let stderr = ''
 +      let settled = false
-+      let timer: ReturnType<typeof setTimeout> | undefined
++      const timer = setTimeout(() => {
++        child.kill('SIGKILL')
++        const tail = stderr.trim().split('\n').slice(-3).join('\n')
++        settle(new Error(`dnf5 repoquery 超过 ${QUERY_TIMEOUT_MS / 1000} 秒未返回，已终止${tail.length > 0 ? `\n${tail}` : ''}`))
++      }, QUERY_TIMEOUT_MS)
 +      const settle = (error?: Error): void => {
 +        if (settled) return
 +        settled = true
@@ -356,11 +364,6 @@ index 00000000..247e06bb
 +        if (error === undefined) resolve(stdout)
 +        else reject(error)
 +      }
-+      timer = setTimeout(() => {
-+        child.kill('SIGKILL')
-+        const tail = stderr.trim().split('\n').slice(-3).join('\n')
-+        settle(new Error(`dnf5 repoquery 超过 ${QUERY_TIMEOUT_MS / 1000} 秒未返回，已终止${tail.length > 0 ? `\n${tail}` : ''}`))
-+      }, QUERY_TIMEOUT_MS)
 +      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
 +      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
 +      child.on('error', settle)
@@ -385,24 +388,26 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..e2e0c27d
+index 00000000..45fa0c57
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,291 @@
-+import { readFileSync } from 'node:fs'
+@@ -0,0 +1,323 @@
++import { existsSync, readFileSync, rmSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
-+import { describe, expect, it, vi } from 'vitest'
++import { afterAll, describe, expect, it, vi } from 'vitest'
 +import {
-+  INSTALL_TIMEOUT_MS, LinuxPackageUpdater, QUERY_TIMEOUT_MS, currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
++  INSTALL_TIMEOUT_MS, LinuxPackageUpdater, PKEXEC_NOT_AUTHORIZED, QUERY_TIMEOUT_MS,
++  currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
 +} from '../src/update-linux.ts'
 +
 +const logsDirectory = await vi.hoisted(async () => {
 +  const { mkdtempSync } = await import('node:fs')
 +  const { tmpdir } = await import('node:os')
-+  const { join } = await import('node:path')
-+  return mkdtempSync(join(tmpdir(), 'dsh-update-logs-'))
++  return mkdtempSync(`${tmpdir()}/dsh-update-logs-`)
 +})
++
++afterAll(() => { rmSync(logsDirectory, { recursive: true, force: true }) })
 +
 +vi.mock('electron', () => ({
 +  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn(), getPath: () => logsDirectory },
@@ -546,14 +551,15 @@ index 00000000..e2e0c27d
 +  it('streams helper lines and reports the exit code with the last ten lines', async () => {
 +    const u = updater()
 +    const errors: (Error & { technicalDetails?: string })[] = []
-+    u.on('error', (error) => errors.push(error as Error & { technicalDetails?: string }))
++    u.on('error', error => errors.push(error as Error & { technicalDetails?: string }))
 +    const seen: string[] = []
 +    u.on('install-progress', ({ line }) => { seen.push(line) })
 +    u.quitAndInstall()
 +    expect(spawned.calls[0]).toEqual(['pkexec', '/bin/sh'])
 +    const child = spawned.child as unknown as {
-+      stdout: { emit: (event: string, chunk: Buffer) => void }, stderr: { emit: (event: string, chunk: Buffer) => void },
-+      emitClose: (code: number) => void,
++      stdout: { emit: (event: string, chunk: Buffer) => void }
++      stderr: { emit: (event: string, chunk: Buffer) => void }
++      emitClose: (code: number) => void
 +    }
 +    child.stdout.emit('data', Buffer.from('第一条\n\u001b[1m第二条\u001b[0m\n'))
 +    child.stderr.emit('data', Buffer.from('第三条\r\r\n'))
@@ -583,37 +589,66 @@ index 00000000..e2e0c27d
 +  it('names the self-healing path when pkexec reports an authorization failure', () => {
 +    const u = updater()
 +    const errors: Error[] = []
-+    u.on('error', (error) => errors.push(error as Error))
++    u.on('error', error => errors.push(error as Error))
 +    u.quitAndInstall()
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
-+    child.emitClose(127)
++    child.emitClose(PKEXEC_NOT_AUTHORIZED)
++    expect(errors[0]?.message).toContain('认证通道异常或 helper 无法执行')
 +    expect(errors[0]?.message).toContain('彻底退出应用后重新打开再试')
 +  })
 +
 +  it('appends the failure record to the application logs directory', () => {
++    const path = join(logsDirectory, 'update-failures.log')
++    const before = existsSync(path) ? readFileSync(path, 'utf8') : ''
 +    const u = new LinuxPackageUpdater({ helperPath: '/bin/sh', queryUpgrades: async () => '' })
 +    const errors: Error[] = []
-+    u.on('error', (error) => errors.push(error as Error))
++    u.on('error', error => errors.push(error as Error))
 +    u.quitAndInstall()
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
-+    child.emitClose(127)
++    child.emitClose(PKEXEC_NOT_AUTHORIZED)
 +    expect(errors).toHaveLength(1)
-+    const log = readFileSync(join(logsDirectory, 'update-failures.log'), 'utf8')
-+    expect(log).toContain('退出码：127')
-+    expect(log).toContain('彻底退出应用后重新打开再试')
++    const added = readFileSync(path, 'utf8').slice(before.length)
++    expect(readFileSync(path, 'utf8').startsWith(before)).toBe(true)
++    expect(added).toContain('退出码：127')
++    expect(added).toContain('候选版本 无，当前版本 0.2.2-alpha.2')
++    expect(added).toContain('彻底退出应用后重新打开再试')
 +  })
 +
 +  it('routes the failure record through the injected sink instead of the log file', () => {
 +    const sink = vi.fn()
 +    const u = updater({ failureSink: sink })
 +    const errors: Error[] = []
-+    u.on('error', (error) => errors.push(error as Error))
++    u.on('error', error => errors.push(error as Error))
 +    u.quitAndInstall()
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
 +    child.emitClose(1)
 +    expect(errors).toHaveLength(1)
++    expect(errors[0]?.message).not.toContain('彻底退出应用后重新打开再试')
 +    expect(sink).toHaveBeenCalledTimes(1)
 +    expect(sink.mock.calls[0]?.[0]).toContain('退出码：1')
++  })
++
++  it('keeps reporting the install failure when the injected sink throws', () => {
++    const u = updater({ failureSink: () => { throw new Error('sink down') } })
++    const errors: Error[] = []
++    u.on('error', error => errors.push(error as Error))
++    u.quitAndInstall()
++    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++    child.emitClose(1)
++    expect(errors).toHaveLength(1)
++    expect(errors[0]?.message).toContain('helper 退出码 1')
++  })
++
++  it('records the missing helper like any other install failure', () => {
++    const sink = vi.fn()
++    const u = updater({ helperPath: '/nonexistent/dsh-update-helper', failureSink: sink })
++    const errors: Error[] = []
++    u.on('error', error => errors.push(error as Error))
++    u.quitAndInstall()
++    expect(errors).toHaveLength(1)
++    expect(errors[0]?.message).toContain('没有 polkit helper')
++    expect(sink).toHaveBeenCalledTimes(1)
++    expect(sink.mock.calls[0]?.[0]).toContain('没有 polkit helper')
 +  })
 +
 +  it('kills a polkit helper that never returns', () => {
@@ -621,7 +656,7 @@ index 00000000..e2e0c27d
 +    try {
 +      const u = updater()
 +      const errors: Error[] = []
-+      u.on('error', (error) => errors.push(error as Error))
++      u.on('error', error => errors.push(error as Error))
 +      u.quitAndInstall()
 +      const child = spawned.child as unknown as { kill: (signal?: string) => void }
 +      vi.advanceTimersByTime(INSTALL_TIMEOUT_MS)
