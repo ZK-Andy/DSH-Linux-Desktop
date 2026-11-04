@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..221be885
+index 00000000..8b9719a7
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,367 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -91,12 +91,13 @@ index 00000000..221be885
 +const FAILURE_LOG_NAME = 'update-failures.log'
 +
 +/**
-+ * The only variables passed into the root authorization path. The 2026-11-05 incident traced to
-+ * the instance's whole environment reaching pkexec: a poisoned variable (prime suspect
-+ * DBUS_SYSTEM_BUS_ADDRESS) broke the polkit connection before authorization, and the tray
-+ * relaunch kept it alive across instances. The helper is a fixed script whose commands resolve
-+ * through PATH, so an allowlist keeps the root side clean; the system bus is reached through the
-+ * default socket on purpose — DBUS_SYSTEM_BUS_ADDRESS stays out.
++ * The only variables pkexec itself receives. pkexec resets the helper's environment to a minimal
++ * known-safe set (man pkexec, SECURITY NOTES), so the helper never inherits ours — what does
++ * reach pkexec's own process is this list, and GDBus reads DBUS_SYSTEM_BUS_ADDRESS from it to
++ * find the authorization authority. The 2026-11-05 incident was a poisoned instance environment
++ * doing exactly that: authorization broke before it started, and the tray relaunch kept the
++ * poison alive across instances. The system bus is reached through the default socket on
++ * purpose; do not widen this list for the helper's sake — the helper needs nothing from us.
 + */
 +const HELPER_ENV_KEYS = ['PATH', 'LANG'] as const
 +
@@ -424,10 +425,10 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..141c6c9f
+index 00000000..447a31c4
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,375 @@
 +import { existsSync, readFileSync, rmSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
@@ -645,6 +646,8 @@ index 00000000..141c6c9f
 +      u.quitAndInstall()
 +      const options = spawned.options.at(-1) as { env: Record<string, string | undefined> }
 +      expect(Object.keys(options.env).sort()).toEqual(['LANG', 'LC_ALL', 'PATH'])
++      expect(options.env.LC_ALL).toBe('C')
++      expect(options.env.PATH).toBe(process.env.PATH)
 +      expect(options.env.DBUS_SYSTEM_BUS_ADDRESS).toBeUndefined()
 +    } finally {
 +      if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang
