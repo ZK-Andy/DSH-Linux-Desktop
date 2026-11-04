@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..f3082d19
+index 00000000..99cc0d71
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,338 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -51,7 +51,7 @@ index 00000000..f3082d19
 + */
 +import { EventEmitter } from 'node:events'
 +import { execFileSync, spawn } from 'node:child_process'
-+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
++import { appendFileSync, chmodSync, existsSync, mkdirSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { app } from 'electron'
 +
@@ -163,10 +163,13 @@ index 00000000..f3082d19
 +  }
 +}
 +
-+/** @returns The installed version+release encoded the same way dnf results are. */
-+export function currentLinuxVersion(): string {
-+  const evr = installedEvrSync()
-+  return evr === undefined ? app.getVersion() : encodeVersion(evr)
++/**
++ * @param evr The installed rpm EVR to encode; `null` forces the packaged-version fallback, and
++ *   leaving it undefined probes the rpm database (the caller usually wants the injection in tests).
++ * @returns The installed version+release encoded the same way dnf results are.
++ */
++export function currentLinuxVersion(evr: string | null | undefined = installedEvrSync()): string {
++  return evr === null || evr === undefined ? app.getVersion() : encodeVersion(evr)
 +}
 +
 +export class LinuxPackageUpdater extends EventEmitter {
@@ -318,15 +321,20 @@ index 00000000..f3082d19
 +   * try with the file write.
 +   */
 +  private recordFailure(error: Error, details: string): void {
-+    const context = `候选版本 ${this.candidate ?? '无'}，当前版本 ${this.current()}`
-+    const record = `${new Date().toISOString()} ${error.message}\n${context}${details.length > 0 ? `\n${details}` : ''}\n\n`
 +    try {
++      // Building the record stays inside the try: this.current() reaches into app or a caller's
++      // provider, and nothing on this path may shadow the install error being reported.
++      const context = `候选版本 ${this.candidate ?? '无'}，当前版本 ${this.current()}`
++      const record = `${new Date().toISOString()} ${error.message}\n${context}${details.length > 0 ? `\n${details}` : ''}\n\n`
 +      if (this.options.failureSink !== undefined) {
 +        this.options.failureSink(record)
 +        return
 +      }
 +      const directory = app.getPath('logs')
 +      mkdirSync(directory, { recursive: true, mode: 0o700 })
++      // mkdirSync's mode only applies to directories it creates; the logs directory usually exists
++      // already (crash reports share it), so the chmod makes 0700 unconditional.
++      chmodSync(directory, 0o700)
 +      appendFileSync(join(directory, FAILURE_LOG_NAME), record, { mode: 0o600 })
 +    } catch {
 +      // Keep the install error as the only reported failure.
@@ -388,10 +396,10 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..45fa0c57
+index 00000000..5d96e1a0
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,327 @@
 +import { existsSync, readFileSync, rmSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
@@ -674,7 +682,11 @@ index 00000000..45fa0c57
 +  })
 +
 +  it('encodes the installed version with its rpm release', () => {
-+    expect(currentLinuxVersion()).toMatch(/^0\.2\.2(?:-alpha\.2|-z\.|$)/)
++    expect(currentLinuxVersion('0.2.2~alpha.2-6')).toBe('0.2.2-alpha.2.6')
++  })
++
++  it('falls back to the packaged version without an installed rpm', () => {
++    expect(currentLinuxVersion(null)).toBe('0.2.2-alpha.2')
 +  })
 +
 +  it('runs dnf5 with a closed stdin and auto-confirms repository key imports', async () => {
