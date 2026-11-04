@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 生成 dnf 仓库的 repodata 并签名（repodata 放 gh-pages，rpm 留在版本 Release）。
 #
-#   ./scripts/publish-repo.sh dist/dsh-desktop-0.2.2-alpha.3-x86_64.rpm v0.2.2-alpha.3-2
+#   ./scripts/publish-repo.sh dist/dsh-desktop-0.2.2-rc.1-x86_64.rpm v0.2.2-rc.1-1
 #
 # 产物：
 #   build/repo/repodata/{primary.xml.gz,repomd.xml,repomd.xml.asc}
@@ -13,7 +13,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RPM_FILE="${1:?usage: $0 <rpm-file> <tag> [--out DIR] [--baseurl URL] [--key-id ID] [--no-sign]}"
-TAG="${2:?缺少 tag，例如 v0.2.2-alpha.3-2}"
+TAG="${2:?缺少 tag，例如 v0.2.2-rc.1-1}"
 shift 2
 OUT="$ROOT/build/repo"
 BASEURL=""
