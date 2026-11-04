@@ -39,10 +39,10 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..b3345ffb
+index 00000000..221be885
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,345 @@
+@@ -0,0 +1,366 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
@@ -89,6 +89,25 @@ index 00000000..b3345ffb
 +
 +/** Appended file under the application logs directory; one record per failed install. */
 +const FAILURE_LOG_NAME = 'update-failures.log'
++
++/**
++ * The only variables passed into the root authorization path. The 2026-11-05 incident traced to
++ * the instance's whole environment reaching pkexec: a poisoned variable (prime suspect
++ * DBUS_SYSTEM_BUS_ADDRESS) broke the polkit connection before authorization, and the tray
++ * relaunch kept it alive across instances. The helper is a fixed script whose commands resolve
++ * through PATH, so an allowlist keeps the root side clean; the system bus is reached through the
++ * default socket on purpose — DBUS_SYSTEM_BUS_ADDRESS stays out.
++ */
++const HELPER_ENV_KEYS = ['PATH', 'LANG'] as const
++
++const helperEnv = (): Record<string, string> => {
++  const env: Record<string, string> = { LC_ALL: 'C' }
++  for (const key of HELPER_ENV_KEYS) {
++    const value = process.env[key]
++    if (value !== undefined) env[key] = value
++  }
++  return env
++}
 +
 +/** Strips ANSI control sequences and the carriage-return progress tail dnf redraws in place. */
 +export function stripProgress(line: string): string {
@@ -147,6 +166,8 @@ index 00000000..b3345ffb
 +  try {
 +    const value = execFileSync('rpm', ['-q', '--qf', '%{RELEASE}', LINUX_PACKAGE_NAME], {
 +      encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },
++      // Bounded like installedEvrSync: rpm -q can wait on a transaction lock after an upgrade.
++      timeout: VERSION_PROBE_TIMEOUT_MS,
 +    }).trim()
 +    return /^\d+$/.test(value) ? value : undefined
 +  } catch {
@@ -264,7 +285,7 @@ index 00000000..b3345ffb
 +    }
 +    let settled = false
 +    const child = spawn('pkexec', [helper], {
-+      env: { ...process.env, LC_ALL: 'C' },
++      env: helperEnv(),
 +      // polkit prompts through the desktop agent, not stdin; the helper inherits this pipe, and
 +      // a pipe nobody writes to or closes can block a prompt exactly like it blocks dnf5.
 +      stdio: ['ignore', 'pipe', 'pipe'],
@@ -403,10 +424,10 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..57dfda96
+index 00000000..141c6c9f
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,373 @@
 +import { existsSync, readFileSync, rmSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
@@ -612,6 +633,23 @@ index 00000000..57dfda96
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
 +    child.emitClose(0)
 +    expect(installed).toHaveBeenCalledTimes(1)
++  })
++
++  it('spawns pkexec with an environment allowlist, not the process environment', () => {
++    const savedLang = process.env.LANG
++    const savedBus = process.env.DBUS_SYSTEM_BUS_ADDRESS
++    process.env.LANG = 'zh_CN.UTF-8'
++    process.env.DBUS_SYSTEM_BUS_ADDRESS = 'unix:path=/nonexistent'
++    try {
++      const u = updater()
++      u.quitAndInstall()
++      const options = spawned.options.at(-1) as { env: Record<string, string | undefined> }
++      expect(Object.keys(options.env).sort()).toEqual(['LANG', 'LC_ALL', 'PATH'])
++      expect(options.env.DBUS_SYSTEM_BUS_ADDRESS).toBeUndefined()
++    } finally {
++      if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang
++      if (savedBus === undefined) delete process.env.DBUS_SYSTEM_BUS_ADDRESS; else process.env.DBUS_SYSTEM_BUS_ADDRESS = savedBus
++    }
 +  })
 +
 +  it('names the self-healing path when pkexec reports an authorization failure', () => {

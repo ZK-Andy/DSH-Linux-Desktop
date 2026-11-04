@@ -152,6 +152,52 @@ log "装回本次构建：$(rpm -q --qf '%{VERSION}-%{RELEASE}' dsh-desktop)"
   || { log "装回后缺少 /opt/deepseek-harness-desktop/deepseek-harness"; exit 1; }
 log "更新链 helper 安装 OK"
 
+# 授权链（#19 后的回归覆盖）：非 root 用户经 pkexec → polkit（implicit 全 yes 免认证）→
+# helper → dnf5。容器没有 logind，进程无会话——正是 2026-11-05 127 事故的形状（当时靠策略
+# allow_inactive=yes 放行）。helper 是真本体；dnf5 换成 stub：升级行为已在上面直跑验证过，
+# 这里只验授权与执行链。替换按绝对路径落刀，不赌 pkexec 给 helper 的 PATH。
+log "验证 pkexec 授权链（非 root、无 logind 会话）"
+dnf5 install -y --setopt=install_weak_deps=False polkit >/dev/null \
+  || { log "装 polkit 失败"; exit 1; }
+mkdir -p /run/dbus
+dbus-daemon --system --fork 2>/dev/null || log "system dbus 未自起（可能已在运行，继续）"
+polkitd=/usr/lib/polkit-1/polkitd
+[ -x "$polkitd" ] || { log "缺 polkitd"; exit 1; }
+"$polkitd" >/dev/null 2>&1 &
+ready=""
+for _ in $(seq 1 10); do
+  pkaction --verbose --action-id org.deepseek.harness.desktop.update 2>/dev/null | grep -q 'implicit any:.*yes' \
+    && { ready=1; break; }
+  sleep 1
+done
+[ -n "$ready" ] || { log "polkit 没加载我们的 action 或 implicit any 不是 yes"; exit 1; }
+useradd -M -N -s /bin/bash smokeuser 2>/dev/null || true
+rm -f /var/log/dsh-desktop/update.log
+mv /usr/bin/dnf5 /usr/bin/dnf5.real
+cat > /usr/bin/dnf5 <<'STUB'
+#!/bin/bash
+printf 'stub-dnf5 %s\n' "$*" >> /var/log/dsh-desktop/update.log
+exit 0
+STUB
+chmod 755 /usr/bin/dnf5
+if su smokeuser -s /bin/sh -c 'pkexec /usr/libexec/dsh-update-helper'; then
+  grep -q '开始升级 dsh-desktop' /var/log/dsh-desktop/update.log \
+    || { log "pkexec 执行了 helper 但 helper 没写开始日志"; exit 1; }
+  grep -q '调用者 uid=' /var/log/dsh-desktop/update.log \
+    || { log "helper 没记录调用者 uid"; exit 1; }
+  grep -q 'stub-dnf5 upgrade' /var/log/dsh-desktop/update.log \
+    || { log "helper 没调 dnf5 upgrade（stub 未命中）"; exit 1; }
+  grep -q '升级成功' /var/log/dsh-desktop/update.log \
+    || { log "helper 没走到成功出口"; exit 1; }
+  log "授权链 OK：非 root 经 pkexec 免认证执行 helper，dnf5 由 stub 顶住"
+else
+  log "pkexec 授权链失败"
+  tail -20 /var/log/dsh-desktop/update.log >&2
+  exit 1
+fi
+mv -f /usr/bin/dnf5.real /usr/bin/dnf5
+log "授权链验证完成，dnf5 已恢复"
+
 export DSH_HOME=/tmp/dsh-home
 mkdir -p "$DSH_HOME"
 xvfb=(xvfb-run -a -s "-screen 0 1280x1024x24")
