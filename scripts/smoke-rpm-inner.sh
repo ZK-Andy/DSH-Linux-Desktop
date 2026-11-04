@@ -170,17 +170,27 @@ for _ in $(seq 1 10); do
     && { ready=1; break; }
   sleep 1
 done
-[ -n "$ready" ] || { log "polkit 没加载我们的 action 或 implicit any 不是 yes"; exit 1; }
+if [ -z "$ready" ]; then
+  log "polkit 未就绪（10 秒内 action 未免认证放行），现场："
+  pgrep -a dbus-daemon || log "没有 dbus-daemon 进程"
+  pgrep -a polkitd || log "没有 polkitd 进程"
+  pkaction --verbose --action-id org.deepseek.harness.desktop.update 2>&1 | head -5 || true
+  exit 1
+fi
 useradd -M -N -s /bin/bash smokeuser 2>/dev/null || true
 rm -f /var/log/dsh-desktop/update.log
 mv /usr/bin/dnf5 /usr/bin/dnf5.real
+# stub 期间任何失败都要把真 dnf5 放回去；恢复成功后立刻拆掉 trap。
+trap 'mv -f /usr/bin/dnf5.real /usr/bin/dnf5 2>/dev/null' EXIT
 cat > /usr/bin/dnf5 <<'STUB'
 #!/bin/bash
 printf 'stub-dnf5 %s\n' "$*" >> /var/log/dsh-desktop/update.log
 exit 0
 STUB
 chmod 755 /usr/bin/dnf5
-if su smokeuser -s /bin/sh -c 'pkexec /usr/libexec/dsh-update-helper'; then
+# 与真机同形：应用侧白名单只给 pkexec 传 PATH/LANG/LC_ALL，这里用 env -i 复刻该形态，
+# 让「白名单环境下授权链通」成为持续回归，而不是只有一次手工验证。
+if su smokeuser -s /bin/sh -c 'env -i PATH=/usr/local/bin:/usr/bin:/bin LC_ALL=C pkexec /usr/libexec/dsh-update-helper'; then
   grep -q '开始升级 dsh-desktop' /var/log/dsh-desktop/update.log \
     || { log "pkexec 执行了 helper 但 helper 没写开始日志"; exit 1; }
   grep -q '调用者 uid=' /var/log/dsh-desktop/update.log \
@@ -196,6 +206,7 @@ else
   exit 1
 fi
 mv -f /usr/bin/dnf5.real /usr/bin/dnf5
+trap - EXIT
 log "授权链验证完成，dnf5 已恢复"
 
 export DSH_HOME=/tmp/dsh-home
