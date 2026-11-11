@@ -39,7 +39,7 @@ index 00000000..3dfb1af6
 +# DOWNLOAD_PROD_COS_SECRET_ID=
 +# DOWNLOAD_PROD_COS_SECRET_KEY=
 diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
-index cf0c19e8..01876090 100644
+index d5522e3d..8dc57f4c 100644
 --- a/apps/desktop/scripts/electron-builder-config.mjs
 +++ b/apps/desktop/scripts/electron-builder-config.mjs
 @@ -23,7 +23,9 @@ import {
@@ -68,24 +68,22 @@ index cf0c19e8..01876090 100644
    if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
    const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
    if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
-@@ -76,7 +84,13 @@ export function createElectronBuilderConfig(
-   let dshDestination
+@@ -77,6 +85,12 @@ export function createElectronBuilderConfig(
    let windowsCode = []
    const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
--    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
-+    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
+     `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
 +    // Sharp runs in a plain-Node child process (electron/electron#46323); that process has no ASAR
 +    // awareness, so the package and its prebuilt libvips binaries must exist as real files.
 +    // Sharp also requires detect-libc and semver at load time; a plain-Node process cannot resolve
 +    // dependencies left inside the archive, so they are unpacked alongside the package.
 +    '**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/detect-libc/**',
-+    '**/node_modules/semver/**']
-   const windowsSigner = packagesWindows && !unsigned
-     ? createWindowsTokenSigner({
-         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
-@@ -104,22 +118,33 @@ export function createElectronBuilderConfig(
++    '**/node_modules/semver/**',
+     // LaunchServices opens the Computer Use helper as an application, so every file of its bundles stays on disk.
+     // Both architectures ship: they form one notarized payload whose manifest staging verifies as a whole.
+     '**/node_modules/@deepseek-ai/dsh-experimental-cua-macos/native/bin/**/*']
+@@ -106,22 +120,33 @@ export function createElectronBuilderConfig(
+   const productVersion = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).version
    const buildVersion = resolveDesktopBuildVersion(env, productVersion)
-   if (update?.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop package: latest requires a stable version')
    const packaged = resolveDesktopBuildCommit(env)
 -  return {
 +  return withLinuxTargets({
@@ -120,7 +118,7 @@ index cf0c19e8..01876090 100644
      asar: true,
      electronDist: buildPaths.electron,
      electronFuses: { runAsNode: true },
-@@ -158,7 +183,8 @@ export function createElectronBuilderConfig(
+@@ -160,7 +185,8 @@ export function createElectronBuilderConfig(
      extraResources: [
        { from: buildPaths.runtime, to: 'runtime' },
        { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
@@ -130,7 +128,7 @@ index cf0c19e8..01876090 100644
        ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
      ],
      mac: {
-@@ -252,10 +278,6 @@ export function createElectronBuilderConfig(
+@@ -254,10 +280,6 @@ export function createElectronBuilderConfig(
        },
        target: ['nsis'],
      },
@@ -141,7 +139,7 @@ index cf0c19e8..01876090 100644
      nsis: {
        uninstallDisplayName: '${productName}',
        installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
-@@ -270,5 +292,5 @@ export function createElectronBuilderConfig(
+@@ -272,5 +294,5 @@ export function createElectronBuilderConfig(
      },
      detectUpdateChannel: false,
      publish: update === undefined ? null : [{ provider: 'generic', url: update.publicUrl, channel: update.channel }],

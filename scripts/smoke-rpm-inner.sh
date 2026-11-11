@@ -110,8 +110,9 @@ printf '{"id":1,"input":"%s","options":{"failOn":"error","limitInputPixels":fals
   | grep -q '"ok":true' || { log "sharp worker 解码失败：检查 0021 的 asarUnpack 是否含 detect-libc 与 semver"; exit 1; }
 log "sharp 解码 OK"
 
-# 更新链（M5）：helper、polkit 策略、.repo 与公钥都由 rpm 拥有；helper 不接受参数，
-# 只触发一次 `dnf5 upgrade dsh-desktop`。这里真跑一次，验证它不需要任何外部参数。
+# 更新链（M5 + 渠道 C）：helper、polkit 策略、.repo 与公钥都由 rpm 拥有；helper 只接受唯一的
+# 渠道参数 --channel=nightly|stable（无参=nightly，兼容旧应用），内部触发一次
+# `dnf5 upgrade dsh-desktop`。这里真跑一次，验证参数契约与升级链都通。
 log "验证更新链 helper 与 dnf 仓库"
 [ -x /usr/libexec/dsh-update-helper ] || { log "缺少 /usr/libexec/dsh-update-helper"; exit 1; }
 [ -f /usr/share/polkit-1/actions/org.deepseek.harness.desktop.update.policy ]   || { log "缺少 polkit 策略"; exit 1; }
@@ -136,9 +137,14 @@ sandbox_drift="$(rpm -V dsh-desktop | grep 'chrome-sandbox' || true)"
 unexpected="$(rpm -V dsh-desktop | grep -v 'chrome-sandbox' || true)"
 [[ -n "$sandbox_drift" ]] && log "chrome-sandbox 权限由 %post 调整（预期内）：$sandbox_drift"
 [[ -z "$unexpected" ]] || { echo "$unexpected" >&2; log "rpm -V dsh-desktop 报告了预期之外的差异"; exit 1; }
-# helper 不接受参数，跑一次 `dnf5 upgrade dsh-desktop`；它可能把包换成仓库里的发布版，
-# 所以这条放在归属断言之后。
-/usr/libexec/dsh-update-helper \
+# 先验参数契约：非法参数必须在动 dnf 之前以 64 退出。
+rc=0
+/usr/libexec/dsh-update-helper --channel=bogus >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || { log "helper 对非法参数未返回 64（实际 $rc）"; exit 1; }
+# 再真跑一次到 nightly。它可能把包换成仓库里的发布版，所以放在归属断言之后；
+# 渠道仓库还没发布过内容时，dnf 按 .repo 的 skip_if_unavailable=1 跳过并 exit 0，
+# 跳过提示由 helper 的 tee 落进 update.log（日志里能区分「跳过」与「Nothing to do」）。
+/usr/libexec/dsh-update-helper --channel=nightly \
   || { log "helper 升级失败"; tail -20 /var/log/dsh-desktop/update.log >&2; exit 1; }
 grep -q '升级成功' /var/log/dsh-desktop/update.log || { log "helper 没写出成功日志"; exit 1; }
 rpm -q dsh-desktop >/dev/null || { log "helper 跑完后 dsh-desktop 不在 rpmdb"; exit 1; }

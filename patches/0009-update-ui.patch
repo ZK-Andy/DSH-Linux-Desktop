@@ -1,10 +1,9 @@
 变化理由：dnf-only 更新的界面呈现——安装阶段显示「下载并安装，可能需要几分钟」与 helper 最新一行。
-
 diff --git a/apps/desktop/src/update-coordinator.ts b/apps/desktop/src/update-coordinator.ts
-index 3b83cea0..e99ca8e3 100644
+index 475a5606..b226e902 100644
 --- a/apps/desktop/src/update-coordinator.ts
 +++ b/apps/desktop/src/update-coordinator.ts
-@@ -27,6 +27,11 @@ export class DesktopUpdateCoordinator {
+@@ -35,6 +35,11 @@ export class DesktopUpdateCoordinator {
      this.setState({ phase: percent >= 100 ? 'verifying' : 'downloading', ...this.target(), percent })
    }
  
@@ -14,10 +13,10 @@ index 3b83cea0..e99ca8e3 100644
 +  }
 +
    private readonly onDownloaded = (info: UpdateInfo): void => {
-     if (this.downloadOperation === undefined || info.version !== this.candidate) return
-     this.downloaded = true
-@@ -74,6 +79,8 @@ export class DesktopUpdateCoordinator {
-     this.updater.allowDowngrade = false
+     if (this.downloadGeneration !== this.generation || this.downloadOperation === undefined || info.version !== this.candidate) return
+     this.release = { kind: 'downloaded', version: info.version }
+@@ -81,6 +86,8 @@ export class DesktopUpdateCoordinator {
+     selectUpdateChannel(this.updater, channel)
      this.updater.on('download-progress', this.onProgress)
      this.updater.on('update-downloaded', this.onDownloaded)
 +    // Linux helper output is streamed on an event electron-updater does not declare.
@@ -25,15 +24,17 @@ index 3b83cea0..e99ca8e3 100644
      this.updater.on('error', this.onError)
    }
  
-@@ -151,11 +158,22 @@ export class DesktopUpdateCoordinator {
+@@ -230,6 +237,7 @@ export class DesktopUpdateCoordinator {
      this.disposed = true
      this.updater.off('download-progress', this.onProgress)
      this.updater.off('update-downloaded', this.onDownloaded)
 +    this.installProgressEvents().off('install-progress', this.onInstallProgress)
      // Pending updater promises can still emit EventEmitter errors during shutdown.
-     void Promise.allSettled([this.checkOperation, this.downloadOperation, this.installOperation])
+     void Promise.allSettled([this.checkOperation, this.downloadOperation, this.installOperation, this.switchTail])
        .then(() => { this.updater.off('error', this.onError) })
-   }
+@@ -239,6 +247,16 @@ export class DesktopUpdateCoordinator {
+ 
+   private get downloaded(): boolean { return this.release.kind === 'downloaded' || this.release.kind === 'handed-off' }
  
 +  private installProgressEvents(): AppUpdater & {
 +    on(event: 'install-progress', listener: (event: { readonly line: string }) => void): void
@@ -49,24 +50,24 @@ index 3b83cea0..e99ca8e3 100644
      if (this.disposed) throw new Error('desktop update: coordinator is disposed')
    }
 diff --git a/apps/desktop/src/update-presentation.ts b/apps/desktop/src/update-presentation.ts
-index 670b6eb4..058f522f 100644
+index 4fa061f3..27179782 100644
 --- a/apps/desktop/src/update-presentation.ts
 +++ b/apps/desktop/src/update-presentation.ts
-@@ -47,6 +47,7 @@ export function presentDesktopUpdate(state: DesktopUpdateState): DesktopUpdatePr
+@@ -53,6 +53,7 @@ export function presentDesktopUpdate(state: DesktopUpdateState): DesktopUpdatePr
      phase: state.phase,
      ...(state.version === undefined ? {} : { version: state.version }),
      ...(state.percent === undefined ? {} : { percent: Math.floor(state.percent) }),
-+    ...(state.phase === 'installing' && state.message === undefined ? {} : state.phase === 'installing' ? { installDetail: state.message } : {}),
++    ...(state.phase === 'installing' && state.message !== undefined ? { installDetail: state.message } : {}),
      ...(state.phase === 'error' ? { failure: desktopUpdateFailureKind(state) } : {}),
    }
  }
 diff --git a/apps/desktop/tests/update-coordinator.spec.ts b/apps/desktop/tests/update-coordinator.spec.ts
-index 3aef0bc6..16874a68 100644
+index b65f825b..ae735e5a 100644
 --- a/apps/desktop/tests/update-coordinator.spec.ts
 +++ b/apps/desktop/tests/update-coordinator.spec.ts
-@@ -257,3 +257,18 @@ it('keeps a stable-version nightly installation on nightly and rejects prereleas
-   expect((await latest.coordinator.check()).phase).toBe('error')
-   expect(latest.downloadUpdate).not.toHaveBeenCalled()
+@@ -449,3 +449,18 @@ it('does not diagnose a filesystem cause from error wording alone', async () =>
+   f.downloadUpdate.mockRejectedValueOnce(new Error('ENOSPC or EACCES in a remote response'))
+   expect((await f.coordinator.download('1.1.0-rc.2')).downloadFailure).toBeUndefined()
  })
 +
 +it('publishes the latest helper line only while the install phase is current', async () => {
@@ -84,11 +85,11 @@ index 3aef0bc6..16874a68 100644
 +  await installing
 +})
 diff --git a/apps/desktop/tests/update-presentation.spec.ts b/apps/desktop/tests/update-presentation.spec.ts
-index 9c53a9eb..a0295a35 100644
+index a9ad2501..b1a05c9f 100644
 --- a/apps/desktop/tests/update-presentation.spec.ts
 +++ b/apps/desktop/tests/update-presentation.spec.ts
-@@ -44,3 +44,13 @@ it('keeps raw diagnostics out of error tooltips in both locales', () => {
-       technicalDetails: 'private diagnostic' }, messages)).toBe(messages.updateInstallFailed)
+@@ -59,3 +59,13 @@ it('offers actionable filesystem recovery without exposing paths in the indicato
+     }
    }
  })
 +
@@ -102,10 +103,10 @@ index 9c53a9eb..a0295a35 100644
 +  expect(presentDesktopUpdate({ phase: 'idle', message: '不应透出' })).toEqual({ phase: 'idle' })
 +})
 diff --git a/packages/client/ui-settings-general/src/client/DesktopUpdateIndicator.tsx b/packages/client/ui-settings-general/src/client/DesktopUpdateIndicator.tsx
-index 728fee65..f61adf76 100644
+index 4fcc71f1..4e6f4fb2 100644
 --- a/packages/client/ui-settings-general/src/client/DesktopUpdateIndicator.tsx
 +++ b/packages/client/ui-settings-general/src/client/DesktopUpdateIndicator.tsx
-@@ -23,7 +23,12 @@ function updateCopy(state: DesktopUpdatePresentation, t: SettingsTranslate): { l
+@@ -24,7 +24,12 @@ function updateCopy(state: DesktopUpdatePresentation, t: SettingsTranslate): { l
      error: t('desktop.update.retry'),
    }
    const label = labels[state.phase]
@@ -120,10 +121,10 @@ index 728fee65..f61adf76 100644
    }
    if (state.phase === 'error') {
 diff --git a/packages/client/ui-settings-general/src/client/locales.ts b/packages/client/ui-settings-general/src/client/locales.ts
-index 58afc6bb..2e052e01 100644
+index a6a6bc28..d064dcb1 100644
 --- a/packages/client/ui-settings-general/src/client/locales.ts
 +++ b/packages/client/ui-settings-general/src/client/locales.ts
-@@ -9,6 +9,7 @@ export const zh = {
+@@ -29,6 +29,7 @@ export const zh = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': '正在校验更新文件…',
    'desktop.update.installing': '正在准备重启…',
@@ -131,7 +132,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': '安装并重启',
    'desktop.update.retry': '重试更新',
    'desktop.update.versionDetail': '{label}：{version}',
-@@ -58,6 +59,7 @@ export const en = {
+@@ -101,6 +102,7 @@ export const en = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Verifying update files…',
    'desktop.update.installing': 'Preparing to restart…',
@@ -139,7 +140,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'Install and Restart',
    'desktop.update.retry': 'Retry update',
    'desktop.update.versionDetail': '{label}: {version}',
-@@ -104,6 +106,7 @@ export const ja = {
+@@ -170,6 +172,7 @@ export const ja = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': '更新ファイルを検証中…',
    'desktop.update.installing': '再起動の準備中…',
@@ -147,7 +148,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'インストールして再起動',
    'desktop.update.retry': '更新を再試行',
    'desktop.update.versionDetail': '{label}: {version}',
-@@ -150,6 +153,7 @@ export const es = {
+@@ -239,6 +242,7 @@ export const es = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Verificando archivos de actualización...',
    'desktop.update.installing': 'Preparándose para reiniciar…',
@@ -155,7 +156,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'Instalar y reiniciar',
    'desktop.update.retry': 'Reintentar actualización',
    'desktop.update.versionDetail': '{label}: {version}',
-@@ -196,6 +200,7 @@ export const fr = {
+@@ -308,6 +312,7 @@ export const fr = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Vérification des fichiers de mise à jour…',
    'desktop.update.installing': 'Préparation du redémarrage…',
@@ -163,7 +164,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'Installer et redémarrer',
    'desktop.update.retry': 'Réessayez la mise à jour',
    'desktop.update.versionDetail': '{label} : {version}',
-@@ -242,6 +247,7 @@ export const de = {
+@@ -377,6 +382,7 @@ export const de = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Aktualisierungsdateien werden überprüft…',
    'desktop.update.installing': 'Neustart wird vorbereitet…',
@@ -171,7 +172,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'Installieren und neu starten',
    'desktop.update.retry': 'Update erneut versuchen',
    'desktop.update.versionDetail': '{label}: {version}',
-@@ -288,6 +294,7 @@ export const ru = {
+@@ -446,6 +452,7 @@ export const ru = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Проверка файлов обновлений…',
    'desktop.update.installing': 'Подготовка к перезапуску…',
@@ -179,7 +180,7 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.ready': 'Установить и перезапустить',
    'desktop.update.retry': 'Повторить обновление',
    'desktop.update.versionDetail': '{label}: {version}',
-@@ -334,6 +341,7 @@ export const pt = {
+@@ -515,6 +522,7 @@ export const pt = {
    'desktop.update.progress': '{percent}%',
    'desktop.update.verifying': 'Verificando arquivos de atualização…',
    'desktop.update.installing': 'Preparando para reiniciar…',
@@ -188,23 +189,23 @@ index 58afc6bb..2e052e01 100644
    'desktop.update.retry': 'Tentar atualizar novamente',
    'desktop.update.versionDetail': '{label}: {version}',
 diff --git a/packages/client/ui-settings-general/src/types.ts b/packages/client/ui-settings-general/src/types.ts
-index 9aa0ea95..736f68d2 100644
+index 33edb975..e99a7867 100644
 --- a/packages/client/ui-settings-general/src/types.ts
 +++ b/packages/client/ui-settings-general/src/types.ts
-@@ -18,6 +18,8 @@ export interface DesktopUpdatePresentation {
+@@ -22,6 +22,8 @@ export interface DesktopUpdatePresentation {
    readonly phase: 'idle' | 'checking' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'error'
    readonly version?: string
    readonly percent?: number
 +  /** Latest package-manager line during installation, already stripped of terminal control codes. */
 +  readonly installDetail?: string
    readonly failure?: DesktopUpdateFailureKind
+   readonly configurationError?: DesktopChannelState['error']
  }
- 
 diff --git a/packages/client/ui-settings-general/tests/desktop-update.client.spec.tsx b/packages/client/ui-settings-general/tests/desktop-update.client.spec.tsx
-index bfcebc3c..899c6f45 100644
+index 3a207e1f..97cc7234 100644
 --- a/packages/client/ui-settings-general/tests/desktop-update.client.spec.tsx
 +++ b/packages/client/ui-settings-general/tests/desktop-update.client.spec.tsx
-@@ -153,7 +153,7 @@ it('shows fallback progress and error details when the shell omits optional fiel
+@@ -155,7 +155,7 @@ it('shows fallback progress and error details when the shell omits optional fiel
    } finally { f.view.unmount(); f.status.resolve({ phase: 'idle' }) }
  })
  
@@ -213,7 +214,7 @@ index bfcebc3c..899c6f45 100644
    const f = fixture()
    try {
      await f.emit({ phase, version: '0.1.7-alpha.2' })
-@@ -165,10 +165,23 @@ it.each(['checking', 'verifying', 'installing'] as const)('shows only the versio
+@@ -167,10 +167,23 @@ it.each(['checking', 'verifying', 'installing'] as const)('shows only the versio
    } finally { f.view.unmount(); f.status.resolve({ phase: 'idle' }) }
  })
  

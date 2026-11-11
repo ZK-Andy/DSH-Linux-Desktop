@@ -85,12 +85,21 @@ jobs:
 
   # 每次发版刷新 dnf 仓库：repodata 推到 gh-pages，rpm 本体留在本版本的 Release 里
   # （<location xml:base> 指向 releases/download/<tag>/）。不跑这步，dnf5 就会一直停在旧版本。
+  #
+  # 两个渠道共用同一个 rpm 与同一份 repodata，区别只在 gh-pages 的目录：
+  #   /nightly/ 收所有发布（预发布只在这里；正式版也进，nightly 是 stable 的超集）
+  #   /stable/  只收正式版
+  #   /repodata 站点根目录，迁移期镜像（等价 nightly），给 baseurl 指根的旧版应用
   repo:
     needs: release
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+    # 同组串行：两个 tag 的作业并发跑会互相覆盖/推送冲突 gh-pages，这里不取消在跑的版本。
+    concurrency:
+      group: gh-pages-repo
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -117,23 +126,53 @@ jobs:
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           echo "GPG_PASSPHRASE_FILE=$RUNNER_TEMP/pass" >> "$GITHUB_ENV"
 
-      - name: 重生成并签名 repodata
-        run: bash scripts/publish-repo.sh dist/*.rpm "$GITHUB_REF_NAME" --out "$RUNNER_TEMP/repo"
+      - name: 判定发布渠道
+        id: channel
+        run: |
+          set -euo pipefail
+          source scripts/lib/release-channel.sh
+          channel="$(release_channel_for_tag "$GITHUB_REF_NAME")"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "本版渠道：$channel（预发布只进 nightly；正式版同时进 stable 与 nightly）"
+
+      - name: 重生成并签名 repodata（nightly）
+        run: bash scripts/publish-repo.sh dist/*.rpm "$GITHUB_REF_NAME" --channel nightly --out "$RUNNER_TEMP/repo/nightly"
+
+      - name: 重生成并签名 repodata（stable）
+        if: steps.channel.outputs.channel == 'stable'
+        run: bash scripts/publish-repo.sh dist/*.rpm "$GITHUB_REF_NAME" --channel stable --out "$RUNNER_TEMP/repo/stable"
 
       - name: 推送 repodata 到 gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
         run: |
           set -euo pipefail
+          nightly="$RUNNER_TEMP/repo/nightly"
+          stable="$RUNNER_TEMP/repo/stable"
           site="$RUNNER_TEMP/site"
           git clone --branch gh-pages --depth 1 \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$site"
           # --checksum：rsync 默认只比「大小 + mtime」，新旧签名字节数相同、mtime 又可能落在同一秒，
           # 不加 --checksum 会把签名文件跳过，导致 repomd.xml 与 repomd.xml.asc 对不上（dnf 报 Bad PGP signature）。
-          rsync -a --delete --checksum "$RUNNER_TEMP/repo/repodata/" "$site/repodata/"
-          cmp "$RUNNER_TEMP/repo/repodata/repomd.xml.asc" "$site/repodata/repomd.xml.asc" || {
-            echo "::error::repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
-          cp "$RUNNER_TEMP/repo/dsh-desktop.repo" "$site/dsh-desktop.repo"
+          mkdir -p "$site/nightly/repodata"
+          rsync -a --delete --checksum "$nightly/repodata/" "$site/nightly/repodata/"
+          cmp "$nightly/repodata/repomd.xml.asc" "$site/nightly/repodata/repomd.xml.asc" || {
+            echo "::error::nightly 的 repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
+          cp "$nightly/dsh-desktop.repo" "$site/dsh-desktop.repo"
+          # 站点根目录是迁移期镜像（等价 nightly）：旧版应用的 .repo baseurl 指向根，换掉根
+          # 会让它们停在旧版本。所有发布都刷新它，stable 版也一样进根目录。
+          rsync -a --delete --checksum "$nightly/legacy-root/repodata/" "$site/repodata/"
+          cmp "$nightly/legacy-root/repodata/repomd.xml.asc" "$site/repodata/repomd.xml.asc" || {
+            echo "::error::根目录镜像的 repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
+          # 只有正式版刷新 stable 目录；nightly 发布不许覆盖 stable 的索引。
+          if [[ "$CHANNEL" == "stable" ]]; then
+            mkdir -p "$site/stable/repodata"
+            rsync -a --delete --checksum "$stable/repodata/" "$site/stable/repodata/"
+            cmp "$stable/repodata/repomd.xml.asc" "$site/stable/repodata/repomd.xml.asc" || {
+              echo "::error::stable 的 repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
+            cp "$stable/dsh-desktop.repo" "$site/stable/dsh-desktop.repo"
+          fi
           cd "$site"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

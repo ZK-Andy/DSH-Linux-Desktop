@@ -154,15 +154,24 @@ check_not "%postun 不删 rpm 拥有的 polkit 策略" grep -q 'org.deepseek.har
 
 # --- 更新链收敛为 dnf-only（M5）---
 helper="$(rpm_cat /usr/libexec/dsh-update-helper 2>/dev/null)"
-check "helper 不接受参数" grep -q '不接受参数' <<<"$helper"
+# 渠道 C：helper 只接受唯一的渠道参数 --channel=nightly|stable（无参=nightly，兼容旧应用），
+# 内部按渠道显式选择 repo；旧的「不接受任何参数」契约已作废。
+check "helper 只接受唯一的渠道参数" grep -q -- '--channel=nightly|--channel=stable' <<<"$helper"
 check "helper 只跑 dnf5 upgrade dsh-desktop" grep -q 'dnf5 upgrade -y --refresh.*dsh-desktop' <<<"$helper"
-check_not "helper 不再接收 rpm 路径参数" grep -q '\$1' <<<"$helper"
+check "helper 覆盖 stable 渠道 repo" grep -q -- '--enablerepo=dsh-desktop) ' <<<"$helper"
+check "helper 覆盖 nightly 渠道 repo" grep -q -- '--enablerepo=dsh-desktop-nightly' <<<"$helper"
+check "helper 对非法参数返回 64" grep -q 'exit 64' <<<"$helper"
 check "helper 用 tee 同时写日志与 stdout" grep -q '2>&1 | tee -a "\$LOG"' <<<"$helper"
 repo="$(rpm_cat /etc/yum.repos.d/dsh-desktop.repo 2>/dev/null)"
 check ".repo 的 gpgkey 指向随包公钥" \
   grep -qx 'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$repo"
 check ".repo 的 metadata_expire=1h" grep -qx 'metadata_expire=1h' <<<"$repo"
 check ".repo 的 skip_if_unavailable=1" grep -qx 'skip_if_unavailable=1' <<<"$repo"
+check ".repo 含 nightly 渠道 section" grep -qx '\[dsh-desktop-nightly\]' <<<"$repo"
+check ".repo 的 stable baseurl 指向 Pages 渠道目录" \
+  grep -qx 'baseurl=https://zk-andy.github.io/DSH-Linux-Desktop/stable/' <<<"$repo"
+check ".repo 的 nightly baseurl 指向 Pages 渠道目录" \
+  grep -qx 'baseurl=https://zk-andy.github.io/DSH-Linux-Desktop/nightly/' <<<"$repo"
 check "%post 幂等导入随包公钥" \
   grep -q 'rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop' <<<"$post"
 # 公钥在 rpmdb 里是 NAME=gpg-pubkey、VERSION=指纹，%postun 只能按指纹尾筛。

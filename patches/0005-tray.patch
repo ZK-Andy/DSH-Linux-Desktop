@@ -224,7 +224,7 @@ index 00000000..e28ad895
 +  return { ...dictionary, ...linuxMessages[key] }
 +}
 diff --git a/apps/desktop/src/locale.ts b/apps/desktop/src/locale.ts
-index 74a1f199..7c10d75a 100644
+index 3e2db64e..c543cb7d 100644
 --- a/apps/desktop/src/locale.ts
 +++ b/apps/desktop/src/locale.ts
 @@ -1,6 +1,8 @@
@@ -237,7 +237,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'Manage dsh Command…',
    cliCommandTitle: 'Manage dsh Command',
    cliCommandLocation: 'Desktop command: {path}',
-@@ -33,12 +35,12 @@ export const en = {
+@@ -33,14 +35,14 @@ export const en = {
    closePage: 'Close Page or Window',
    aboutMenu: 'About DeepSeek Harness',
    aboutProduct: 'DeepSeek Harness',
@@ -246,6 +246,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'Hide DeepSeek Harness',
    hideOtherApplications: 'Hide Others',
    showAllApplications: 'Show All',
+   substitutionsMenu: 'Substitutions',
+   speechMenu: 'Speech',
 -  quitApplication: 'Quit DeepSeek Harness',
 -  openApplication: 'Open DeepSeek Harness',
 +  quitApplication: 'Quit',
@@ -253,7 +255,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Quit',
    cancel: 'Cancel',
    quitTitle: 'Quit DeepSeek Harness?',
-@@ -177,9 +179,13 @@ export const en = {
+@@ -193,9 +195,13 @@ export const en = {
  } as const
  
  /** Every Desktop locale supplies the complete English key set. */
@@ -269,7 +271,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: '管理 dsh 命令…',
    cliCommandTitle: '管理 dsh 命令',
    cliCommandLocation: 'Desktop 命令：{path}',
-@@ -212,12 +218,12 @@ export const zh = {
+@@ -228,14 +234,14 @@ export const zh = {
    closePage: '关闭页面或窗口',
    aboutMenu: '关于 DeepSeek Harness',
    aboutProduct: 'DeepSeek Harness',
@@ -278,6 +280,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: '隐藏 DeepSeek Harness',
    hideOtherApplications: '隐藏其他',
    showAllApplications: '显示全部',
+   substitutionsMenu: '替换',
+   speechMenu: '语音',
 -  quitApplication: '退出 DeepSeek Harness',
 -  openApplication: '打开 DeepSeek Harness',
 +  quitApplication: '退出',
@@ -285,7 +289,7 @@ index 74a1f199..7c10d75a 100644
    quit: '退出',
    cancel: '取消',
    quitTitle: '退出 DeepSeek Harness？',
-@@ -353,10 +359,10 @@ export const zh = {
+@@ -385,10 +391,10 @@ export const zh = {
    mandatoryCopyFailed: '复制失败，请手动选择并复制下方链接。',
    mandatoryAddress: '下载链接',
    mandatoryNotification: '返回应用确认安装并重启。',
@@ -298,7 +302,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'dsh コマンドを管理…',
    cliCommandTitle: 'dsh コマンドを管理',
    cliCommandLocation: 'デスクトップコマンド: {path}',
-@@ -389,12 +395,12 @@ export const ja = {
+@@ -421,14 +427,14 @@ export const ja = {
    closePage: 'ページまたはウィンドウを閉じる',
    aboutMenu: 'DeepSeek Harness について',
    aboutProduct: 'DeepSeek Harness',
@@ -307,6 +311,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'DeepSeek Harness を隠す',
    hideOtherApplications: 'ほかを隠す',
    showAllApplications: 'すべて表示',
+   substitutionsMenu: '自動置換',
+   speechMenu: 'スピーチ',
 -  quitApplication: 'DeepSeek Harness を終了',
 -  openApplication: 'DeepSeek Harness を開く',
 +  quitApplication: '終了',
@@ -314,7 +320,7 @@ index 74a1f199..7c10d75a 100644
    quit: '終了',
    cancel: 'キャンセル',
    quitTitle: 'DeepSeek Harness を終了しますか？',
-@@ -530,10 +536,10 @@ export const ja = {
+@@ -578,10 +584,10 @@ export const ja = {
    mandatoryCopyFailed: 'リンクをコピーできませんでした。以下から選択してコピーしてください。',
    mandatoryAddress: 'ダウンロードリンク',
    mandatoryNotification: 'アプリに戻り、インストールと再起動を確認してください。',
@@ -327,7 +333,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'Administrar el comando dsh…',
    cliCommandTitle: 'Administrar el comando dsh',
    cliCommandLocation: 'Comando de escritorio: {path}',
-@@ -566,12 +572,12 @@ export const es = {
+@@ -614,14 +620,14 @@ export const es = {
    closePage: 'Cerrar página o ventana',
    aboutMenu: 'Acerca de DeepSeek Harness',
    aboutProduct: 'DeepSeek Harness',
@@ -336,6 +342,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar otros',
    showAllApplications: 'Mostrar todo',
+   substitutionsMenu: 'Sustituciones',
+   speechMenu: 'Voz',
 -  quitApplication: 'Salir de DeepSeek Harness',
 -  openApplication: 'Abrir DeepSeek Harness',
 +  quitApplication: 'Salir',
@@ -343,7 +351,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Salir',
    cancel: 'Cancelar',
    quitTitle: '¿Salir de DeepSeek Harness?',
-@@ -707,10 +713,10 @@ export const es = {
+@@ -771,10 +777,10 @@ export const es = {
    mandatoryCopyFailed: 'No se pudo copiar el enlace. Selecciónelo y cópielo a continuación.',
    mandatoryAddress: 'Enlace de descarga',
    mandatoryNotification: 'Regrese a la aplicación para confirmar la instalación y reiniciar.',
@@ -356,7 +364,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'Gérer la commande dsh…',
    cliCommandTitle: 'Gérer la commande dsh',
    cliCommandLocation: 'Commande de bureau : {path}',
-@@ -743,12 +749,12 @@ export const fr = {
+@@ -807,14 +813,14 @@ export const fr = {
    closePage: 'Fermer la page ou la fenêtre',
    aboutMenu: 'À propos de DeepSeek Harness',
    aboutProduct: 'DeepSeek Harness',
@@ -365,6 +373,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'Masquer DeepSeek Harness',
    hideOtherApplications: 'Masquer les autres',
    showAllApplications: 'Afficher tout',
+   substitutionsMenu: 'Substitutions',
+   speechMenu: 'Parole',
 -  quitApplication: 'Quitter DeepSeek Harness',
 -  openApplication: 'Ouvrir DeepSeek Harness',
 +  quitApplication: 'Quitter',
@@ -372,7 +382,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Quitter',
    cancel: 'Annuler',
    quitTitle: 'Quitter DeepSeek Harness ?',
-@@ -884,10 +890,10 @@ export const fr = {
+@@ -964,10 +970,10 @@ export const fr = {
    mandatoryCopyFailed: 'Impossible de copier le lien. Sélectionnez-le et copiez-le ci-dessous.',
    mandatoryAddress: 'Lien de téléchargement',
    mandatoryNotification: "Revenez à l'application pour confirmer l'installation et redémarrer.",
@@ -385,7 +395,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'dsh-Befehl verwalten…',
    cliCommandTitle: 'dsh-Befehl verwalten',
    cliCommandLocation: 'Desktop-Befehl: {path}',
-@@ -920,12 +926,12 @@ export const de = {
+@@ -1000,14 +1006,14 @@ export const de = {
    closePage: 'Seite oder Fenster schließen',
    aboutMenu: 'Über DeepSeek Harness',
    aboutProduct: 'DeepSeek Harness',
@@ -394,6 +404,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'DeepSeek Harness ausblenden',
    hideOtherApplications: 'Andere ausblenden',
    showAllApplications: 'Alle einblenden',
+   substitutionsMenu: 'Ersetzungen',
+   speechMenu: 'Sprachausgabe',
 -  quitApplication: 'DeepSeek Harness beenden',
 -  openApplication: 'DeepSeek Harness öffnen',
 +  quitApplication: 'Beenden',
@@ -401,7 +413,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Beenden',
    cancel: 'Abbrechen',
    quitTitle: 'DeepSeek Harness beenden?',
-@@ -1061,10 +1067,10 @@ export const de = {
+@@ -1157,10 +1163,10 @@ export const de = {
    mandatoryCopyFailed: 'Der Link konnte nicht kopiert werden. Wählen Sie es aus und kopieren Sie es unten.',
    mandatoryAddress: 'Download-Link',
    mandatoryNotification: 'Kehren Sie zur Anwendung zurück, um die Installation zu bestätigen und neu zu starten.',
@@ -414,7 +426,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'Управление командой dsh…',
    cliCommandTitle: 'Управление командой dsh',
    cliCommandLocation: 'Команда Desktop: {path}',
-@@ -1095,14 +1101,14 @@ export const ru = {
+@@ -1191,16 +1197,16 @@ export const ru = {
    application: 'Приложение',
    fileMenu: 'Файл',
    closePage: 'Закрыть страницу или окно',
@@ -426,6 +438,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'Скрыть DeepSeek Harness',
    hideOtherApplications: 'Скрыть других',
    showAllApplications: 'Показать все',
+   substitutionsMenu: 'Замены',
+   speechMenu: 'Речь',
 -  quitApplication: 'Выйти из DeepSeek Harness',
 -  openApplication: 'Открыть DeepSeek Harness',
 +  quitApplication: 'Выход',
@@ -433,7 +447,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Выйти',
    cancel: 'Отмена',
    quitTitle: 'Выйти из DeepSeek Harness?',
-@@ -1238,10 +1244,10 @@ export const ru = {
+@@ -1350,10 +1356,10 @@ export const ru = {
    mandatoryCopyFailed: 'Не удалось скопировать ссылку. Выделите и скопируйте его ниже.',
    mandatoryAddress: 'Ссылка для скачивания',
    mandatoryNotification: 'Вернитесь в приложение, чтобы подтвердить установку и перезапустить.',
@@ -446,7 +460,7 @@ index 74a1f199..7c10d75a 100644
    cliCommandMenu: 'Gerenciar comando dsh…',
    cliCommandTitle: 'Gerenciar comando dsh',
    cliCommandLocation: 'Comando da área de trabalho: {path}',
-@@ -1272,14 +1278,14 @@ export const pt = {
+@@ -1384,16 +1390,16 @@ export const pt = {
    application: 'Aplicativo',
    fileMenu: 'Arquivo',
    closePage: 'Fechar página ou janela',
@@ -458,6 +472,8 @@ index 74a1f199..7c10d75a 100644
    hideApplication: 'Ocultar DeepSeek Harness',
    hideOtherApplications: 'Ocultar outros',
    showAllApplications: 'Mostrar tudo',
+   substitutionsMenu: 'Substituições',
+   speechMenu: 'Fala',
 -  quitApplication: 'Sair de DeepSeek Harness',
 -  openApplication: 'Abra DeepSeek Harness',
 +  quitApplication: 'Sair',
@@ -465,7 +481,7 @@ index 74a1f199..7c10d75a 100644
    quit: 'Sair',
    cancel: 'Cancelar',
    quitTitle: 'Sair de DeepSeek Harness?',
-@@ -1415,9 +1421,18 @@ export const pt = {
+@@ -1543,9 +1549,18 @@ export const pt = {
    mandatoryCopyFailed: 'Não foi possível copiar o link. Selecione e copie abaixo.',
    mandatoryAddress: 'Link de download',
    mandatoryNotification: 'Retorne ao aplicativo para confirmar a instalação e reinicie.',
@@ -486,7 +502,7 @@ index 74a1f199..7c10d75a 100644
  
  /** Locale payload exposed to the Desktop-owned renderer. */
  export interface DesktopLocale {
-@@ -1430,9 +1445,9 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
+@@ -1558,9 +1573,9 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
    const primary = locale.toLowerCase().split('-')[0]
    if (primary !== undefined && Object.hasOwn(dictionaries, primary)) {
      const id = primary as keyof typeof dictionaries
@@ -623,7 +639,7 @@ index 11c3a488..42e27064 100644
    f.tray.dispose()
    expect(f.native.destroy).toHaveBeenCalledOnce()
 diff --git a/apps/desktop/tsconfig.client.json b/apps/desktop/tsconfig.client.json
-index 3de33f06..35a696a1 100644
+index eb17ebe0..8885a9f5 100644
 --- a/apps/desktop/tsconfig.client.json
 +++ b/apps/desktop/tsconfig.client.json
 @@ -7,6 +7,7 @@

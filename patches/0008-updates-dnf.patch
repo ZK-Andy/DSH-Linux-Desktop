@@ -1,4 +1,4 @@
-变化理由：更新收敛为 dnf-only：检查走 dnf5 repoquery --upgrades，安装走无参 polkit helper 的 dnf5 upgrade；应用内不再下载、校验或缓存 rpm。
+变化理由：更新收敛为 dnf-only：检查走 dnf5 repoquery --upgrades，安装走 polkit helper 的 dnf5 upgrade；渠道（nightly/stable）决定启用的 repo 与 helper 参数；旧 .repo 缺渠道 section 时退回单仓库查询；应用内不再下载、校验或缓存 rpm。
 diff --git a/apps/desktop/src/linux-updates.ts b/apps/desktop/src/linux-updates.ts
 new file mode 100644
 index 00000000..80ba3723
@@ -39,35 +39,68 @@ index 00000000..80ba3723
 +}
 diff --git a/apps/desktop/src/update-linux.ts b/apps/desktop/src/update-linux.ts
 new file mode 100644
-index 00000000..ea3dc486
+index 00000000..4c93591f
 --- /dev/null
 +++ b/apps/desktop/src/update-linux.ts
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,418 @@
 +/**
 + * Linux updater: the electron-updater surface the coordinator consumes, backed entirely by the
 + * system package manager. No manifest is fetched and no rpm is downloaded or verified here —
 + * `dnf5` discovers the update through the shipped repository and installs it through the polkit
-+ * helper. The only things this file owns are version encoding and the two dnf queries.
++ * helper. The only things this file owns are version encoding, the two dnf queries, and the
++ * channel's repository section: the coordinator sets `channel` (electron-updater's own field) and
++ * every check and install reads it at call time, so a channel switch needs no further wiring.
++ * The repository file is the one exception: an rpm upgrade leaves a locally edited
++ * `%config(noreplace)` copy in place, and such a file may predate the channel sections, so the
++ * check degrades to the single repository that file declares instead of asking dnf for a feed
++ * whose section does not exist (dnf5 exits 2 on an unmatched repository id).
 + */
 +import { EventEmitter } from 'node:events'
 +import { execFileSync, spawn } from 'node:child_process'
-+import { appendFileSync, chmodSync, existsSync, mkdirSync } from 'node:fs'
++import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { app } from 'electron'
++import type { DesktopUpdateChannel } from './update-channel.ts'
 +
 +
 +/** Package name in the rpm database; also the repository's only package. */
 +export const LINUX_PACKAGE_NAME = 'dsh-desktop'
 +
-+/** Root entry point installed by the rpm; it takes no arguments. */
++/** Root entry point installed by the rpm; it takes the selected channel as its only argument. */
 +export const LINUX_UPDATER_HELPER = '/usr/libexec/dsh-update-helper'
 +
-+/** Repository id defined in packaging/dsh-desktop.repo. */
-+const REPO_ID = 'dsh-desktop'
++/**
++ * Repository section per channel, both defined in packaging/dsh-desktop.repo. The section name is
++ * the only place a channel turns into a dnf repository, so check and install cannot drift apart.
++ */
++const CHANNEL_REPO: Readonly<Record<DesktopUpdateChannel, string>> = {
++  nightly: 'dsh-desktop-nightly',
++  stable: 'dsh-desktop',
++}
 +
-+/** Repository defines this so a missing repository never blocks unrelated dnf transactions. */
-+const REPO_SKIP_OPTION = `--setopt=${REPO_ID}.skip_if_unavailable=0`
++/** The other channel, so a check disables exactly the feed it is not asking. */
++function otherChannel(channel: DesktopUpdateChannel): DesktopUpdateChannel {
++  return channel === 'nightly' ? 'stable' : 'nightly'
++}
 +
++/** Repository definition shipped by the rpm; the only place the channel sections are declared. */
++export const LINUX_REPO_FILE = '/etc/yum.repos.d/dsh-desktop.repo'
++
++/**
++ * @param repoFile - Repository definition to inspect; defaults to the shipped path.
++ * @returns Whether both channel sections are declared. An rpm-installed file declares them; a
++ *   `%config(noreplace)` file kept from a locally edited mirror or proxy usually does not, and
++ *   dnf5 rejects `--enablerepo` for an id it cannot match (exit 2), so the caller must fall back
++ *   to a single-repository query instead of failing every check.
++ */
++export function hasChannelSections(repoFile: string = LINUX_REPO_FILE): boolean {
++  try {
++    const text = readFileSync(repoFile, 'utf8')
++    return /^\[dsh-desktop\]/m.test(text) && /^\[dsh-desktop-nightly\]/m.test(text)
++  } catch {
++    return false
++  }
++}
 +
 +/** How many helper output lines survive for the failure dialog. */
 +export const INSTALL_LOG_LINES = 10
@@ -130,6 +163,8 @@ index 00000000..ea3dc486
 +  readonly queryUpgrades?: (refresh: boolean) => Promise<string>
 +  /** Receives one record per failed install; defaults to appending under the application logs. */
 +  readonly failureSink?: (record: string) => void
++  /** Repository definition to consult; overridable for tests, defaults to the shipped path. */
++  readonly repoFile?: string
 +}
 +
 +/**
@@ -198,13 +233,15 @@ index 00000000..ea3dc486
 +export class LinuxPackageUpdater extends EventEmitter {
 +  autoDownload = false
 +  autoInstallOnAppQuit = false
-+  channel = 'nightly'
++  channel: DesktopUpdateChannel = 'nightly'
 +  allowPrerelease = true
 +  allowDowngrade = false
 +
 +  private candidate: string | undefined
 +
 +  private manual = false
++
++  private legacyRepoWarned = false
 +
 +  private readonly options: LinuxUpdaterOptions
 +
@@ -228,7 +265,7 @@ index 00000000..ea3dc486
 +  }
 +
 +  /**
-+   * Asks the package manager whether an upgrade exists.
++   * Asks the package manager whether an upgrade exists in the selected channel.
 +   * @returns The upgrade candidate, or the current version when there is none.
 +   * @throws When dnf cannot be queried; the coordinator surfaces the message as-is.
 +   */
@@ -280,7 +317,7 @@ index 00000000..ea3dc486
 +      }
 +    }
 +    let settled = false
-+    const child = spawn('pkexec', [helper], {
++    const child = spawn('pkexec', [helper, `--channel=${this.channel}`], {
 +      env: helperEnv(),
 +      // polkit prompts through the desktop agent, not stdin; the helper inherits this pipe, and
 +      // a pipe nobody writes to or closes can block a prompt exactly like it blocks dnf5.
@@ -370,11 +407,30 @@ index 00000000..ea3dc486
 +    return provider === undefined ? app.getVersion() : provider()
 +  }
 +
++  /** Says once per instance that the installed repository file cannot express a channel. */
++  private warnLegacyRepo(): void {
++    if (this.legacyRepoWarned) return
++    this.legacyRepoWarned = true
++    console.warn(`[dsh-desktop] ${this.options.repoFile ?? LINUX_REPO_FILE} 没有渠道 section`
++      + '（旧版或本地改过的 .repo）；本次按单仓库检查，渠道选择可能不生效；装上随包的新 .repo 后自动恢复')
++  }
++
 +  private queryUpgrades(refresh: boolean): Promise<string> {
 +    if (this.options.queryUpgrades !== undefined) return this.options.queryUpgrades(refresh)
 +    return new Promise((resolve, reject) => {
-+      const args = ['repoquery', '--upgrades', '--assumeyes', ...refresh ? ['--refresh'] : [],
-+        `--repo=${REPO_ID}`, '--queryformat', '%{evr}\n', REPO_SKIP_OPTION, LINUX_PACKAGE_NAME]
++      // Both repository sections ship together, so the pair names both feeds even though only one
++      // is enabled: dnf5 rejects an id it cannot match, and an unknown feed must fail loudly. An
++      // old `%config(noreplace)` file may declare only `[dsh-desktop]`; the pair would then abort
++      // every check, so degrade to that single repository and say the channel cannot be expressed.
++      const selected = CHANNEL_REPO[this.channel]
++      const channelSections = hasChannelSections(this.options.repoFile)
++      if (!channelSections) this.warnLegacyRepo()
++      const repoArgs = channelSections
++        ? [`--disablerepo=${CHANNEL_REPO[otherChannel(this.channel)]}`, `--enablerepo=${selected}`]
++        : []
++      const args = ['repoquery', '--upgrades', '--assumeyes', ...refresh ? ['--refresh'] : [], ...repoArgs,
++        '--queryformat', '%{evr}\n',
++        `--setopt=${channelSections ? selected : 'dsh-desktop'}.skip_if_unavailable=0`, LINUX_PACKAGE_NAME]
 +      const child = spawn('dnf5', args, {
 +        env: { ...process.env, LC_ALL: 'C' },
 +        // dnf5 asks on stdin before importing repository OpenPGP keys, and a pipe nobody writes
@@ -420,17 +476,17 @@ index 7c08e569..d6a0561a 100644
    if (!Number.isFinite(jitter) || jitter < 0 || jitter > 1 || maxBackoffMs < intervalMs) {
 diff --git a/apps/desktop/tests/update-linux.spec.ts b/apps/desktop/tests/update-linux.spec.ts
 new file mode 100644
-index 00000000..9890e7b3
+index 00000000..aae3aa18
 --- /dev/null
 +++ b/apps/desktop/tests/update-linux.spec.ts
-@@ -0,0 +1,372 @@
-+import { existsSync, readFileSync, rmSync } from 'node:fs'
+@@ -0,0 +1,469 @@
++import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 +import { join } from 'node:path'
 +import { gt } from 'semver'
 +import { afterAll, describe, expect, it, vi } from 'vitest'
 +import {
 +  INSTALL_TIMEOUT_MS, LinuxPackageUpdater, PKEXEC_NOT_AUTHORIZED, QUERY_TIMEOUT_MS,
-+  currentLinuxVersion, encodeVersion, parseUpgrade, stripProgress,
++  currentLinuxVersion, encodeVersion, hasChannelSections, parseUpgrade, stripProgress,
 +} from '../src/update-linux.ts'
 +
 +const logsDirectory = await vi.hoisted(async () => {
@@ -440,6 +496,20 @@ index 00000000..9890e7b3
 +})
 +
 +afterAll(() => { rmSync(logsDirectory, { recursive: true, force: true }) })
++
++/** What the rpm installs: both channel sections in one file. */
++const channelRepo = join(logsDirectory, 'channel.repo')
++writeFileSync(channelRepo, [
++  '[dsh-desktop]', 'name=DSH Linux Desktop (stable)', 'enabled=1', 'skip_if_unavailable=1', '',
++  '[dsh-desktop-nightly]', 'name=DSH Linux Desktop (nightly)', 'enabled=0', 'skip_if_unavailable=1', '',
++].join('\n'))
++
++/** What a locally edited `%config(noreplace)` file from an older rpm still looks like. */
++const legacyRepo = join(logsDirectory, 'legacy.repo')
++writeFileSync(legacyRepo, [
++  '[dsh-desktop]', 'name=DSH Linux Desktop', 'baseurl=https://zk-andy.github.io/DSH-Linux-Desktop/',
++  'enabled=1', 'gpgcheck=1', 'repo_gpgcheck=1', 'metadata_expire=1h', 'skip_if_unavailable=1', '',
++].join('\n'))
 +
 +vi.mock('electron', () => ({
 +  app: { getVersion: () => '0.2.2-alpha.2', relaunch: vi.fn(), exit: vi.fn(), getPath: () => logsDirectory },
@@ -504,13 +574,14 @@ index 00000000..9890e7b3
 +    currentVersion: () => '0.2.2-alpha.2.5',
 +    queryUpgrades: async () => '',
 +    relaunch: vi.fn(),
++    repoFile: channelRepo,
 +    ...overrides,
 +  })
 +}
 +
 +/** Updater wired exactly like production: no `queryUpgrades` override, so the real dnf runner runs. */
 +function realUpdater() {
-+  return new LinuxPackageUpdater({ currentVersion: () => '0.2.2-alpha.2' })
++  return new LinuxPackageUpdater({ currentVersion: () => '0.2.2-alpha.2', repoFile: channelRepo })
 +}
 +
 +describe('encodeVersion', () => {
@@ -600,7 +671,7 @@ index 00000000..9890e7b3
 +    const seen: string[] = []
 +    u.on('install-progress', ({ line }) => { seen.push(line) })
 +    u.quitAndInstall()
-+    expect(spawned.calls[0]).toEqual(['pkexec', '/bin/sh'])
++    expect(spawned.calls[0]).toEqual(['pkexec', '/bin/sh', '--channel=nightly'])
 +    const child = spawned.child as unknown as {
 +      stdout: { emit: (event: string, chunk: Buffer) => void }
 +      stderr: { emit: (event: string, chunk: Buffer) => void }
@@ -624,7 +695,7 @@ index 00000000..9890e7b3
 +    const installed = vi.fn()
 +    u.on('installed', installed)
 +    u.quitAndInstall()
-+    expect(spawned.calls.at(-1)).toEqual(['pkexec', '/bin/sh'])
++    expect(spawned.calls.at(-1)).toEqual(['pkexec', '/bin/sh', '--channel=nightly'])
 +    expect(spawned.options.at(-1)).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] })
 +    const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
 +    child.emitClose(0)
@@ -770,9 +841,91 @@ index 00000000..9890e7b3
 +    await expect(pending).resolves.toEqual({
 +      updateInfo: { version: '0.2.2-alpha.2.9' }, isUpdateAvailable: true,
 +    })
++    // The pair names both repository sections, and only the selected feed answers the query.
 +    expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes',
-+      '--repo=dsh-desktop', '--queryformat', '%{evr}\n', '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
++      '--disablerepo=dsh-desktop', '--enablerepo=dsh-desktop-nightly', '--queryformat', '%{evr}\n',
++      '--setopt=dsh-desktop-nightly.skip_if_unavailable=0', 'dsh-desktop'])
 +    expect(spawned.options.at(-1)).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] })
++  })
++
++  it('asks the stable repository once the coordinator selects the stable channel', async () => {
++    const u = realUpdater()
++    u.channel = 'stable'
++    const pending = u.checkForUpdates()
++    const child = spawned.child as unknown as { emitClose: (code: number) => void }
++    child.emitClose(0)
++    await pending
++    expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes',
++      '--disablerepo=dsh-desktop-nightly', '--enablerepo=dsh-desktop', '--queryformat', '%{evr}\n',
++      '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
++  })
++
++  it('detects the channel sections a repository file declares', () => {
++    expect(hasChannelSections(channelRepo)).toBe(true)
++    expect(hasChannelSections(legacyRepo)).toBe(false)
++    expect(hasChannelSections(join(logsDirectory, 'absent.repo'))).toBe(false)
++  })
++
++  it('queries the single repository when an old .repo declares no channel sections', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
++    try {
++      const u = new LinuxPackageUpdater({ currentVersion: () => '0.2.2-alpha.2', repoFile: legacyRepo })
++      const first = u.checkForUpdates()
++      const firstChild = spawned.child as unknown as { emitClose: (code: number) => void }
++      firstChild.emitClose(0)
++      await first
++      expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes',
++        '--queryformat', '%{evr}\n', '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
++      expect(warn).toHaveBeenCalledTimes(1)
++      expect(String(warn.mock.calls[0]?.[0])).toContain('渠道选择可能不生效')
++      const second = u.checkForUpdates()
++      const secondChild = spawned.child as unknown as { emitClose: (code: number) => void }
++      secondChild.emitClose(0)
++      await second
++      expect(warn).toHaveBeenCalledTimes(1)
++    } finally {
++      warn.mockRestore()
++    }
++  })
++
++  it('does not warn about the channel when both sections are installed', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
++    try {
++      const u = updater({ repoFile: channelRepo })
++      await u.checkForUpdates()
++      expect(warn).not.toHaveBeenCalled()
++    } finally {
++      warn.mockRestore()
++    }
++  })
++
++  it('hands the selected channel to the helper, and reads the channel at install time', () => {
++    const u = updater()
++    u.on('error', () => { /* the close below is only here to release the helper timer */ })
++    const close = (): void => {
++      const child = spawned.child as unknown as { emitClose: (code: number | null) => void }
++      child.emitClose(1)
++    }
++    u.quitAndInstall()
++    close()
++    expect(spawned.calls.at(-1)).toEqual(['pkexec', '/bin/sh', '--channel=nightly'])
++    u.channel = 'stable'
++    u.quitAndInstall()
++    close()
++    expect(spawned.calls.at(-1)).toEqual(['pkexec', '/bin/sh', '--channel=stable'])
++  })
++
++  it('keeps a manual check refreshing metadata on the selected channel', async () => {
++    const u = realUpdater()
++    u.channel = 'stable'
++    u.markManualCheck()
++    const pending = u.checkForUpdates()
++    const child = spawned.child as unknown as { emitClose: (code: number) => void }
++    child.emitClose(0)
++    await pending
++    expect(spawned.calls.at(-1)).toEqual(['dnf5', 'repoquery', '--upgrades', '--assumeyes', '--refresh',
++      '--disablerepo=dsh-desktop-nightly', '--enablerepo=dsh-desktop', '--queryformat', '%{evr}\n',
++      '--setopt=dsh-desktop.skip_if_unavailable=0', 'dsh-desktop'])
 +  })
 +
 +  it('kills a dnf5 query that never returns instead of leaving the check pending', async () => {

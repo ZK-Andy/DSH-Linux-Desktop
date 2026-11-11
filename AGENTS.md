@@ -91,9 +91,12 @@
 
 - 只出 rpm，只支持 x86_64；不出 AppImage/deb。
 - Host 使用 Electron 自带 Node；asar 保持开启；sharp 只在子进程加载。
-- 更新只经 dnf 仓库：
-  - 检查：普通权限运行 `dnf5 check-upgrade dsh-desktop`（手动检查加 `--refresh`），退出码 100 表示有更新；
-  - 安装：`pkexec /usr/libexec/dsh-update-helper`，不传参数；helper 只执行 `dnf5 upgrade -y --refresh dsh-desktop`；
+- 更新只经 dnf 仓库，分 nightly / stable 两个渠道：
+  - 渠道判定：发布 tag 经 `scripts/lib/release-channel.sh` 判定——版本含预发布标记（`~`、`-rc`、alpha、beta 等）→ nightly；正式版 → stable，且同时进 nightly。应用侧渠道状态只存于上游 `settings-file` 的 `updates.channel`，默认 nightly。
+  - 仓库：随包 `/etc/yum.repos.d/dsh-desktop.repo` 一份文件两个 section——stable `dsh-desktop`（enabled=1）、nightly `dsh-desktop-nightly`（enabled=0）；手动 dnf 默认只走 stable。
+  - 检查：手动检查用普通权限 `dnf5 check-upgrade dsh-desktop`（加 `--refresh`；退出码 100 = 有更新）；应用内需要可用版本号，用 `dnf5 repoquery --upgrades --queryformat '%{evr}\n'`，并按渠道显式 `--enablerepo` / `--disablerepo`（nightly 默认 disabled，不显式选就看不到预发布）。
+  - 安装：`pkexec /usr/libexec/dsh-update-helper [--channel=nightly|stable]`，只有一个参数，无参 = nightly；helper 只接受 `--channel=nightly` / `--channel=stable`（非法 → 64，非 root → 77，公钥导入失败 → 70），只执行一条 `dnf5 upgrade -y --refresh`，显式启用所选渠道、禁用另一渠道；dnf 语义不降级。
+  - 迁移兼容：用户改过的旧 `.repo`（`%config(noreplace)`）缺渠道 section 时，helper 与应用侧都退回单仓库查询/升级，并在日志写明“渠道可能不生效”。
   - 应用不自行下载、校验或安装 rpm，不改写 `/opt`、`/usr`。
 - `/etc`、`/usr` 下的系统文件由 rpm 拥有，不在 `%post` 中复制。
 - 包名 `dsh-desktop`，可执行名 `deepseek-harness`，仓库名 `DSH-Linux-Desktop`。

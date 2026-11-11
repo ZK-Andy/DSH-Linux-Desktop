@@ -27,11 +27,11 @@
 
 - fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
 - 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
-- 补丁序列 `0001–0011`，每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
+- 补丁序列 `0001–0009`、`0011`（`0010` 已随上游 rc.2 删除，编号不复用；见 §10），每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
   - `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径；
   - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数，全部落在 `scripts/electron-builder-linux.mjs`，上游 builder 配置只留一处展开）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
   - `0003-sharp-isolation`：sharp 隔离（§3.6）；`0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退；
-  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）；`0009-update-ui`：应用内更新的对话框与设置页指示器（`update-coordinator.ts`、`update-presentation.ts`、`ui-settings-general`，含对应测试）；`0010-host-auth-cookie-prune`：启动前回收历史端口签发的 Host 认证 cookie（实现落在 `host-auth-cookies.ts`），避免累计约 70 条后请求头越过 Host 的 16 KB 上限、431 被误报为 Web 认证失败；`0011-update-install-handoff`：更新安装交接——helper 在应用运行中执行（不取 Host 任务锁），成功后停 Host 再重启，失败则保持运行（实现落在 `update-install-handoff.ts`，含测试；`main.ts` 只挂钩）。`main.ts` 只留各模块的挂钩（净增为负）。
+  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`；尺寸存为上游 `settings-file` 的 looseObject 根字段，不另建存储）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）；`0009-update-ui`：应用内更新的对话框与设置页指示器（`update-coordinator.ts`、`update-presentation.ts`、`ui-settings-general`，含对应测试）；`0011-update-install-handoff`：更新安装交接——helper 在应用运行中执行（不取 Host 任务锁），成功后停 Host 再重启，失败则保持运行（实现落在 `update-install-handoff.ts`，含测试；`main.ts` 只挂钩）。`main.ts` 只留各模块的挂钩（净增为负）。
 - **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
 - 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
@@ -40,7 +40,9 @@
 - electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
 - 构建配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
 - `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
-- 预发布版本映射：`dsh-v0.2.2-rc.1` → rpm `0.2.2~rc.1`。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。
+- 预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`（tag `v0.2.2-rc.2-1` 对应 Release 号 1）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。
+- 门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测（`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义）；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
+- 上游 publish 流程（`desktop-publish-targets.ts`、`retain-desktop-ci.ts`、mac/win 各 workflow）保持 mac/win 三目标不变；`0001` 只把 publish runner 的 target 校验放宽到接受 `linux-x64`，使类型与 `DesktopAutoUpdateTarget` 一致——这只是允许配置里出现 linux 目标，Linux 不走上游 publish 流程（`desktopPackageWorkflows` 仍只有 mac/win 三项）。
 - GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。
 - 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
 - 补丁重放失败：构建失败并自动开 issue，不产出 Release。
@@ -60,12 +62,14 @@
 ### 3.4 更新
 
 - 唯一真源是包管理器；应用内不写 `/usr`，不做自更新。
+- **渠道（nightly / stable）**：发布 tag 经 `scripts/lib/release-channel.sh` 判定——版本含预发布标记（`~`、`-rc`、alpha、beta 等）→ nightly；正式版 → stable，且同时进 nightly。应用侧渠道状态只存上游 `settings-file` 的 `updates.channel`，默认 nightly，设置页可切换。切换只影响检查/安装时查哪个 repo，不改变已装版本；dnf 语义不降级，从 nightly 切回 stable 后正式版追平前显示「已是最新」。
+- 仓库布局：`gh-pages` 上分 `/stable` 与 `/nightly` 两套 repodata；迁移期根 `/repodata` 镜像 nightly，供未升到双渠道版的老应用继续工作（见 §10）。随包 `/etc/yum.repos.d/dsh-desktop.repo` 一份文件两个 section：stable `dsh-desktop`（enabled=1）、nightly `dsh-desktop-nightly`（enabled=0）——手动 dnf 默认只走 stable。
 - **复用官方更新 UI**：改 `apps/desktop/src/update-coordinator.ts` 的状态机（:54 目前直接 `new autoUpdater`，:55 依赖 `app-update.yml`），保留 `update-dialog` / `update-presentation` 的渲染层契约，不另做原生 dialog，不搞两套更新界面。
-- 检查源：随包安装的 dnf 仓库，一条命令——`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（手动检查加 `--refresh`）。有输出 = 有更新，空 = 已是最新，非 0 退出 = 原样展示错误；不解析人类可读输出。
+- 检查源：随包安装的 dnf 仓库，一条命令——`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（手动检查加 `--refresh`），并按渠道显式 `--enablerepo` / `--disablerepo`（nightly 默认 disabled，不显式选就看不到预发布）。有输出 = 有更新，空 = 已是最新，非 0 退出 = 原样展示错误；不解析人类可读输出。
 - 检查时机：启动后延迟一次 + 托盘「检查更新」+ 设置页；不静默下载。
-- 流程：检查 → 提示 → `pkexec /usr/libexec/dsh-update-helper`（无参，应用保持运行；spawn 只给 pkexec 设 `LC_ALL=C`——pkexec 会把 helper 的环境重置为最小安全集（man pkexec SECURITY NOTES），helper 不继承我们的 env，真正要守的是 pkexec 自己的 polkit 连接：GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`，实例级环境污染曾由此致授权前失败（#19），系统总线固定走默认 socket。真机验证：`env -i LC_ALL=C` 下全链成功，PATH/HOME/会话变量都不需要。硬耦合：不设 `DBUS_SESSION_BUS_ADDRESS`，pkexec 接触不到会话总线与认证代理，当前 `allow_any` 下无碍；策略一旦改回需要认证的形态，安装会直接失败而非弹窗，改策略前先放宽 env）→ helper `dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop` → 成功后停 Host、`app.relaunch()` 并退出；失败则保持应用运行并显示错误，不自动重启（Linux 全程不取 Host 任务锁），同时把失败详情（候选与当前版本、退出码、helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600，目录每次失败时 chmod 0700——`mkdirSync` 的 mode 只在新建时生效，日志目录通常已由 crash 报告创建，故补 chmod 兜底；每条记录有界，故不做轮转）——pkexec 只在成功时写系统日志，失败只打 stderr，不落盘就没有目击者（2026-11-05 真机 127 排查的教训）；helper 退出码 127（pkexec 未获授权、出错或 helper 无法执行，认证对话框被取消才是 126）的错误文案附「彻底退出应用后重新打开」的自愈指引：实例级的环境污染会让 pkexec 在授权前失败，托盘「重启」走 `app.relaunch()` 继承旧进程环境治不了，只有桌面重新拉起才拿干净环境。应用内没有下载缓存、没有 sha256/`rpm -K` 校验，签名与完整性由 dnf 的 `gpgcheck`/`repo_gpgcheck` 负责。
+- 流程：检查 → 提示 → `pkexec /usr/libexec/dsh-update-helper [--channel=nightly|stable]`（只有一个可选参数，无参 = nightly，应用保持运行；spawn 只给 pkexec 设 `LC_ALL=C`——pkexec 会把 helper 的环境重置为最小安全集（man pkexec SECURITY NOTES），helper 不继承我们的 env，真正要守的是 pkexec 自己的 polkit 连接：GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`，实例级环境污染曾由此致授权前失败（#19），系统总线固定走默认 socket。真机验证：`env -i LC_ALL=C` 下全链成功，PATH/HOME/会话变量都不需要。硬耦合：不设 `DBUS_SESSION_BUS_ADDRESS`，pkexec 接触不到会话总线与认证代理，当前 `allow_any` 下无碍；策略一旦改回需要认证的形态，安装会直接失败而非弹窗，改策略前先放宽 env）→ helper 只执行一条 `dnf5 upgrade -y --refresh <所选渠道的 repo 参数> dsh-desktop`，显式启用所选渠道、禁用另一渠道；仓库文件里是 `skip_if_unavailable=1`，helper 不覆盖该开关，仓库不可达的可见性由应用侧检查负责（它显式关掉此项以便报错）；非法参数退 64，非 root 退 77，公钥导入失败退 70；dnf 语义不降级 → 成功后停 Host、`app.relaunch()` 并退出；失败则保持应用运行并显示错误，不自动重启（Linux 全程不取 Host 任务锁），同时把失败详情（候选与当前版本、退出码、helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600，目录每次失败时 chmod 0700——`mkdirSync` 的 mode 只在新建时生效，日志目录通常已由 crash 报告创建，故补 chmod 兜底；每条记录有界，故不做轮转）——pkexec 只在成功时写系统日志，失败只打 stderr，不落盘就没有目击者（2026-11-05 真机 127 排查的教训）；helper 退出码 127（pkexec 未获授权、出错或 helper 无法执行，认证对话框被取消才是 126）的错误文案附「彻底退出应用后重新打开」的自愈指引：实例级的环境污染会让 pkexec 在授权前失败，托盘「重启」走 `app.relaunch()` 继承旧进程环境治不了，只有桌面重新拉起才拿干净环境。应用内没有下载缓存、没有 sha256/`rpm -K` 校验，签名与完整性由 dnf 的 `gpgcheck`/`repo_gpgcheck` 负责。
 - 版本比较：把 rpm `EVR` 编码成 semver——预发布 `X.Y.Z~<pre>-R` → `X.Y.Z-<pre>.R`，正式版 `X.Y.Z-R` → `X.Y.Z-z.R`，去掉 `0:` epoch，按最后一个 `-` 切分；`currentVersion` 用同一函数编码安装中的版本。
-- helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与 `/var/log/dsh-desktop` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`）；`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载时删掉随包公钥；polkit 对本机用户直接放行（`allow_any=yes`，不依赖 logind 会话或认证代理）；helper 只接受零参数，日志写 `/var/log/dsh-desktop/update.log`，并记录 pkexec 传入的调用者 uid/pid 便于审计。`.repo` 用 `metadata_expire=1h`、`skip_if_unavailable=1`、`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`。
+- helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与 `/var/log/dsh-desktop` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`）；`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载时删掉随包公钥；polkit 对本机用户直接放行（`allow_any=yes`，不依赖 logind 会话或认证代理）；helper 只接受可选 `--channel=nightly|stable`（无参 = nightly，其它参数退 64），日志写 `/var/log/dsh-desktop/update.log`，并记录 pkexec 传入的调用者 uid/pid 便于审计。`.repo` 用 `metadata_expire=1h`、`skip_if_unavailable=1`、`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`；迁移期用户改过的旧 `.repo`（`%config(noreplace)`）缺渠道 section 时，helper 与应用侧退回单仓库查询/升级并在日志写明「渠道可能不生效」（见 §10）。
 - electron-updater 的下载/安装路径在补丁里整体替换（不是「禁用后另开一路」），避免两套状态机并存。
 
 ### 3.5 桌面集成
@@ -107,7 +111,7 @@
 DSH-Linux-Desktop/
 ├── PLAN.md
 ├── upstream-tag             # 钉住的上游 tag（fetch 与 CI 的唯一真源）
-├── patches/                 # 0001–0011，每个补丁一个模块，按编号顺序 git apply
+├── patches/                 # 0001–0009、0011，每个补丁一个模块，按编号顺序 git apply
 ├── assets/tray-linux.png    # 二进制托盘图标（apply-patches.sh 放到位）
 ├── scripts/
 │   ├── fetch-upstream.sh    # 按 upstream-tag 浅克隆到 upstream/
@@ -129,7 +133,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 - **M1 本地跑通（dev）**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘、关窗隐藏后能召回，并验证 sharp 隔离后 `read_image`/图片附件不再崩 Host（只验行为，不出包）。
 - **M2 CI 出包**：CI 构建 rpm（含冒烟截图与 SNI 检查），`dnf5 install` 产物后可启动；实测并钉死版本映射、`/opt` 路径、`WM_CLASS` 与依赖。
 - **M3 CI + 自动跟版**：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
-- **M4 更新链**：`dnf5 repoquery --upgrades` 检查 → 官方更新 UI → helper（无参）→ 授权 → `dnf5 upgrade` → 重启。
+- **M4 更新链**：`dnf5 repoquery --upgrades` 检查 → 官方更新 UI → helper（可选 `--channel=nightly|stable`，无参 = nightly）→ 授权 → `dnf5 upgrade` → 重启。
 - **M5 收尾**：单实例复核、GPG 校验、README 前置条件、docs 成文。
 - dnf 仓库（B）不进里程碑，M1–M5 完成后再评估。
 
@@ -209,7 +213,7 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 ### M8 补丁首行与门禁
 
-- 现状：8 个模块补丁都已写 `变化理由：` 首行；`0006-window-frameless.patch` 不再需要 `例外：规则 4`（实现搬进模块后 `main.ts` 净增为负）。`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 已落地并在 CI 里于 `apply-patches.sh` 之前运行。
+- 现状：10 个模块补丁都已写 `变化理由：` 首行；`0006-window-frameless.patch` 不再需要 `例外：规则 4`（实现搬进模块后 `main.ts` 净增为 -68）。`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 已落地并在 CI 里于 `apply-patches.sh` 之前运行。
 - 目标（已完成部分）：首行（`变化理由：`、`例外：` 行）是 `diff --git` 之前的 preamble；`patches/` 只经 `regen-patch.sh` 生成和重生成；`patch-surface.sh` 只读 `patches/` 做静态检查：
   - 每个补丁首行为 `变化理由：…`；
   - 除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；
@@ -219,3 +223,14 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 - 验收：CI 在 `apply-patches.sh` 之前运行该脚本；对现状输出的违规恰好是本节登记的项。
 - `apply-patches.sh --check` 对叠加补丁不成立（每条都对干净树试打，后置补丁依赖前置补丁新建的文件），待修成累积试打或删除该选项。
 - 负责补丁：不涉及补丁（`scripts/`）；首行随各模块补丁重写补齐（已完成）。
+
+### 双渠道更新（迁移期）
+
+- 现状：`gh-pages` 根 `/repodata` 仍镜像 nightly，供未升级到双渠道版的老应用继续检查更新；用户改过的旧 `.repo`（`%config(noreplace)`）没有 nightly section，helper 与应用侧退回单仓库并在日志写明「渠道可能不生效」。
+- 目标：所有用户换装带两 section 的新 `.repo` 后，删除根 `/repodata` 镜像与两处兜底（helper 单仓库回退、应用侧单仓库查询）。
+- 验收：`scripts/lib/release-channel.sh` 的渠道判定 + 发布布局断言（`/stable`、`/nightly` 各自 repodata）；helper 收到 `--channel=*` 时显式 `--enablerepo` / `--disablerepo`。
+- 负责补丁：`0002-packaging`（`.repo` 两 section）、`0008-updates-dnf`（应用侧查询）；helper 属 `packaging/` 资产，不在补丁内。
+
+### 条目删除记录
+
+- `0010-host-auth-cookie-prune`：已由上游 `dsh-v0.2.2-rc.2` 实现（启动前回收历史 Host 认证 cookie），我们的补丁与 `host-auth-cookies.ts` 已删除、编号 0010 不复用；现补丁序列为 `0001–0009`、`0011`。

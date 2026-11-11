@@ -1,28 +1,67 @@
 #!/bin/bash
-# 由 pkexec 以 root 调用的唯一入口：把 dsh-desktop 升到仓库里的最新版。
+# 由 pkexec 以 root 调用的唯一入口：把 dsh-desktop 升到所选渠道的最新版。
 #
-# 不接受任何参数：仓库地址、签名公钥与 gpgcheck 全部由 /etc/yum.repos.d/dsh-desktop.repo
-# 与随包公钥定义，helper 只负责触发一次 `dnf5 upgrade`。日志写在 /var/log/dsh-desktop/。
+# 唯一可选参数：--channel=<nightly|stable>；缺省 nightly（旧版应用不传渠道，迁移期沿用 nightly）。
+# 其他任何参数一律拒绝（退出码 64）。仓库地址、签名公钥与 gpgcheck 仍由
+# /etc/yum.repos.d/dsh-desktop.repo 与随包公钥定义，helper 只按渠道固定选择 repo。
+# 日志写在 /var/log/dsh-desktop/。
 set -euo pipefail
 
 LOG_DIR=/var/log/dsh-desktop
 LOG="$LOG_DIR/update.log"
-mkdir -p "$LOG_DIR"
-chmod 0755 "$LOG_DIR"
+CHANNEL=nightly
+
+# 参数先于权限校验：参数错是调用方的问题，不该被误报成「没经 pkexec」（77）。
+# 这两步都发生在日志目录就绪之前，所以写日志尽力而为，任何情况下都不掩盖退出码。
+try_log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG" 2>/dev/null || true; }
+usage_reject() {
+  try_log "拒绝：$1"
+  printf '用法：dsh-update-helper [--channel=nightly|stable]\n' >&2
+  exit 64
+}
+
+case "$#" in
+  0) ;;
+  1)
+    case "$1" in
+      --channel=nightly|--channel=stable) CHANNEL="${1#--channel=}" ;;
+      *) usage_reject "不支持的参数：$1（只接受 --channel=nightly 或 --channel=stable）" ;;
+    esac
+    ;;
+  *) usage_reject "只接受一个可选参数 --channel=<nightly|stable>（收到 $# 个）" ;;
+esac
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
 
-if [ "$#" -ne 0 ]; then
-  log "拒绝：不接受参数（收到 $# 个）"
-  exit 64
-fi
-
 if [ "$(id -u)" -ne 0 ]; then
-  log "拒绝：必须经 pkexec 以 root 运行"
+  try_log "拒绝：必须经 pkexec 以 root 运行（渠道 $CHANNEL）"
   exit 77
 fi
 
-log "开始升级 dsh-desktop"
+mkdir -p "$LOG_DIR"
+chmod 0755 "$LOG_DIR"
+
+# 渠道只决定启用哪个 repo：两个 repo 都在随包的 dsh-desktop.repo 里，显式禁用另一个，
+# 保证 dnf 这次事务只看所选渠道。dnf upgrade 本身不降级，所以这里不需要额外比较版本。
+#
+# 迁移期兜底：.repo 是 %config(noreplace)，用户改过（常见是换镜像/代理）就会保留旧文件，
+# 里面只有单仓库 [dsh-desktop]、baseurl 指向站点根。给 dnf 传它不认识的
+# --enablerepo/--disablerepo 会直接失败（dnf5：任何仓库未匹配到 X，退出码 2），所以缺渠道
+# section 时退回「不指定 repo」的单仓库升级；站点根目录迁移期等价 nightly，等用户换上随包的
+# 新 .repo 后自动走渠道。
+REPO_FILE=/etc/yum.repos.d/dsh-desktop.repo
+if grep -q '^\[dsh-desktop\]' "$REPO_FILE" 2>/dev/null \
+  && grep -q '^\[dsh-desktop-nightly\]' "$REPO_FILE" 2>/dev/null; then
+  case "$CHANNEL" in
+    stable) REPO_ARGS=(--disablerepo=dsh-desktop-nightly --enablerepo=dsh-desktop) ;;
+    nightly) REPO_ARGS=(--disablerepo=dsh-desktop --enablerepo=dsh-desktop-nightly) ;;
+  esac
+else
+  REPO_ARGS=()
+  log "注意：$REPO_FILE 缺少渠道 section（旧版或本地改过），本次按单仓库升级（single-repo upgrade）；站点根目录迁移期等价 nightly，所选渠道 $CHANNEL 可能不生效（labeled channel may not take effect）"
+fi
+
+log "开始升级 dsh-desktop（渠道 $CHANNEL）"
 log "调用者 uid=${PKEXEC_UID:-unknown} pid=${PKEXEC_PID:-unknown}"
 # 公钥由 rpm 装在 /etc/pki/rpm-gpg/，%post 已做过一次幂等导入；这里再导入一次，
 # 保证手工删除过 keyring 的机器也能升级。
@@ -32,10 +71,15 @@ rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop >>"$LOG" 2>&1 || {
 }
 
 # dnf5 的输出用 tee 同时进日志与 stdout：pkexec 客户端按行读取，安装期间显示最新一行。
-if dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop 2>&1 | tee -a "$LOG"; then
+# 不传 --setopt=...skip_if_unavailable=0：随包 .repo 用 skip_if_unavailable=1，渠道仓库还没
+# 发布第一次内容时（新渠道上线那一刻）helper 应跳过而不是报错；仓库不可达的可见性由应用侧
+# 检查步骤负责（它显式关掉 skip_if_unavailable 以便报错）。
+if dnf5 upgrade -y --refresh "${REPO_ARGS[@]}" dsh-desktop 2>&1 | tee -a "$LOG"; then
   log "升级成功"
   exit 0
+else
+  rc=$?
 fi
 
-log "升级失败，见上方 dnf5 输出（退出码 $?）"
+log "升级失败，见上方 dnf5 输出（退出码 $rc）"
 exit 1

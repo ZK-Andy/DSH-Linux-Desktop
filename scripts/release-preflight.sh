@@ -33,13 +33,25 @@ size=$(stat -c %s "$rpm")
 
 # tag 尾部的 Release 必须与包内 Release 一致：v0.2.2-alpha.2-2 ⇒ Release 2。
 tag="${GITHUB_REF_NAME:-}"
+channel=""
 if [[ -n "$tag" ]]; then
   want_release=$(printf '%s' "$tag" | sed -n 's/^v.*-\([0-9][0-9]*\)$/\1/p')
   got_release=$(rpm -qp --qf '%{RELEASE}' "$rpm")
   [[ -n "$want_release" ]] || fail "tag 结尾缺少 Release 段：$tag"
   [[ "$want_release" == "$got_release" ]] || fail "tag 的 Release（$want_release）与包内 Release（$got_release）不一致"
+
+  # 渠道与包内版本必须一致：stable 仓库只能收正式版（VERSION 不含 ~），预发布只能进 nightly。
+  # tag 判 stable 而包内是 0.2.2~rc.2 这类错配在这里拦下，否则 stable 渠道会收到预发布版。
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/release-channel.sh"
+  channel="$(release_channel_for_tag "$tag")"
+  version="$(rpm -qp --qf '%{VERSION}' "$rpm")"
+  if [[ "$channel" == stable ]]; then
+    [[ "$version" != *~* ]] || fail "tag $tag 判为 stable，但包内 VERSION=$version 是预发布（含 ~）"
+  else
+    [[ "$version" == *~* ]] || echo "::warning::tag $tag 判为 nightly，但包内 VERSION=$version 是正式版；正式版也进 nightly，仅提示"
+  fi
 fi
 
 # 校验和文件必须只因自指而省略自身，且逐条复核通过。
 (cd "$dir" && sha256sum -c SHA256SUMS.txt >/dev/null) || fail "SHA256SUMS.txt 复核失败"
-echo "preflight OK: $(basename "$rpm")（$(numfmt --to=iec "$size")，Release $(rpm -qp --qf '%{RELEASE}' "$rpm")）"
+echo "preflight OK: $(basename "$rpm")（$(numfmt --to=iec "$size")，Release $(rpm -qp --qf '%{RELEASE}' "$rpm")，渠道 ${channel:-未判定}）"

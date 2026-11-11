@@ -1,6 +1,6 @@
 变化理由：把上游仓库变成可构建的 Linux 桌面工程：下载与解包、补齐 workspace 入口、包骨架、运行时依赖、托盘图标生成、office 与 assets 放置。
 diff --git a/.gitignore b/.gitignore
-index 4d52487a..296a8ea3 100644
+index 6255c708..22e5eee8 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -2,6 +2,7 @@ CLAUDE.local.md
@@ -11,7 +11,7 @@ index 4d52487a..296a8ea3 100644
  apps/desktop/*.p12
  node_modules/
  lib/
-@@ -50,3 +51,10 @@ native/system/test/bin/
+@@ -52,3 +53,10 @@ native/system/test/bin/
  
  # Generated company-signed CUA release record.
  /packages/experimental/cua-macos/cua-helper.json
@@ -23,10 +23,10 @@ index 4d52487a..296a8ea3 100644
 +apps/desktop/resources/rpm-post-install.sh
 +apps/desktop/resources/rpm-post-remove.sh
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 5d4f00eb..4bab4807 100644
+index f13ba317..525cca0a 100644
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
-@@ -38,6 +38,8 @@
+@@ -39,6 +39,8 @@
      "package:win:x64": "tsx scripts/package-target.ts win-x64",
      "package:win:x64:unsigned": "tsx scripts/package-target.ts win-x64 --unsigned",
      "package:win:x64:dir": "tsx scripts/package-target.ts win-x64 --dir",
@@ -36,7 +36,7 @@ index 5d4f00eb..4bab4807 100644
      "upload:mac:x64": "tsx scripts/upload-target.ts mac-x64",
      "upload:win:x64": "tsx scripts/upload-target.ts win-x64",
 diff --git a/apps/desktop/scripts/desktop-auto-update-environment.d.mts b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
-index 4d42b3dd..87b29dee 100644
+index c58df5a0..f85721d2 100644
 --- a/apps/desktop/scripts/desktop-auto-update-environment.d.mts
 +++ b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
 @@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
@@ -49,7 +49,7 @@ index 4d42b3dd..87b29dee 100644
  /**
   * Name the fixed installer object shared by uploading and cache refresh.
 diff --git a/apps/desktop/scripts/desktop-auto-update-environment.mjs b/apps/desktop/scripts/desktop-auto-update-environment.mjs
-index 835beadd..8cf84b36 100644
+index 24aaa0ea..be95335b 100644
 --- a/apps/desktop/scripts/desktop-auto-update-environment.mjs
 +++ b/apps/desktop/scripts/desktop-auto-update-environment.mjs
 @@ -33,7 +33,7 @@ const UPDATE_ENVIRONMENTS = {
@@ -61,7 +61,7 @@ index 835beadd..8cf84b36 100644
  
  /**
   * Name the fixed installer object shared by uploading and cache refresh.
-@@ -63,7 +63,7 @@ export function resolveDesktopAutoUpdateEnvironment(env) {
+@@ -72,7 +72,7 @@ export function resolveDesktopAutoUpdateEnvironment(env) {
   * Resolve one supported platform and architecture to its update directory.
   * @param {NodeJS.Platform} platform - Target Node.js platform.
   * @param {string} arch - Target Node.js architecture.
@@ -70,7 +70,7 @@ index 835beadd..8cf84b36 100644
   */
  export function resolveDesktopAutoUpdateTarget(platform, arch) {
    const os = platform === 'darwin' ? 'mac' : platform === 'win32' ? 'win' : platform
-@@ -76,7 +76,7 @@ export function resolveDesktopAutoUpdateTarget(platform, arch) {
+@@ -85,7 +85,7 @@ export function resolveDesktopAutoUpdateTarget(platform, arch) {
  
  /**
   * Return the local completion record filename for one packaged target.
@@ -371,10 +371,10 @@ index ec9da721..76c07e5e 100644
    options?: { unsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean },
  ): void
 diff --git a/apps/desktop/scripts/desktop-package-environment.mjs b/apps/desktop/scripts/desktop-package-environment.mjs
-index 27a7f92c..23a0c37e 100644
+index 83e9dbbc..79627c33 100644
 --- a/apps/desktop/scripts/desktop-package-environment.mjs
 +++ b/apps/desktop/scripts/desktop-package-environment.mjs
-@@ -7,7 +7,8 @@ import { parseEnv } from 'node:util'
+@@ -7,7 +7,8 @@ import { readDesktopPackageSettings as readSettings } from './desktop-file-setti
  import { resolveDesktopAppId, resolveMacOSNotarizationEnvironment, resolveMacOSSigningEnvironment, resolveNpmRegistry } from './desktop-release-environment.mjs'
  import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
  import { createWindowsTokenSigner } from './windows-sign.mjs'
@@ -391,10 +391,10 @@ index 27a7f92c..23a0c37e 100644
 -const AMBIENT_RELEASE_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|MANDATORY_UPDATE_.*|WINDOWS_.*|MACOS_.*)|APPLE_.*|(?:WIN_)?CSC_.*|DOWNLOAD_(?:TEST|PROD)_.*)$/iu
 +const LINUX_SETTING = /^DSH_DESKTOP_LINUX_(?:MAINTAINER|HOMEPAGE)$/u
 +const AMBIENT_RELEASE_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|MANDATORY_UPDATE_.*|WINDOWS_.*|MACOS_.*|LINUX_.*)|APPLE_.*|(?:WIN_)?CSC_.*|DOWNLOAD_(?:TEST|PROD)_.*)$/iu
- const FILE_SETTINGS = ['DSH_DESKTOP_WINDOWS_CER_FILE', 'DSH_DESKTOP_WINDOWS_SIGNTOOL', 'APPLE_API_KEY', 'APPLE_KEYCHAIN', 'CSC_LINK']
  
  /**
-@@ -40,7 +42,7 @@ export function localMacOSPackageEnvironment(environment = process.env) {
+  * Select local macOS test defaults without reading dotenv files or inheriting release settings.
+@@ -39,7 +41,7 @@ export function localMacOSPackageEnvironment(environment = process.env) {
   * Any defined Mac ZIP override rejects Windows, including an empty value; nonempty Windows overrides reject macOS.
   * PACKAGE_TEST_RELEASE_ID overrides the test preset only; blank retains its configured ID.
   * PACKAGE_WINDOWS_COMPRESSION_LEVEL selects 3 or 7 for Windows workflow builds; blank retains the file setting.
@@ -403,7 +403,7 @@ index 27a7f92c..23a0c37e 100644
   * @param {NodeJS.ProcessEnv} environment Parent environment, retained only for unrelated build tools.
   * @param {string} appRoot Desktop application directory; relative credential paths resolve here.
   * @param {{ unsigned?: boolean, prepareOnly?: boolean }} options Unsigned presets and Windows preparation-only presets never read signing credentials.
-@@ -59,14 +61,18 @@ export function loadDesktopPackageEnvironment(platform, environment = process.en
+@@ -58,14 +60,18 @@ export function loadDesktopPackageEnvironment(platform, environment = process.en
      if (!['3', '7'].includes(zipCompression)) throw new Error('desktop package: workflow ZIP compression must be 3 or 7')
    }
    const preset = environment.DSH_PACKAGING_PRESET
@@ -424,7 +424,7 @@ index 27a7f92c..23a0c37e 100644
    const publicPlatformSetting = platform === 'win32'
      ? /^DSH_DESKTOP_WINDOWS_(?:SIGNATURE_CACHE_(?:DIR|CONCURRENCY)|PACK_CONCURRENCY|COMPRESSION_LEVEL)$/u
      : /^DSH_DESKTOP_MACOS_(?:SIGNATURE_CACHE_DIR|PACK_CONCURRENCY|ZIP_COMPRESSION_LEVEL|DOWNLOAD_PROXY|NOTARIZATION_PROXY)$/u
-@@ -148,7 +154,7 @@ function requireReadableFile(environment, name) {
+@@ -113,7 +119,7 @@ function requireReadableFile(environment, name) {
  /**
   * Validate the packaging mode before preparation without invoking a token or Apple's services.
   * @param {NodeJS.ProcessEnv} environment Selected local defaults or file-owned release settings.
@@ -433,7 +433,7 @@ index 27a7f92c..23a0c37e 100644
   * @param {{ unsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean }} options Explicit packaging mode.
   * @returns {void}
   */
-@@ -156,9 +162,22 @@ export function validateDesktopPackageEnvironment(environment, target, options =
+@@ -121,9 +127,22 @@ export function validateDesktopPackageEnvironment(environment, target, options =
    resolveDesktopTargetBuildPaths(environment, target.platform, target.arch)
    resolveDesktopAppId(environment)
    resolveNpmRegistry(environment)
@@ -458,7 +458,7 @@ index 27a7f92c..23a0c37e 100644
    if (options.unsigned) return
    if (!options.prepareOnly) resolveDesktopAutoUpdateConfig(environment, target.platform, target.arch)
    if (target.platform === 'win32') {
-@@ -169,7 +188,7 @@ export function validateDesktopPackageEnvironment(environment, target, options =
+@@ -134,7 +153,7 @@ export function validateDesktopPackageEnvironment(environment, target, options =
        keyContainer: environment.DSH_DESKTOP_WINDOWS_KEY_CONTAINER,
      })
      if (!options.prepareOnly) resolveWindowsSignatureCacheDirectory(environment)
@@ -507,12 +507,25 @@ index 59114757..5df4e464 100644
  /**
   * Resolve mandatory policy metadata before preparing artifacts or accessing signing hardware.
   * @param {NodeJS.ProcessEnv} environment File-owned release settings; the unselected origin is not required.
+diff --git a/apps/desktop/scripts/desktop-publish-targets.ts b/apps/desktop/scripts/desktop-publish-targets.ts
+index 3270b99b..2e8a271e 100644
+--- a/apps/desktop/scripts/desktop-publish-targets.ts
++++ b/apps/desktop/scripts/desktop-publish-targets.ts
+@@ -8,7 +8,7 @@ export const desktopPackageWorkflows = {
+   'win-x64': '.github/workflows/windows-package.yml',
+ } as const
+ 
+-const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64'])
++const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'])
+ 
+ /** Machine labels are unique; a scalar target is shorthand for a one-element target list. */
+ export const desktopPublishRunnersSchema = z.record(z.string(), z.object({
 diff --git a/apps/desktop/scripts/desktop-release-store.ts b/apps/desktop/scripts/desktop-release-store.ts
-index c080272e..83ec26c4 100644
+index eb9d5457..37798609 100644
 --- a/apps/desktop/scripts/desktop-release-store.ts
 +++ b/apps/desktop/scripts/desktop-release-store.ts
 @@ -17,7 +17,7 @@ const sourceSchema = z.strictObject({
-   channel: z.enum(['nightly', 'latest']),
+   channel: z.enum(['nightly', 'stable']),
    runnerName: z.string().min(1),
    // Storage accepts every Desktop target; CI routing separately limits currently provisioned platforms.
 -  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64']),
@@ -585,7 +598,7 @@ index ff855cfd..a568c806 100644
  ): Promise<void> {
    const failures = await probeDesktopToolchain(platform, environment)
 diff --git a/apps/desktop/scripts/desktop-upload-plan.ts b/apps/desktop/scripts/desktop-upload-plan.ts
-index 1461444f..1adda3f1 100644
+index 39ff954b..b53b1267 100644
 --- a/apps/desktop/scripts/desktop-upload-plan.ts
 +++ b/apps/desktop/scripts/desktop-upload-plan.ts
 @@ -21,6 +21,7 @@ const TARGETS = {
@@ -829,10 +842,10 @@ index 6c3c12c8..0ae20f99 100644
    resolveDesktopPackageTarget(target))
  if (windows && !values.unsigned) await verifyWindowsCode(application)
 diff --git a/apps/desktop/tests/desktop-auto-update-environment.spec.ts b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-index 9fbe629c..50770217 100644
+index 74fabee9..89867fe6 100644
 --- a/apps/desktop/tests/desktop-auto-update-environment.spec.ts
 +++ b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-@@ -107,8 +107,9 @@ describe('desktop auto-update environment', () => {
+@@ -108,8 +108,9 @@ describe('desktop auto-update environment', () => {
      expect(() => resolveDesktopAutoUpdateEnvironment({
        DSH_DESKTOP_AUTO_UPDATE_ENV: 'staging',
      })).toThrow(/test.*production/u)

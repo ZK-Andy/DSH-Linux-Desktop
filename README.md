@@ -10,7 +10,7 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 状态
 
-补丁序列 `0001–0011`（每个补丁一个模块）已在上游 `dsh-v0.2.2-rc.1` 的干净树上重放通过（`patch-surface.sh` 静态断言 + 逐补丁应用干净）。已发版至 `v0.2.2-alpha.3-3`，托盘与更新链路已在装出来的 rpm 上实机验收通过。里程碑见 PLAN.md §5。
+补丁序列 `0001–0009`、`0011`（每个补丁一个模块；`0010` 已随上游 rc.2 删除）已在上游 `dsh-v0.2.2-rc.2` 的干净树上重放通过：`patch-surface.sh` 静态断言、全量 `apply-patches.sh`（无 `.rej`）、`pnpm install --frozen-lockfile`、类型门与 8 个定向单测均在本机通过；rpm 构建与安装验收只走 CI（本机没有 rpmbuild），留待 CI 与真机。已发版至 `v0.2.2-alpha.3-3`，托盘与更新链路已在装出来的 rpm 上实机验收通过。里程碑见 PLAN.md §5。
 
 ## 需求（验收口径）
 
@@ -26,9 +26,9 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 版本号规则
 
-- `Version` 跟上游 tag：`0.2.2-rc.1` 映射成 rpm 的 `0.2.2~rc.1`（`~` 让预发布排在正式版之前）。
-- `Release` 是我们自己的打包序号，每次重新打包递增；同一个上游版本重新出包就是 `0.2.2~rc.1-2`，dnf 据此判定升级。
-- git tag 用 `v<上游版本>-<Release>`（如 `v0.2.2-rc.1-2`），Release 名与 tag 一致。
+- `Version` 跟上游 tag：`0.2.2-rc.2` 映射成 rpm 的 `0.2.2~rc.2`（`~` 让预发布排在正式版之前）。
+- `Release` 是我们自己的打包序号，每次重新打包递增；同一个上游版本重新出包就是 `0.2.2~rc.2-2`，dnf 据此判定升级。
+- git tag 用 `v<上游版本>-<Release>`（如 `v0.2.2-rc.2-2`），Release 名与 tag 一致。
 
 ## 安装
 
@@ -59,11 +59,12 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 ## 更新模型
 
 - 包管理器是唯一真源，应用不写 `/usr`、不自更新、不自带下载器。
-- 检查更新：`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`。有输出即有新版本，空输出即已是最新，命令失败则原样展示错误；启动后延迟检查一次，托盘「检查更新」与设置页可手动触发（手动时带 `--refresh`）。
-- 安装：`pkexec /usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，对本机用户直接放行、不依赖 logind 会话或认证代理——COSMIC 等桌面以 systemd 用户 scope 启动应用时，应用进程没有会话，按会话放行的策略会静默拒绝；代价是本机任何用户都能触发一次从签名仓库的升级，但 helper 只做固定动作，拿不到任意 root 执行）。spawn 只给 pkexec 设 `LC_ALL=C`：pkexec 会把 helper 的环境重置为最小安全集，真正要守的是 pkexec 自己的 polkit 连接（GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`），实例级的环境污染不再能打断授权，系统总线固定走默认 socket（真机验证过 `env -i LC_ALL=C` 下全链成功，PATH/HOME 都不需要）。helper 不接受任何参数，只执行 `dnf5 upgrade -y --refresh --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`，日志写 `/var/log/dsh-desktop/update.log`；helper 在应用运行中升级，成功后应用停 Host 再重启，失败则保持运行并显示错误，不自动重启，失败详情（候选与当前版本、退出码与 helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600）。
+- **更新渠道（nightly / stable）**：仓库分两个渠道——stable 只收正式版，nightly 收预发布、正式版同时进 nightly。应用默认 nightly（渠道状态存于上游 settings，设置页可切）；切换只影响检查/安装时查哪个仓库，不改变已装版本，dnf 语义不降级；从 nightly 切回 stable 后，正式版追平前显示「已是最新」。手动 `sudo dnf5 upgrade dsh-desktop` 只走 stable（nightly 的 section 默认 `enabled=0`）。
+- 检查更新：`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（应用按渠道显式 `--enablerepo` / `--disablerepo`；nightly 默认 disabled，手动命令不加就看不到预发布）。有输出即有新版本，空输出即已是最新，命令失败则原样展示错误；启动后延迟检查一次，托盘「检查更新」与设置页可手动触发（手动时带 `--refresh`）。
+- 安装：`pkexec /usr/libexec/dsh-update-helper`（polkit 动作 `org.deepseek.harness.desktop.update`，对本机用户直接放行、不依赖 logind 会话或认证代理——COSMIC 等桌面以 systemd 用户 scope 启动应用时，应用进程没有会话，按会话放行的策略会静默拒绝；代价是本机任何用户都能触发一次从签名仓库的升级，但 helper 只做固定动作，拿不到任意 root 执行）。spawn 只给 pkexec 设 `LC_ALL=C`：pkexec 会把 helper 的环境重置为最小安全集，真正要守的是 pkexec 自己的 polkit 连接（GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`），实例级的环境污染不再能打断授权，系统总线固定走默认 socket（真机验证过 `env -i LC_ALL=C` 下全链成功，PATH/HOME 都不需要）。helper 只接受可选参数 `--channel=nightly|stable`（只此一个；非法 64、非 root 77、公钥导入失败 70），无参 = nightly，只执行一条 `dnf5 upgrade -y --refresh <所选渠道的 repo 参数> dsh-desktop`，显式启用所选渠道、禁用另一渠道；仓库文件里是 `skip_if_unavailable=1`，helper 不覆盖该开关（仓库不可达的可见性由应用侧检查负责，它显式关掉此项以便报错），日志写 `/var/log/dsh-desktop/update.log`；helper 在应用运行中升级，成功后应用停 Host 再重启，失败则保持运行并显示错误，不自动重启，失败详情（候选与当前版本、退出码与 helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600）。
 - **安装报「helper 退出码 127」**：这是 pkexec 自身失败——未获授权、出错或 helper 无法执行（认证对话框被取消才是 126），helper 没有运行。失败详情已写入应用日志目录的 `update-failures.log`（含候选与当前版本）。pkexec 失败不留系统日志；个别应用实例的进程环境被污染时会出现，且托盘「重启」（`app.relaunch()`，继承旧环境）治不了——**彻底退出应用后从桌面重新打开**再装即可；若日志显示的是 exec 类错误（权限、noexec 挂载、SELinux），重开应用无效，需按日志另行排查。
 - **从旧策略升上来的机器需要一次性旁路**：alpha.2 与 alpha.3-1 的 rpm 携带的是旧 polkit 策略（按会话放行），应用内更新会被静默拒绝；先 `sudo dnf5 upgrade --refresh dsh-desktop` 装上带修复的版本，之后的应用内更新才会走通。
-- 版本比较：应用把安装的 rpm `VERSION-RELEASE` 编码成 semver 再比（预发布 `0.2.2~rc.1-6` → `0.2.2-rc.1.6`，正式版 `0.2.3-1` → `0.2.3.z.1`），所以第 10 个 release 不会被当成比第 9 个旧。
+- 版本比较：应用把安装的 rpm `VERSION-RELEASE` 编码成 semver 再比（预发布 `0.2.2~rc.2-6` → `0.2.2-rc.2.6`，正式版 `0.2.3-1` → `0.2.3.z.1`），所以第 10 个 release 不会被当成比第 9 个旧。
 - helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与日志目录 `/var/log/dsh-desktop` 都由 rpm 文件清单直接拥有（fpm 的 `源=目标` 映射）；`.repo` 标 `%config(noreplace)`，`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载（参数 0）时删掉随包公钥。
 - dnf 仓库已维护：repodata 在 `gh-pages`（GitHub Pages），rpm 在版本 Release；每次发版用 `scripts/publish-repo.sh` 重生 repodata 并推上去，否则 `dnf5 check-update` 只看到旧版本。
 
@@ -79,8 +80,8 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 发版就是打 tag 并推送（tag 尾部的数字即 rpm Release 段）：
 
 ```bash
-git tag -a v0.2.2-rc.1-1 -m "DSH Linux Desktop v0.2.2-rc.1-1"
-git push origin v0.2.2-rc.1-1
+git tag -a v0.2.2-rc.2-1 -m "DSH Linux Desktop v0.2.2-rc.2-1"
+git push origin v0.2.2-rc.2-1
 ```
 
 
@@ -103,7 +104,7 @@ git push origin v0.2.2-rc.1-1
 ## 仓库结构
 
 ```
-patches/       # 相对 upstream-tag 的补丁序列（0001–0011，每个补丁一个模块）
+patches/       # 相对 upstream-tag 的补丁序列（0001–0009、0011，每个补丁一个模块）
 assets/        # 补丁装不下的二进制资产（托盘 PNG，由 apply-patches.sh 放到位）
 scripts/       # 取上游、打补丁、构建、dev、静态 verify、装包冒烟
 docs/          # 调研与说明

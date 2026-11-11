@@ -24,7 +24,13 @@ jobs:
           fetch-depth: 0
 
       - name: Shell syntax
-        run: bash -n scripts/*.sh
+        run: |
+          bash -n scripts/*.sh scripts/lib/*.sh
+          # 渠道判定是发布链路的唯一事实来源：预发布进 nightly，正式版进 stable。
+          source scripts/lib/release-channel.sh
+          [ "$(release_channel_for_tag v0.2.2-rc.2-1)" = "nightly" ]
+          [ "$(release_channel_for_tag v0.2.2-1)" = "stable" ]
+          echo "渠道判定规则检查通过"
 
       - name: Check patch surface
         run: bash scripts/patch-surface.sh
