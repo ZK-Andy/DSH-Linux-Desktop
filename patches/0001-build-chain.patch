@@ -23,7 +23,7 @@ index 6255c708..22e5eee8 100644
 +apps/desktop/resources/rpm-post-install.sh
 +apps/desktop/resources/rpm-post-remove.sh
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index f13ba317..525cca0a 100644
+index 0c90226f..36d57171 100644
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
 @@ -39,6 +39,8 @@

@@ -1259,7 +1259,7 @@ index 83b3af70..747165fd 100644
        </div>
        {showTabs && (
 diff --git a/packages/client/ui-layout/package.json b/packages/client/ui-layout/package.json
-index d00ca63a..a56cbfe3 100644
+index f8b6b164..ba35a9b6 100644
 --- a/packages/client/ui-layout/package.json
 +++ b/packages/client/ui-layout/package.json
 @@ -47,16 +47,17 @@
@@ -1681,7 +1681,7 @@ index e0182a61..5981d3f7 100644
    )
  }
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
-index a9de4165..fe15e6bc 100644
+index 3d2e7aa6..10381d98 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 @@ -57,7 +57,13 @@
@@ -1699,7 +1699,7 @@ index a9de4165..fe15e6bc 100644
    height: 0;
  }
  
-@@ -208,6 +214,11 @@
+@@ -213,6 +219,11 @@
    justify-content: flex-start;
  }
  
@@ -1712,7 +1712,7 @@ index a9de4165..fe15e6bc 100644
     tucks 12px back under it, still clear of the toggle (28px control centered
     in the strip ends at y 40). */
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-index b573b19c..2427825e 100644
+index c8193d23..9465c5f5 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 @@ -278,6 +278,10 @@ export function SidebarRoot({
@@ -2016,10 +2016,10 @@ index de7832d1..2b504b27 100644
      const seams = harness()
      const element = row()
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
-index 65f0388b..37943d94 100644
+index 9a84d64b..d2a14964 100644
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
-@@ -4881,6 +4881,9 @@ importers:
+@@ -4884,6 +4884,9 @@ importers:
        '@deepseek-ai/dsh-client-store':
          specifier: workspace:*
          version: link:../store
