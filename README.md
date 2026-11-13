@@ -10,7 +10,7 @@ DeepSeek Harness 官方桌面端的**非官方 Fedora RPM 打包**：fork 官方
 
 ## 状态
 
-补丁序列 `0001–0009`、`0011`（每个补丁一个模块；`0010` 已随上游 rc.2 删除）已在上游 `dsh-v0.2.2-rc.2` 的干净树上重放通过：`patch-surface.sh` 静态断言、全量 `apply-patches.sh`（无 `.rej`）、`pnpm install --frozen-lockfile`、类型门与 8 个定向单测均在本机通过；rpm 构建与安装验收只走 CI（本机没有 rpmbuild），留待 CI 与真机。已发版至 `v0.2.2-alpha.3-3`，托盘与更新链路已在装出来的 rpm 上实机验收通过。里程碑见 PLAN.md §5。
+补丁序列 `0001–0009`、`0011`（每个补丁一个模块；`0010` 已随上游 rc.2 删除）已跟到上游 `dsh-v0.2.2-rc.3`：`patch-surface.sh` 静态断言、干净树顺序重放与逐字节比对通过；rc.3 尚未发版，rpm 构建与安装验收仍只走 CI（本机没有 rpmbuild）。此前已发版至 `v0.2.2-rc.2-2`（rpm `0.2.2~rc.2-2`，nightly 渠道）：CI 构建、验签、发 Release、刷新 `/nightly` repodata 全绿；托盘「检查更新」→ helper → `dnf5 upgrade` 已在真机 nightly 上升级成功（2026-11-12）。里程碑见 PLAN.md §5。
 
 ## 需求（验收口径）
 
@@ -80,8 +80,8 @@ CI 跑在 `ubuntu-24.04` 上，装 `rpm`/`xz`/`cpio` 后用 electron-builder 出
 发版就是打 tag 并推送（tag 尾部的数字即 rpm Release 段）：
 
 ```bash
-git tag -a v0.2.2-rc.2-1 -m "DSH Linux Desktop v0.2.2-rc.2-1"
-git push origin v0.2.2-rc.2-1
+git tag -a v0.2.2-rc.2-2 -m "DSH Linux Desktop v0.2.2-rc.2-2"
+git push origin v0.2.2-rc.2-2
 ```
 
 
