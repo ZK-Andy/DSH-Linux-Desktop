@@ -1,0 +1,22 @@
+# 编辑器侧的文本约定声明。与 .gitattributes 配对：那个文件钉住 GIT 产出什么（LF 签出），
+# 这个文件钉住编辑器往磁盘写什么——那是 git 的 filter 唯一管不到的路径。
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+charset = utf-8
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.patch]
+trim_trailing_whitespace = false
+
+[*.sh]
+indent_size = 2
+
+[*.{json,yml,yaml}]
+indent_size = 2

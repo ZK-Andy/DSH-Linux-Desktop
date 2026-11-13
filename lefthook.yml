@@ -1,0 +1,69 @@
+# Git 钩子（lefthook）。这里的检查只为本地快速拦一道；完整的门禁矩阵由 CI 拥有。
+# 安装：`node scripts/install-lefthook.mjs`（装依赖时由 postinstall 自动跑）。
+
+pre-commit:
+  jobs:
+    - name: 文档折行（暂存的文件）
+      glob: '*.md'
+      exclude:
+        - '.agents/notes/archived/**'
+      run: node scripts/verify-md-wrap.ts {staged_files}
+
+    - name: 文档链接（暂存的文件）
+      glob: '*.md'
+      exclude:
+        - '.agents/notes/archived/**'
+      run: node scripts/verify-md-links.ts {staged_files}
+
+    - name: Agent Note 结构
+      glob: '.agents/notes/**/*.md'
+      run: node scripts/verify-agent-note-classification.ts
+
+    - name: Agent Note 格式
+      glob: '.agents/notes/**/*.md'
+      exclude:
+        - '.agents/notes/archived/**'
+      run: node scripts/verify-agent-note-format.ts
+
+    - name: 归档件哈希
+      glob: '.agents/notes/archived/**'
+      run: node scripts/verify-archived-agent-notes.ts
+
+    - name: 字数预算
+      glob: '{AGENTS.md,PLAN.md,README.md,CONTRIBUTING.md,docs/**,.agents/skills/**}'
+      run: node scripts/verify-doc-budgets.ts
+
+    - name: 技能元数据
+      glob: '.agents/skills/**'
+      run: node scripts/verify-skill-invocation-metadata.ts
+
+    - name: 代码规范（暂存的文件）
+      glob: 'scripts/*.ts'
+      run: >-
+        ./node_modules/.bin/oxlint --config .oxlintrc.staged.json --fix
+        --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+
+    - name: 补丁形状
+      glob: 'patches/**'
+      run: bash scripts/patch-surface.sh
+
+    - name: shell 语法
+      glob: 'scripts/*.sh'
+      run: bash scripts/verify-shell-syntax.sh
+
+    - name: 空白（暂存的内容）
+      run: git diff --cached --check
+
+pre-merge-commit:
+  jobs:
+    - name: Agent Note 结构
+      run: node scripts/verify-agent-note-classification.ts
+
+    - name: 归档件哈希
+      run: node scripts/verify-archived-agent-notes.ts
+
+pre-push:
+  jobs:
+    - name: 全部门禁
+      run: pnpm run check:all

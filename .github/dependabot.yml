@@ -1,0 +1,27 @@
+version: 2
+
+# 只跟门禁依赖与 Action 版本；上游客户端由 upstream-tag 钉住，不由 dependabot 推动。
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 4 * * *"
+      timezone: "Asia/Shanghai"
+    cooldown:
+      default-days: 30
+    labels:
+      - "kind/dependency"
+      - "area/infra"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 4 * * *"
+      timezone: "Asia/Shanghai"
+    cooldown:
+      default-days: 30
+    labels:
+      - "kind/dependency"
+      - "area/infra"

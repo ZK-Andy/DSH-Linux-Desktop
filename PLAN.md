@@ -1,229 +1,198 @@
 # DSH-Linux-Desktop 计划
 
-本文件是项目计划的唯一来源。调整计划改这里，不在对话里另起一份。
+本文件是产品规格的唯一来源。决定与备选在 [Agent Notes](.agents/notes/README.md)，形状与边界在 [docs/architecture.md](docs/architecture.md)。
 
 ## 1. 定性
 
-- 非官方 Linux 桌面打包：fork `deepseek-ai/deepseek-harness`（MIT）的 `apps/desktop`，只叠加托盘与桌面集成补丁。
-- 取代 `dotnet-deepseek-harness-desktop`：.NET 壳停止维护。
-- 自用为主，仓库与产物公开（他人可 `dnf5 install` 同一个 rpm）；交付物只有 RPM（Fedora 44 / dnf5）。
-- 不重做客户端：UI、Chromium 渲染全部来自官方 Electron 应用。
+非官方 Linux 桌面打包：fork `deepseek-ai/deepseek-harness`（MIT）的 `apps/desktop`，只叠加托盘与桌面集成补丁。取代已停维护的 `dotnet-deepseek-harness-desktop`。自用为主，仓库与产物公开；交付物只有 RPM（Fedora 44 / dnf5）。不重做客户端：UI 与 Chromium 渲染全部来自官方 Electron 应用。
 
-## 2. 需求（硬性，全部闭环）
+## 2. 需求
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| R1 | RPM 可分发包 | 公钥已导入（§3.3）后，`dnf5 install ./dsh-desktop-*.rpm` 成功，应用菜单可见、可启动 |
-| R2 | 托盘常驻 | 托盘图标存在，菜单含「显示窗口 / 退出」；在 Fedora 44 GNOME Wayland（装 AppIndicator 扩展）上人工确认 |
-| R3 | 关闭到托盘 | 点关闭窗口后进程仍在，窗口隐藏；从托盘退出才结束 |
+| R1 | RPM 可分发包 | 公钥已导入后，`dnf5 install ./dsh-desktop-*.rpm` 成功，应用菜单可见、可启动 |
+| R2 | 托盘常驻 | 托盘图标存在，菜单含「显示窗口 / 退出」；Fedora 44 GNOME Wayland（装 AppIndicator 扩展）人工确认 |
+| R3 | 关闭到托盘 | 点关闭后进程仍在、窗口隐藏；从托盘退出才结束 |
 | R4 | 更新体验对齐旧桌面壳 | 检查 → 提示 → 下载 → 一次授权 → 安装 → 自动重启 |
 | R5 | 自动跟版 + 手动触发 | 每周探测上游 `dsh-v*` tag；`workflow_dispatch` 可指定 tag/commit；补丁重放成功才发 Release，失败开 issue 并保留上一版 |
 
-> 原 R3（开机自启）已取消，见 §9 决策记录。
+原 R3（开机自启）已取消，理由见 [那份 Agent Note](.agents/notes/implemented/simplification/2026-10-30-no-autostart.md)。
 
-## 3. 架构决定
+## 3. 规格
 
 ### 3.1 代码形态
 
-- fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
-- 补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。**例外**：`packages/attachment/attachment-local/src/sharp.ts` 是 Linux 可运行性的前提（见 §3.6），允许改这一处。
-- 补丁序列 `0001–0009`、`0011`（`0010` 已随上游 rc.2 删除，编号不复用；见 §10），每个补丁是一个模块（都能从上游 tag 重放，干净树上应用后与改编树逐字节一致）：
-  - `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径；
-  - `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数，全部落在 `scripts/electron-builder-linux.mjs`，上游 builder 配置只留一处展开）、本项目的包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）；
-  - `0003-sharp-isolation`：sharp 隔离（§3.6）；`0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退；
-  - `0005-tray`：托盘（图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，托盘与关于的文案落在 `locale-linux.ts`）；`0006-window-frameless`：无边框窗口与 Web 端窗口按钮（实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`）；`0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`；尺寸存为上游 `settings-file` 的 looseObject 根字段，不另建存储）；`0008-updates-dnf`：应用内更新（清单、下载验签、helper 升级，`linux-updates.ts`）；`0009-update-ui`：应用内更新的对话框与设置页指示器（`update-coordinator.ts`、`update-presentation.ts`、`ui-settings-general`，含对应测试）；`0011-update-install-handoff`：更新安装交接——helper 在应用运行中执行（不取 Host 任务锁），成功后停 Host 再重启，失败则保持运行（实现落在 `update-install-handoff.ts`，含测试；`main.ts` 只挂钩）。`main.ts` 只留各模块的挂钩（净增为负）。
-- **关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。本项目的 R3 由上游行为满足，补丁只补托盘入口。
-- 补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
+fork 官方仓库，固定上游 commit，改动以 `patches/NNNN-*.patch` 保存在本仓。
+
+补丁只触碰 `apps/desktop` 的主进程入口、构建配置与窗口生命周期，不扩散到渲染层。唯一的例外是 `packages/attachment/attachment-local/src/sharp.ts`——Linux 可运行性的前提（§3.6），只改这一处。
+
+补丁序列 `0001–0009`、`0011`（`0010` 已随上游 rc.2 删除，编号不复用）。每个补丁是一个模块，都能从上游 tag 重放，干净树上应用后与改编树逐字节一致：
+
+- `0001-build-chain`：构建链——目标模型认 `linux-x64`（构建目标解析、`--linux` 平台位、host 校验）、`package-target` 接受 `linux-x64`、prepare 阶段的 Linux 路径（`desktopElectronExecutablePath`，跳过 macOS 专属 `prepare:cli`）、发布设置（`.env.linux`）、`package:linux:x64` 脚本、相关测试、Linux 不嵌强制更新策略、包元数据（maintainer/homepage 校验、默认格式）、非 git 构建的 commit 标记、打包冒烟脚本的 Linux 路径。
+- `0002-packaging`：打包——electron-builder 的 Linux 配置（图标、`desktopName`、target、`asar` 与 `asarUnpack`、`extraResources`、fpm 参数，全部落在 `scripts/electron-builder-linux.mjs`，上游 builder 配置只留一处展开）、包身份与 rpm 硬化、更新链资产（helper、polkit 策略、`%post`/`%postun`）。
+- `0003-sharp-isolation`：sharp 隔离（§3.6）。
+- `0004-libreoffice-engine`：LibreOfficeKit 在 ASAR 下的引擎探测回退。
+- `0005-tray`：托盘——图标、菜单、关于、检查更新，实现落在 `linux-tray.ts`，文案落在 `locale-linux.ts`。
+- `0006-window-frameless`：无边框窗口与 Web 端窗口按钮，实现落在 `desktop-window.ts`、`linux-window.ts`、`linux-frame.ts`。
+- `0007-window-size-memory`：窗口尺寸与最大化记忆（`linux-window-size.ts`；尺寸存为上游 `settings-file` 的 looseObject 根字段，不另建存储）。
+- `0008-updates-dnf`：应用内更新的检查与安装（`linux-updates.ts`）。
+- `0009-update-ui`：更新的对话框与设置页指示器（`update-coordinator.ts`、`update-presentation.ts`、`ui-settings-general`，含测试）。
+- `0011-update-install-handoff`：helper 在应用运行中执行（不取 Host 任务锁），成功后停 Host 再重启，失败保持运行（`update-install-handoff.ts`，含测试；`main.ts` 只挂钩）。
+
+`main.ts` 只留各模块的挂钩，净增为负。只有 `0006` 与 `0011` 碰它。
+
+**关闭到托盘与单实例不写补丁**：上游 `apps/desktop/src/main.ts:1173-1188` 已无条件 `preventDefault()+hide()`；单实例在 `apps/desktop/src/single-instance.ts`（`claimDesktopSingleInstance`）。R3 由上游行为满足，补丁只补托盘入口。
+
+补丁以「可重放」为准：上游 tag 一变就重生成，不为通过而调 fuzz。
 
 ### 3.2 构建
 
-- electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
-- 构建配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（见 §3.7）。
-- `artifactName` 定为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
-- 预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.2-2` ↔ Release 号 2（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死；应用比较时把它编码成 semver（见 §3.4）。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.3`（2026-11-13 跟版，尚未发版）。
-- 门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测（`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义）；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
-- 上游 publish 流程（`desktop-publish-targets.ts`、`retain-desktop-ci.ts`、mac/win 各 workflow）保持 mac/win 三目标不变；`0001` 只把 publish runner 的 target 校验放宽到接受 `linux-x64`，使类型与 `DesktopAutoUpdateTarget` 一致——这只是允许配置里出现 linux 目标，Linux 不走上游 publish 流程（`desktopPackageWorkflows` 仍只有 mac/win 三项）。
-- GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处；参考项目同路线），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。
-- 定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。
-- 补丁重放失败：构建失败并自动开 issue，不产出 Release。
-- 缓存：pnpm store（`~/.local/share/pnpm/store`，key 用 fetch 之后的 `upstream/pnpm-lock.yaml`）、Electron 与 electron-builder 工具链（`~/.cache/electron`、`~/.cache/electron-builder`）；不缓存 `node_modules`。
-- 冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install --setopt=localpkg_gpgcheck=0` 真装、`xvfb` 启动、`xdotool` 确认窗口出现并留 `WM_CLASS`，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。容器内脚本分两阶段自举（装包 → 会话总线+Xvfb 重入 `--launch`），容器外只做挂载（`/pkg` 只读、`/shots`、`/smokelogs`）；截图与 `app.log` 走 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR`，上传 artifact 分档：冒烟跑过且失败判 error，其余 warn。
-- CI 证明不了 GNOME 里的可见性：R2 以真实 GNOME Wayland 人工验收为准，CI 只保证对象与注册存在。
-- 授权链（pkexec → polkit → helper）由容器冒烟覆盖：装 polkit 后以非 root 用户、无 logind 会话（与真机桌面 scope 启动的形状一致）经 pkexec 触发真 helper，dnf5 以 stub 顶住（按绝对路径替换，不赌 pkexec 给的 PATH），断言 helper 的开始/调用者/升级成功日志与 dnf5 调用都出现。
+electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 AppImage/deb，不保留任何其它 Linux 产物。
+
+配置分布在 `0002-packaging`（builder 配置、rpm 硬化）与 `0003-sharp-isolation`：`target`、`packageName`、`executableName`、`productName`/`desktopName`、图标、`artifactName`、`asar`/`asarUnpack`、`extraResources`（托盘 PNG、sharp worker）。shell 脚本与 systemd 之外的东西尽量不写，包装脚本能省则省（§3.7）。
+
+`artifactName` 为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
+
+预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.2-2` ↔ Release 号 2（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.3`（2026-11-13 跟版，尚未发版）。
+
+门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测——`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
+
+上游 publish 流程（`desktop-publish-targets.ts`、`retain-desktop-ci.ts`、mac/win 各 workflow）保持三目标不变；`0001` 只把 publish runner 的 target 校验放宽到接受 `linux-x64`，使类型与 `DesktopAutoUpdateTarget` 一致。这只是允许配置里出现 linux 目标，Linux 不走上游 publish 流程（`desktopPackageWorkflows` 仍只有 mac/win 三项）。
+
+GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。补丁重放失败则构建失败并自动开 issue，不产出 Release。
+
+缓存：pnpm store（`~/.local/share/pnpm/store`，key 用 fetch 之后的 `upstream/pnpm-lock.yaml`）、Electron 与 electron-builder 工具链（`~/.cache/electron`、`~/.cache/electron-builder`）；不缓存 `node_modules`。
+
+冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install --setopt=localpkg_gpgcheck=0` 真装、`xvfb` 启动、`xdotool` 确认窗口出现并留 `WM_CLASS`，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。容器内脚本分两阶段自举（装包 → 会话总线+Xvfb 重入 `--launch`），容器外只做挂载（`/pkg` 只读、`/shots`、`/smokelogs`）；截图与 `app.log` 走 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR`，上传 artifact 分档：冒烟跑过且失败判 error，其余 warn。
+
+CI 证明不了 GNOME 里的可见性：R2 以真实 GNOME Wayland 人工验收为准，CI 只保证对象与注册存在。
+
+授权链（pkexec → polkit → helper）由容器冒烟覆盖：装 polkit 后以非 root 用户、无 logind 会话（与真机桌面 scope 启动的形状一致）经 pkexec 触发真 helper，dnf5 以 stub 顶住（按绝对路径替换，不赌 pkexec 给的 PATH），断言 helper 的开始/调用者/升级成功日志与 dnf5 调用都出现。
 
 ### 3.3 分发
 
-- 产物上传公开仓库 `DSH-Linux-Desktop` 的 GitHub Releases（单文件上限 2GB）。
-- 每个 Release 附 rpm、`SHA256SUMS.txt`、公钥 `RPM-GPG-KEY-dsh-desktop`；repodata 由 `release.yml` 的 `repo` 作业刷新到 `gh-pages`。
-- GPG：私钥进 Actions secrets，`rpm --addsign`；公钥随包安装到 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`，并在 Release 里单列一份。
-- **首装公钥**：`dnf5` 校验签名需要 rpmdb 里有公钥，因此 README 的首装命令是两步——先 `sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop`，再 `dnf5 install ./dsh-desktop-*.rpm`。这是第三方签名 rpm 的标准做法，不是临时绕行；更新链由 helper 自动 import，不再需要用户手动做。
-- 分发面：Releases 出 rpm 与公钥，dnf 仓库（`.repo` + `gh-pages` 上的 repodata）是更新发现与安装的唯一通道；应用自身不下载、不落盘安装包（见 §3.4）。
+产物上传公开仓库 `DSH-Linux-Desktop` 的 GitHub Releases（单文件上限 2GB）。每个 Release 附 rpm、`SHA256SUMS.txt`、公钥 `RPM-GPG-KEY-dsh-desktop`；repodata 由 `release.yml` 的 `repo` 作业刷新到 `gh-pages`。
+
+GPG：私钥进 Actions secrets，`rpm --addsign`；公钥随包安装到 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`，并在 Release 里单列一份。
+
+**首装公钥**：`dnf5` 校验签名需要 rpmdb 里有公钥，所以 README 的首装命令是两步——先 `sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop`，再 `dnf5 install ./dsh-desktop-*.rpm`。这是第三方签名 rpm 的标准做法，不是临时绕行；更新链由 helper 自动 import。
+
+分发面：Releases 出 rpm 与公钥，dnf 仓库（`.repo` + `gh-pages` 上的 repodata）是更新发现与安装的唯一通道；应用自身不下载、不落盘安装包。
 
 ### 3.4 更新
 
-- 唯一真源是包管理器；应用内不写 `/usr`，不做自更新。
-- **渠道（nightly / stable）**：发布 tag 经 `scripts/lib/release-channel.sh` 判定——版本含预发布标记（`~`、`-rc`、alpha、beta 等）→ nightly；正式版 → stable，且同时进 nightly。应用侧渠道状态只存上游 `settings-file` 的 `updates.channel`，默认 nightly，设置页可切换。切换只影响检查/安装时查哪个 repo，不改变已装版本；dnf 语义不降级，从 nightly 切回 stable 后正式版追平前显示「已是最新」。
-- 仓库布局：`gh-pages` 上分 `/stable` 与 `/nightly` 两套 repodata；迁移期根 `/repodata` 镜像 nightly，供未升到双渠道版的老应用继续工作（见 §10）。随包 `/etc/yum.repos.d/dsh-desktop.repo` 一份文件两个 section：stable `dsh-desktop`（enabled=1）、nightly `dsh-desktop-nightly`（enabled=0）——手动 dnf 默认只走 stable。
-- **复用官方更新 UI**：改 `apps/desktop/src/update-coordinator.ts` 的状态机（:54 目前直接 `new autoUpdater`，:55 依赖 `app-update.yml`），保留 `update-dialog` / `update-presentation` 的渲染层契约，不另做原生 dialog，不搞两套更新界面。
-- 检查源：随包安装的 dnf 仓库，一条命令——`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（手动检查加 `--refresh`），并按渠道显式 `--enablerepo` / `--disablerepo`（nightly 默认 disabled，不显式选就看不到预发布）。有输出 = 有更新，空 = 已是最新，非 0 退出 = 原样展示错误；不解析人类可读输出。
-- 检查时机：启动后延迟一次 + 托盘「检查更新」+ 设置页；不静默下载。
-- 流程：检查 → 提示 → `pkexec /usr/libexec/dsh-update-helper [--channel=nightly|stable]`（只有一个可选参数，无参 = nightly，应用保持运行；spawn 只给 pkexec 设 `LC_ALL=C`——pkexec 会把 helper 的环境重置为最小安全集（man pkexec SECURITY NOTES），helper 不继承我们的 env，真正要守的是 pkexec 自己的 polkit 连接：GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`，实例级环境污染曾由此致授权前失败（#19），系统总线固定走默认 socket。真机验证：`env -i LC_ALL=C` 下全链成功，PATH/HOME/会话变量都不需要。硬耦合：不设 `DBUS_SESSION_BUS_ADDRESS`，pkexec 接触不到会话总线与认证代理，当前 `allow_any` 下无碍；策略一旦改回需要认证的形态，安装会直接失败而非弹窗，改策略前先放宽 env）→ helper 只执行一条 `dnf5 upgrade -y --refresh <所选渠道的 repo 参数> dsh-desktop`，显式启用所选渠道、禁用另一渠道；仓库文件里是 `skip_if_unavailable=1`，helper 不覆盖该开关，仓库不可达的可见性由应用侧检查负责（它显式关掉此项以便报错）；非法参数退 64，非 root 退 77，公钥导入失败退 70；dnf 语义不降级 → 成功后停 Host、`app.relaunch()` 并退出；失败则保持应用运行并显示错误，不自动重启（Linux 全程不取 Host 任务锁），同时把失败详情（候选与当前版本、退出码、helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600，目录每次失败时 chmod 0700——`mkdirSync` 的 mode 只在新建时生效，日志目录通常已由 crash 报告创建，故补 chmod 兜底；每条记录有界，故不做轮转）——pkexec 只在成功时写系统日志，失败只打 stderr，不落盘就没有目击者（2026-11-05 真机 127 排查的教训）；helper 退出码 127（pkexec 未获授权、出错或 helper 无法执行，认证对话框被取消才是 126）的错误文案附「彻底退出应用后重新打开」的自愈指引：实例级的环境污染会让 pkexec 在授权前失败，托盘「重启」走 `app.relaunch()` 继承旧进程环境治不了，只有桌面重新拉起才拿干净环境。应用内没有下载缓存、没有 sha256/`rpm -K` 校验，签名与完整性由 dnf 的 `gpgcheck`/`repo_gpgcheck` 负责。
-- 真机验证（2026-11-12）：装 nightly 渠道的 rpm `0.2.2~rc.2-2` 后，托盘「检查更新」经应用侧 repoquery 读到该版本 → `pkexec` helper → `dnf5 upgrade` → 升级成功并重启；双渠道链路（tag → Release 资产 → `/nightly` repodata → 应用侧检查 → helper 安装）首次全链真机闭环（CI 侧 run `43055298262` 三 job 全绿）。尚未真机覆盖：stable 渠道、旧单仓库 `.repo` 的兜底、切回 stable 后正式版未追平时的「已是最新」文案。
-- 版本比较：把 rpm `EVR` 编码成 semver——预发布 `X.Y.Z~<pre>-R` → `X.Y.Z-<pre>.R`，正式版 `X.Y.Z-R` → `X.Y.Z-z.R`，去掉 `0:` epoch，按最后一个 `-` 切分；`currentVersion` 用同一函数编码安装中的版本。
-- helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥 `/etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop` 与 `/var/log/dsh-desktop` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`）；`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载时删掉随包公钥；polkit 对本机用户直接放行（`allow_any=yes`，不依赖 logind 会话或认证代理）；helper 只接受可选 `--channel=nightly|stable`（无参 = nightly，其它参数退 64），日志写 `/var/log/dsh-desktop/update.log`，并记录 pkexec 传入的调用者 uid/pid 便于审计。`.repo` 用 `metadata_expire=1h`、`skip_if_unavailable=1`、`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`；迁移期用户改过的旧 `.repo`（`%config(noreplace)`）缺渠道 section 时，helper 与应用侧退回单仓库查询/升级并在日志写明「渠道可能不生效」（见 §10）。
-- electron-updater 的下载/安装路径在补丁里整体替换（不是「禁用后另开一路」），避免两套状态机并存。
+唯一真源是包管理器；应用内不写 `/usr`，不做自更新。
+
+**渠道（nightly / stable）**：发布 tag 经 `scripts/lib/release-channel.sh` 判定——版本含预发布标记（`~`、`-rc`、alpha、beta 等）→ nightly；正式版 → stable，且同时进 nightly。应用侧渠道状态只存上游 `settings-file` 的 `updates.channel`，默认 nightly，设置页可切换。切换只影响检查/安装时查哪个 repo，不改变已装版本；dnf 语义不降级，从 nightly 切回 stable 后正式版追平前显示「已是最新」。
+
+仓库布局：`gh-pages` 上分 `/stable` 与 `/nightly` 两套 repodata；迁移期根 `/repodata` 镜像 nightly，供未升到双渠道版的老应用继续工作。随包 `/etc/yum.repos.d/dsh-desktop.repo` 一份文件两个 section：stable `dsh-desktop`（enabled=1）、nightly `dsh-desktop-nightly`（enabled=0）——手动 dnf 默认只走 stable。
+
+**复用官方更新 UI**：改 `apps/desktop/src/update-coordinator.ts` 的状态机（:54 目前直接 `new autoUpdater`，:55 依赖 `app-update.yml`），保留 `update-dialog` / `update-presentation` 的渲染层契约，不另做原生 dialog，不搞两套更新界面。electron-updater 的下载/安装路径在补丁里整体替换，不是「禁用后另开一路」，避免两套状态机并存。
+
+检查源：随包安装的 dnf 仓库，一条命令——`dnf5 repoquery --upgrades --queryformat '%{evr}\n' --setopt=dsh-desktop.skip_if_unavailable=0 dsh-desktop`（手动检查加 `--refresh`），并按渠道显式 `--enablerepo` / `--disablerepo`（nightly 默认 disabled，不显式选就看不到预发布）。有输出 = 有更新，空 = 已是最新，非 0 退出 = 原样展示错误；不解析人类可读输出。检查时机：启动后延迟一次 + 托盘「检查更新」+ 设置页；不静默下载。
+
+流程：检查 → 提示 → `pkexec /usr/libexec/dsh-update-helper [--channel=nightly|stable]`（只有一个可选参数，无参 = nightly，应用保持运行）→ helper 只执行一条 `dnf5 upgrade -y --refresh <所选渠道的 repo 参数> dsh-desktop`，显式启用所选渠道、禁用另一渠道；仓库文件里是 `skip_if_unavailable=1`，helper 不覆盖该开关，仓库不可达的可见性由应用侧检查负责（它显式关掉此项以便报错）；非法参数退 64，非 root 退 77，公钥导入失败退 70；dnf 语义不降级 → 成功后停 Host、`app.relaunch()` 并退出；失败则保持运行并显示错误，不自动重启（Linux 全程不取 Host 任务锁）。
+
+spawn 只给 pkexec 设 `LC_ALL=C`——pkexec 会把 helper 的环境重置为最小安全集（man pkexec SECURITY NOTES），helper 不继承我们的 env。真正要守的是 pkexec 自己的 polkit 连接：GDBus 读 `DBUS_SYSTEM_BUS_ADDRESS`，实例级环境污染曾由此致授权前失败（#19），系统总线固定走默认 socket。`env -i LC_ALL=C` 下全链已在真机验证，PATH/HOME/会话变量都不需要。硬耦合：不设 `DBUS_SESSION_BUS_ADDRESS`，pkexec 接触不到会话总线与认证代理，当前 `allow_any` 下无碍；策略一旦改回需要认证的形态，安装会直接失败而非弹窗，改策略前先放宽 env。
+
+失败详情（候选与当前版本、退出码、helper 输出末 10 行）追加写入应用日志目录的 `update-failures.log`（文件 0600，目录每次失败时 chmod 0700——`mkdirSync` 的 mode 只在新建时生效，日志目录通常已由 crash 报告创建，故补 chmod 兜底；每条记录有界，不做轮转）。pkexec 只在成功时写系统日志，失败只打 stderr，不落盘就没有目击者（2026-11-05 真机 127 排查的教训）。helper 退出码 127（pkexec 未获授权、出错或 helper 无法执行；认证对话框被取消才是 126）的错误文案附「彻底退出应用后重新打开」的自愈指引：实例级环境污染会让 pkexec 在授权前失败，托盘「重启」走 `app.relaunch()` 继承旧进程环境治不了，只有桌面重新拉起才拿干净环境。
+
+版本比较：把 rpm `EVR` 编码成 semver——预发布 `X.Y.Z~<pre>-R` → `X.Y.Z-<pre>.R`，正式版 `X.Y.Z-R` → `X.Y.Z-z.R`，去掉 `0:` epoch，按最后一个 `-` 切分；`currentVersion` 用同一函数编码安装中的版本。
+
+helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥与 `/var/log/dsh-desktop` 由 rpm 直接拥有（`0002-packaging` 的 fpm `源=目标` 映射；`.repo` 标 `%config(noreplace)`）；`%post` 只做一次幂等 `rpm --import`，`%postun` 在卸载时删掉随包公钥；polkit 对本机用户直接放行（`allow_any=yes`，不依赖 logind 会话或认证代理）；helper 日志写 `/var/log/dsh-desktop/update.log`，记录 pkexec 传入的调用者 uid/pid 便于审计。`.repo` 用 `metadata_expire=1h`、`skip_if_unavailable=1`、`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-dsh-desktop`。
+
+真机验证（2026-11-12）：装 nightly 渠道的 rpm `0.2.2~rc.2-2` 后，托盘「检查更新」经应用侧 repoquery 读到该版本 → `pkexec` helper → `dnf5 upgrade` → 升级成功并重启；双渠道链路（tag → Release 资产 → `/nightly` repodata → 应用侧检查 → helper 安装）首次全链真机闭环（CI 侧 run `43055298262` 三 job 全绿）。尚未真机覆盖：stable 渠道、旧单仓库 `.repo` 的兜底、切回 stable 后正式版未追平时的「已是最新」文案。
 
 ### 3.5 桌面集成
 
-- 托盘：上游 `DesktopTray`（`apps/desktop/src/tray.ts`）本身跨平台。`0013` 做三件事——把 `main.ts` 里的 `win32` 门放宽到 Linux、托盘图标按平台选 `tray-linux.png`、`extraResources` 把 PNG 打进 `resources/`。PNG 由 `scripts/render-tray-icon.ts` 在构建期从 `icon-windows.svg` 渲染（纯 Node 跑 sharp，不进 Electron），产物作为二进制资产放在 `assets/tray-linux.png`，由 `scripts/apply-patches.sh` 放到位（二进制进不了文本补丁）。
-- GNOME 需要「AppIndicator and KStatusNotifierItem Support」扩展，写入 README 前置条件。依赖显式声明 `libdbusmenu`（Fedora 有同名包；dlopen，`ldd` 看不见，缺了菜单为空）。
-- 关闭到托盘、单实例：沿用上游，不重复实现（§3.1）。
-- 运行时保持官方形态：Host 由 Electron 以 node 模式托管（`ELECTRON_RUN_AS_NODE=1`），**不替换成独立 Node**。参考项目 issue #8 里插件市场卡在「安装中」、后续 409，正是把 Host 换成独立 Node 后热挂载/重启握手失败所致；ASAR 也随官方保留开启。
+托盘：上游 `DesktopTray`（`apps/desktop/src/tray.ts`）本身跨平台。`0005` 做三件事——把 `main.ts` 里的 `win32` 门放宽到 Linux、托盘图标按平台选 `tray-linux.png`、`extraResources` 把 PNG 打进 `resources/`。PNG 由 `scripts/render-tray-icon.ts` 在构建期从 `icon-windows.svg` 渲染（纯 Node 跑 sharp，不进 Electron），产物作为二进制资产放在 `assets/tray-linux.png`，由 `scripts/apply-patches.sh` 放到位（二进制进不了文本补丁）。
+
+GNOME 需要「AppIndicator and KStatusNotifierItem Support」扩展，写入 README 前置条件。依赖显式声明 `libdbusmenu`（Fedora 有同名包；dlopen，`ldd` 看不见，缺了菜单为空）。
+
+关闭到托盘、单实例沿用上游，不重复实现（§3.1）。
+
+运行时保持官方形态：Host 由 Electron 以 node 模式托管（`ELECTRON_RUN_AS_NODE=1`），**不替换成独立 Node**——理由见 [那份 Agent Note](.agents/notes/implemented/architecture/2026-10-30-host-keeps-electron-node.md)。ASAR 也随官方保留开启。
 
 ### 3.6 图片解码（sharp 隔离）
 
-- **问题**：Electron 在 Linux 上把 sharp/libvips 加载进自己的进程，会因 glib 断言失败直接 `abort()`（[electron#46323](https://github.com/electron/electron/issues/46323)）。官方运行时下，`read_image` 或把图片作为附件发送，会把整个 Host 弄崩，重启后回到同一会话仍复现（[Zhou #24](https://github.com/Zhou-Yujing114514/deepseek-harness-linux/issues/24)）。
-- **已知的两条半解**：整体换独立 Node → 图片正常、插件市场坏（[ffyfox #8](https://github.com/ffyfox/dsh-desktop-linux/issues/8)）；保持官方运行时 → 市场正常、图片崩（Zhou #24）。两者不能只选其一。
-- **做法**：Host 留在 Electron node 模式；sharp 移出 Electron 进程，放进由打包内 `resources/runtime/primary-runtime/dependencies/node` 启动的子进程，Host 通过 IPC 调用。子进程用打包自带 Node，不依赖系统 node。
-- **打包前提**（`0021` 一并做）：
-  - asar 保持**开启**（与官方一致；参考项目在 Linux 关 asar，是因为它把 Host 换成了独立 Node——本项目不换）；
-  - worker 脚本走 `extraResources`（asar 外）：`resources/sharp-worker.cjs`；
-  - `sharp` 与 `@img/**` 加进 `asarUnpack`，worker 用 `app.asar.unpacked/node_modules` 的绝对路径 `require`，不靠模块解析；
-  - dev 模式没有 primary-runtime node，node 回退到 `PATH`；worker 与模块目录必须由 `DSH_SHARP_WORKER`/`DSH_SHARP_MODULE_DIR` 给出，缺了直接报错（不静默退化）。
-- **补丁点**：`packages/attachment/attachment-local/src/sharp.ts` 里的 `requireSharp`（`createLazyRequire<typeof sharp>('sharp', import.meta.url)`）是全部图片处理的唯一入口，只改这一处；`image.ts` / `normalization.ts` / `encoding.ts` 不动。
-- **失败行为**：子进程崩溃只让当次调用失败，Host 存活并返回明确错误；不再出现「贴一张图，应用退出」。
-- **验收**：以 #24 的复现场景为准（`read_image` 读本地 PNG、粘贴图片附件）；CI 冒烟加一条真实解码断言，上游升级后第一个暴露问题。
-- **不采用**：整体替换 Host 运行时（会把市场问题引进来），或用「不显示图片」降级。
+**问题**：Electron 在 Linux 上把 sharp/libvips 加载进自己的进程，会因 glib 断言失败直接 `abort()`（[electron#46323](https://github.com/electron/electron/issues/46323)）。官方运行时下，`read_image` 或把图片作为附件发送会把整个 Host 弄崩，重启后回到同一会话仍复现（[Zhou #24](https://github.com/Zhou-Yujing114514/deepseek-harness-linux/issues/24)）。
+
+两条半解都不够：整体换独立 Node → 图片正常、插件市场坏（[ffyfox #8](https://github.com/ffyfox/dsh-desktop-linux/issues/8)）；保持官方运行时 → 市场正常、图片崩。
+
+**做法**：Host 留在 Electron node 模式；sharp 移出 Electron 进程，放进由打包内 `resources/runtime/primary-runtime/dependencies/node` 启动的子进程，Host 通过 IPC 调用。子进程用打包自带 Node，不依赖系统 node。
+
+**打包前提**（`0003` 一并做）：asar 保持开启（与官方一致）；worker 脚本走 `extraResources`（asar 外）：`resources/sharp-worker.cjs`；`sharp` 与 `@img/**` 加进 `asarUnpack`，worker 用 `app.asar.unpacked/node_modules` 的绝对路径 `require`，不靠模块解析；dev 模式没有 primary-runtime node，node 回退到 `PATH`，worker 与模块目录必须由 `DSH_SHARP_WORKER`/`DSH_SHARP_MODULE_DIR` 给出，缺了直接报错（不静默退化）。
+
+**补丁点**：`packages/attachment/attachment-local/src/sharp.ts` 里的 `requireSharp`（`createLazyRequire<typeof sharp>('sharp', import.meta.url)`）是全部图片处理的唯一入口，只改这一处；`image.ts` / `normalization.ts` / `encoding.ts` 不动。
+
+**失败行为**：子进程崩溃只让当次调用失败，Host 存活并返回明确错误；不再出现「贴一张图，应用退出」。
+
+**验收**：以 #24 的复现场景为准（`read_image` 读本地 PNG、粘贴图片附件）；CI 冒烟加一条真实解码断言，上游升级后第一个暴露问题。
 
 ### 3.7 打包身份与安装布局
 
-- `productName: "deepseek-harness-desktop"` → `/opt/deepseek-harness-desktop`（electron-builder 的 `/opt` 目录由 `productFilename` 派生，不另写 afterPack）。
-- `executableName: "deepseek-harness"` → `/usr/bin/deepseek-harness` 符号链接与进程名。
-- `packageName: "dsh-desktop"` → rpm 的 `Name`。
-- `desktopName: "dsh-desktop"` + `linux.syncDesktopName: true` → 安装后的 `dsh-desktop.desktop`；`StartupWMClass` 以 M2 实测的 `xprop WM_CLASS` 为准钉死（Electron 版本间有差异），并同步回本计划。
-- 菜单显示名：`productName` 必须是路径安全的 token（它决定 `/opt` 目录与 `Exec`），所以 `productName: "deepseek-harness-desktop"`；desktop 文件里的 `Name` 由 `0020` 的 `linux.desktop.entry.Name` 单独覆盖成 `DeepSeek Harness`，不把空格塞进路径。
-- 图标：`0003` 把 `linux.icon` 指向 `resources/icon-macos.svg`，electron-builder 按 scalable SVG 装到 `hicolor/scalable/apps/`。
-- `chrome-sandbox` 与缓存刷新用 electron-builder 的默认 after-install 模板（不需要自写脚本）：模板先探 `/proc/self/ns/user` + `unshare --user true`，可用则 0755、否则 4755；顺带 `update-alternatives`/`ln -s` 建 `/usr/bin/deepseek-harness`、跑 `update-desktop-database`，Ubuntu 上还装 AppArmor profile。
-- `Requires` 由 `0020` 显式给出（`AutoReqProv` 类自动扫描对 Electron 自带的 `.so` 不可靠）：gtk3、nss、nspr、libnotify、libXScrnSaver、`(libXtst or libXtst6)`、xdg-utils、at-spi2-core、`(libuuid or libuuid1)`、libsecret、libdbusmenu（dlopen 的托盘菜单库），以及 Electron 直接链接/加载的一族：alsa-lib、libdrm、mesa-libgbm、mesa-libGL、libxkbcommon、cups-libs、expat、glib2、pango、cairo、gdk-pixbuf2、dbus-libs、systemd-libs、libX11、libXcomposite、libXdamage、libXext、libXfixes、libXrandr、libxcb；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加（M2 用 `rpm -qpR` 复核）。rpmbuild 后处理按 macOS-Terminal 的配方关掉：`_build_id_links none`、`__os_install_post %{nil}`、`__strip`/`__brp_strip` 指 `/bin/true`、`_binary_payload w19.zstdio`。
+`productName: "deepseek-harness-desktop"` → `/opt/deepseek-harness-desktop`（electron-builder 的 `/opt` 目录由 `productFilename` 派生，不另写 afterPack）。`executableName: "deepseek-harness"` → `/usr/bin/deepseek-harness` 符号链接与进程名。`packageName: "dsh-desktop"` → rpm 的 `Name`。`desktopName: "dsh-desktop"` + `linux.syncDesktopName: true` → 安装后的 `dsh-desktop.desktop`。
+
+菜单显示名：`productName` 必须是路径安全的 token（它决定 `/opt` 目录与 `Exec`），所以用 `deepseek-harness-desktop`；desktop 文件里的 `Name` 由 `0002` 的 `linux.desktop.entry.Name` 单独覆盖成 `DeepSeek Harness`，不把空格塞进路径。
+
+图标：`0002` 把 `linux.icon` 指向 `resources/icon-macos.svg`，electron-builder 按 scalable SVG 装到 `hicolor/scalable/apps/`。
+
+`chrome-sandbox` 与缓存刷新用 electron-builder 的默认 after-install 模板（不自写脚本）：模板先探 `/proc/self/ns/user` + `unshare --user true`，可用则 0755、否则 4755；顺带 `update-alternatives`/`ln -s` 建 `/usr/bin/deepseek-harness`、跑 `update-desktop-database`。
+
+`Requires` 由 `0002` 显式给出（`AutoReqProv` 类自动扫描对 Electron 自带的 `.so` 不可靠）：gtk3、nss、nspr、libnotify、libXScrnSaver、`(libXtst or libXtst6)`、xdg-utils、at-spi2-core、`(libuuid or libuuid1)`、libsecret、libdbusmenu，以及 Electron 直接链接/加载的一族：alsa-lib、libdrm、mesa-libgbm、mesa-libGL、libxkbcommon、cups-libs、expat、glib2、pango、cairo、gdk-pixbuf2、dbus-libs、systemd-libs、libX11、libXcomposite、libXdamage、libXext、libXfixes、libXrandr、libxcb；`libxcrypt-compat` 仅在 primary-runtime 带 Python 时加。rpmbuild 后处理按 macOS-Terminal 的配方关掉：`_build_id_links none`、`__os_install_post %{nil}`、`__strip`/`__brp_strip` 指 `/bin/true`、`_binary_payload w19.zstdio`。
 
 ## 4. 仓库结构
 
 ```
 DSH-Linux-Desktop/
 ├── PLAN.md
+├── AGENTS.md                # 常驻指令
+├── CONTRIBUTING.md
 ├── upstream-tag             # 钉住的上游 tag（fetch 与 CI 的唯一真源）
-├── patches/                 # 0001–0009、0011，每个补丁一个模块，按编号顺序 git apply
-├── assets/tray-linux.png    # 二进制托盘图标（apply-patches.sh 放到位）
-├── scripts/
-│   ├── fetch-upstream.sh    # 按 upstream-tag 浅克隆到 upstream/
-│   ├── apply-patches.sh     # 打补丁 + 放二进制资产；--check/--revert
-│   ├── select-pnpm.sh       # 校验 pnpm 11 且入口可被 node 执行
-│   ├── build.sh             # 默认 --rpm；--dir 只出未打包目录
-│   ├── dev-desktop.sh       # 本地 dev（不打包）
-│   ├── smoke-install-rpm.sh # 起 fedora:44 容器真装真启动
-│   ├── smoke-rpm-inner.sh   # 容器内：dnf5 install → xvfb → xdotool → 截图
-│   └── verify.sh            # rpm 静态验收（包元数据/布局/desktop/%post）
-├── .github/workflows/build.yml   # 每周跟版 + dispatch；出包→verify→冒烟→artifact
-└── docs/                    # 调研、安装、更新、托盘前置条件、故障排查
+├── package.json             # 门禁入口
+├── lefthook.yml             # 本地钩子
+├── patches/                 # 0001–0009、0011，按编号顺序 git apply
+├── assets/                  # 二进制与系统文件，apply-patches.sh 放到位
+├── packaging/               # rpm 元数据、polkit 策略、GPG 公钥
+├── scripts/                 # 重放、出包、验收、门禁
+├── .agents/                 # Agent Notes 与技能
+├── docs/                    # 架构、开发流程、专项参考
+└── .github/workflows/       # build / package / patch-gate / release
 ```
-
-M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）；现在还没有。
 
 ## 5. 里程碑
 
-- **M1 本地跑通（dev）**：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘、关窗隐藏后能召回，并验证 sharp 隔离后 `read_image`/图片附件不再崩 Host（只验行为，不出包）。
-- **M2 CI 出包**：CI 构建 rpm（含冒烟截图与 SNI 检查），`dnf5 install` 产物后可启动；实测并钉死版本映射、`/opt` 路径、`WM_CLASS` 与依赖。
-- **M3 CI + 自动跟版**：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
-- **M4 更新链**：`dnf5 repoquery --upgrades` 检查 → 官方更新 UI → helper（可选 `--channel=nightly|stable`，无参 = nightly）→ 授权 → `dnf5 upgrade` → 重启。
-- **M5 收尾**：单实例复核、GPG 校验、README 前置条件、docs 成文。
-- dnf 仓库（B）不进里程碑，M1–M5 完成后再评估。
+M1 本地跑通（dev）：克隆上游 tag、应用补丁、`pnpm dev` 看到托盘、关窗隐藏后能召回，并验证 sharp 隔离后 `read_image`/图片附件不再崩 Host。
+M2 CI 出包：CI 构建 rpm（含冒烟截图与 SNI 检查），`dnf5 install` 产物后可启动；实测并钉死版本映射、`/opt` 路径、`WM_CLASS` 与依赖。
+M3 CI + 自动跟版：周检上游 tag / 手动 dispatch → 构建 → 签名 → 发 Release。
+M4 更新链：`repoquery --upgrades` 检查 → 官方更新 UI → helper → 授权 → `dnf5 upgrade` → 重启。
+M5 收尾：单实例复核、GPG 校验、README 前置条件、docs 成文。
 
 ## 6. 明确不做
 
-- 不做新桌面壳，不内嵌 WebView/CEF；Chromium 由官方 Electron 应用提供。
-- 不做应用内自更新：不下载、不校验、不安装 rpm，安装只经 `pkexec` + 系统包管理器。
-- 不做开机自启（2026-10-30 取消）。
-- 不出 AppImage / deb / zip；AppImage 的自更新路径与 RPM 冲突，不保留。
-- 不做「原生 dialog 版更新入口」的过渡实现，也不做两套更新界面。
-- dnf 仓库已建（`.repo` + repodata 在 `gh-pages`），Releases 仍提供 rpm 与公钥；应用只通过 dnf 发现与安装更新。
-- 不追非 Linux 平台；换发行版只换 `linux.target` 与更新适配器。
-- 不维护 .NET 客户端，不在本项目里保留旧壳代码。
-- 不替换 Host 运行时（不引入独立 Node、不因此关 ASAR）。
-- 不在 Electron 进程内加载 sharp（Linux 一律走 §3.6 的子进程）。
+不做新桌面壳，不内嵌 WebView/CEF；Chromium 由官方 Electron 应用提供。不做应用内自更新：不下载、不校验、不安装 rpm，安装只经 `pkexec` + 系统包管理器。不出 AppImage / deb / zip。不做「原生 dialog 版更新入口」的过渡实现，也不做两套更新界面。不追非 Linux 平台；换发行版只换 `linux.target` 与更新适配器。不维护 .NET 客户端，不在本项目里保留旧壳代码。不替换 Host 运行时（不引入独立 Node、不因此关 ASAR）。不在 Electron 进程内加载 sharp。
 
 ## 7. 已知约束
 
-- Fedora 44 默认 dnf5，helper 显式调用 `dnf5`，不依赖 `dnf` 符号链接。
-- GNOME 无 AppIndicator 扩展时托盘不可见——文档写明，不作为缺陷处理。
-- Wayland 下按上游默认（XWayland 或原生 Wayland），本项目不额外改渲染参数。
-- 上游升版即需重放补丁；CI 失败就是「版本落后」的信号，不静默通过。
-- Electron 与 libvips 的 glib 冲突是上游未修的问题（electron#46323 仍 open），只能靠 §3.6 的隔离规避；上游哪天修了，隔离补丁可以单独摘掉。
-- 首装须一次性导入公钥（§3.3）；不导入时 `dnf5` 会以 NOKEY 拒绝签名包。
-- `/opt` 目录名、desktop 文件名、`WM_CLASS` 由 `productName`/`desktopName` 与 Electron 版本共同决定，M2 实测后以实测值为准。
+Fedora 44 默认 dnf5，helper 显式调用 `dnf5`，不依赖 `dnf` 符号链接。GNOME 无 AppIndicator 扩展时托盘不可见——文档写明，不作为缺陷处理。Wayland 下按上游默认（XWayland 或原生 Wayland），不额外改渲染参数。上游升版即需重放补丁；CI 失败就是「版本落后」的信号，不静默通过。Electron 与 libvips 的 glib 冲突是上游未修的问题（electron#46323 仍 open），只能靠 §3.6 规避；上游修了，隔离补丁可以单独摘掉。首装须一次性导入公钥，不导入时 `dnf5` 会以 NOKEY 拒绝签名包。`/opt` 目录名、desktop 文件名、`WM_CLASS` 由 `productName`/`desktopName` 与 Electron 版本共同决定，以 M2 实测值为准。
 
 ## 8. 命名
 
-- 仓库目录 / GitHub 公开仓库：`DSH-Linux-Desktop`（大小写一致，不缩写）
-- RPM 包名（`Name`）：`dsh-desktop`
-- `productName` / `/opt` 目录：`deepseek-harness-desktop`
-- 可执行名：`deepseek-harness`（`/usr/bin/deepseek-harness` 符号链接）
-- `desktopName` / desktop 文件：`dsh-desktop` / `dsh-desktop.desktop`
-- `StartupWMClass`：以 M2 实测 `WM_CLASS` 为准（预期 `dsh-desktop`）
-- `MimeType=x-scheme-handler/dsh`
-- 产物名：`dsh-desktop-<version>-<arch>.rpm`
-- 描述：unofficial patched build of the official DSH desktop client for Linux
+仓库目录 / GitHub 公开仓库 `DSH-Linux-Desktop`（大小写一致，不缩写）；RPM `Name` `dsh-desktop`；`productName` / `/opt` 目录 `deepseek-harness-desktop`；可执行名 `deepseek-harness`（`/usr/bin/deepseek-harness` 符号链接）；`desktopName` / desktop 文件 `dsh-desktop` / `dsh-desktop.desktop`；`StartupWMClass` 以 M2 实测 `WM_CLASS` 为准（预期 `dsh-desktop`）；`MimeType=x-scheme-handler/dsh`；产物名 `dsh-desktop-<version>-<arch>.rpm`；描述 unofficial patched build of the official DSH desktop client for Linux。
 
-## 9. 决策记录
+## 9. 待迁移
 
-| 日期 | 决定 | 理由 |
-|---|---|---|
-| 2026-10-30 | 放弃 .NET 壳，fork 官方 Electron 客户端 | 渲染体验由引擎层决定，自研壳无法对齐 |
-| 2026-10-30 | 更新交给 dnf5，应用内只做提示 | RPM 拥有文件，自更新会破坏包状态 |
-| 2026-10-30 | 构建走 CI，产物进 Releases | 不依赖常开机器，日志与产物可追溯 |
-| 2026-10-30 | 项目名不含 RPM | 包格式是产物，不是身份 |
-| 2026-10-30 | 取消开机自启（原 R3） | 用户明确不要；顺带省掉一条 autostart 补丁与 `%post` 写系统目录 |
-| 2026-10-30 | 只出 rpm，不出 AppImage/deb | 单一产物好验收；AppImage 的自更新路径与「更新交给 dnf」相悖 |
-| 2026-10-30 | 先走 Releases（A），dnf 仓库（B）后置 | A 不需要静态托管，R1–R5 即可闭环；B 可增量，不改包结构 |
-| 2026-10-30 | 仓库名 `DSH-Linux-Desktop`，包名 `dsh-desktop` | 仓库名要大小写一致；包名与可执行名分离，避免与上游 CLI 同名 |
-| 2026-10-30 | Host 保持官方 Electron node 模式，不换独立 Node | 参考项目 issue #8：换独立 Node 后插件市场热挂载/重启握手失败、UI 卡「安装中」并 409；官方形态在 Win/Mac 已验证 |
-| 2026-10-30 | sharp 隔离到子进程，写进 M1 | Electron 进程内加载 libvips 在 Linux 会 abort（electron#46323、Zhou #24）；独立 Node 跑 sharp 正常（ffyfox #8 实测），把这两段拼起来即可，不依赖逐步试错 |
-| 2026-10-30 | 本地只跑 dev 调补丁，出包与发版全在 CI | 补丁迭代要快；rpm 构建、签名、发布不落在本机 |
-| 2026-10-30 | 更新入口直接改 `update-coordinator` 状态机，复用官方 UI | 用户明确不要临时方案；两套更新界面（原生 dialog）后期还要合并，等于白做 |
-| 2026-10-30 | 命名一次对齐：`productName` 驱动 `/opt`，`desktopName` 驱动 desktop 文件 | 避免 afterPack 改名这类二次加工；`/opt` 与 desktop 名各有唯一来源 |
-| 2026-10-30 | rpm 签名，首装一次性导入公钥，helper 自动 import | 完整性不能降级；helper 里的 import 让更新链对用户仍是「一次授权」 |
-| 2026-10-30 | 关闭到托盘与单实例不写补丁 | 上游 `main.ts:1173-1188` 与 `single-instance.ts` 已有，重复实现只会增加重放成本 |
-| 2026-10-30 | 补丁序列按变化来源拼接：流水线取 ffyfox、office/冒烟取 zhsj、rpm 硬化取 macOS-Terminal、包身份取 coderirse | 每条都有人真跑通过；自己重写等于把别人的试错重做一遍 |
-| 2026-10-30 | asar 保持开启，sharp 走子进程 + `asarUnpack` | 官方形态 + 隔离；关 asar 是独立 Node 路线的前提，本项目不采用 |
-| 2026-10-30 | `productName` 用路径安全 token，菜单名用 `linux.desktop.entry.Name` 覆盖 | 路径（`/opt`、`Exec`）不能有空格；显示名不该反过来决定路径 |
-| 2026-10-30 | verify.sh 重写为 rpm 静态验收，与冒烟分工 | 参考版的 Arch/PKGBUILD 断言与 RPM 无关；静态看包、冒烟看启动，互不重叠 |
+现状与 [AGENTS.md](AGENTS.md) 规则不一致、已知且计划收拢的项。规则 9 按名字引用本节；格式只在这里定义。
 
-## 10. 待迁移
-
-现状与 AGENTS.md 不一致、已知且计划收拢的项。AGENTS.md 1.3 规则 9 按名字引用本节；格式只在这里定义。
-
-每条四项：
-
-- **现状**：文件、触碰它的补丁及数量，或不一致的事实；
-- **目标**：新文件或归属；
-- **验收**：怎么断言（命令或 `patch-surface.sh` 检查项）；
-- **负责补丁**：由哪个补丁（或合并后的模块补丁）完成。
-
-条目完成即删除；删除时 `patch-surface.sh` 对应断言改为常规检查。`patch-surface.sh` 断言每条引用的补丁仍存在。
-
-执行顺序：M8 的两个脚本（`patch-surface.sh`、`regen-patch.sh`，不动补丁）→ 其余条目。M1 的两步、M2、M3、M4、M6、M7 已完成，条目已删除；对应断言（每文件单补丁、Linux 文案与 builder 配置的归属）已转为 `patch-surface.sh` 的常规检查。
+每条四项：**现状**（文件、触碰它的补丁及数量，或不一致的事实）、**目标**（新文件或归属）、**验收**（怎么断言）、**负责补丁**。条目完成即删除，删除时 `patch-surface.sh` 对应断言改为常规检查，且该脚本会断言本节每条引用的补丁仍存在。
 
 ### M8 补丁首行与门禁
 
 - 现状：10 个模块补丁都已写 `变化理由：` 首行；`0006-window-frameless.patch` 不再需要 `例外：规则 4`（实现搬进模块后 `main.ts` 净增为 -68）。`scripts/patch-surface.sh`、`scripts/regen-patch.sh` 已落地并在 CI 里于 `apply-patches.sh` 之前运行。
-- 目标（已完成部分）：首行（`变化理由：`、`例外：` 行）是 `diff --git` 之前的 preamble；`patches/` 只经 `regen-patch.sh` 生成和重生成；`patch-surface.sh` 只读 `patches/` 做静态检查：
-  - 每个补丁首行为 `变化理由：…`；
-  - 除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；
-  - 单补丁 `main.ts` 净增 ≤15 行，或有 `例外：规则 4` 行；
-  - 本节每条引用的补丁存在；
-  - 补丁新增文件不与 `ASSETS` 表重合。
+- 目标：首行（`变化理由：`、`例外：` 行）是 `diff --git` 之前的 preamble；`patches/` 只经 `regen-patch.sh` 生成；`patch-surface.sh` 只读 `patches/` 做静态检查——首行为 `变化理由：…`；除 `main.ts` 外每个上游文件补丁数 = 1，本节登记的文件补丁数不上升；单补丁 `main.ts` 净增 ≤15 行或有 `例外：规则 4` 行；本节每条引用的补丁存在；补丁新增文件不与 `ASSETS` 表重合。
 - 验收：CI 在 `apply-patches.sh` 之前运行该脚本；对现状输出的违规恰好是本节登记的项。
 - `apply-patches.sh --check` 对叠加补丁不成立（每条都对干净树试打，后置补丁依赖前置补丁新建的文件），待修成累积试打或删除该选项。
-- 负责补丁：不涉及补丁（`scripts/`）；首行随各模块补丁重写补齐（已完成）。
+- 负责补丁：不涉及补丁。
 
 ### 双渠道更新（迁移期）
 
@@ -234,4 +203,4 @@ M3 会新增 `packaging/`（polkit 策略、`dsh-update-helper`、GPG 公钥）�
 
 ### 条目删除记录
 
-- `0010-host-auth-cookie-prune`：已由上游 `dsh-v0.2.2-rc.2` 实现（启动前回收历史 Host 认证 cookie），我们的补丁与 `host-auth-cookies.ts` 已删除、编号 0010 不复用；现补丁序列为 `0001–0009`、`0011`。
+- `0010-host-auth-cookie-prune`：已由上游 `dsh-v0.2.2-rc.2` 实现（启动前回收历史 Host 认证 cookie），补丁与 `host-auth-cookies.ts` 已删除、编号 0010 不复用；现补丁序列为 `0001–0009`、`0011`。

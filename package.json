@@ -1,0 +1,46 @@
+{
+  "name": "dsh-linux-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unofficial Linux packaging of the DSH desktop client: patches, packaging assets, and the gates this repository enforces",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "scripts": {
+    "change-scope": "node scripts/change-scope.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --config .oxlintrc.json scripts/",
+    "test": "vitest run",
+    "duplication": "jscpd --config .jscpd.json scripts",
+    "verify-md-wrap": "node scripts/verify-md-wrap.ts",
+    "verify-md-links": "node scripts/verify-md-links.ts",
+    "verify-doc-budgets": "node scripts/verify-doc-budgets.ts",
+    "verify-agent-note-classification": "node scripts/verify-agent-note-classification.ts",
+    "verify-agent-note-format": "node scripts/verify-agent-note-format.ts",
+    "verify-archived-agent-notes": "node scripts/verify-archived-agent-notes.ts",
+    "verify-skill-invocation-metadata": "node scripts/verify-skill-invocation-metadata.ts",
+    "verify-patch-surface": "bash scripts/patch-surface.sh",
+    "verify-shell-syntax": "bash scripts/verify-shell-syntax.sh",
+    "check:all": "node scripts/run-gates.ts check-all",
+    "check:ci": "node scripts/run-gates.ts ci-static",
+    "hooks:install": "node scripts/install-lefthook.mjs"
+  },
+  "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^26.6.6",
+    "eslint-plugin-sonarjs": "^4.2.2",
+    "js-yaml": "^4.3.2",
+    "jscpd": "^5.1.2",
+    "lefthook": "^2.2.2",
+    "mdast-util-from-markdown": "^2.1.0",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "oxlint": "^1.93.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,115 +1,75 @@
 # AGENTS.md
 
-本文规定本仓库的架构与代理的行为。与其他判断冲突时以本文为准；计划与补丁清单见 PLAN.md。
+本仓库是对官方 DSH 桌面客户端的 Linux 打包。上游是外部依赖，不是我们的代码；我们提交补丁，以及围绕补丁的脚本、资产、打包配置。产物是 Fedora x86_64 rpm，主要维护成本是上游升版后重放补丁。
 
-## 一、架构
+规格在 [PLAN.md](PLAN.md)，形状与边界在 [docs/architecture.md](docs/architecture.md)，决定与备选在 [Agent Notes](.agents/notes/README.md)，文档规则在 [docs/AGENTS.md](docs/AGENTS.md)，本地流程在 [docs/development.md](docs/development.md)。
 
-### 1.1 仓库构成
+## 仓库构成
 
-- 上游：官方 DSH Electron 客户端，外部依赖，不是我们的代码。
-- 我们的代码：`patches/` 下的补丁，以及 `scripts/`、`assets/`、`packaging/`、`.github/`。
-- 产物：Fedora x86_64 rpm。
-- 主要维护成本：上游升版后重放补丁。
+```
+patches/      上游改动的唯一载体，一个补丁一个变化理由
+scripts/      重放补丁、出包、验收、门禁
+assets/       二进制与系统文件，由 apply-patches.sh 放置
+packaging/    rpm 元数据
+docs/         架构、开发流程、专项参考
+.agents/      Agent Notes 与技能
+upstream/     拉下来的上游工作树（忽略）
+```
 
-### 1.2 原则
+## 命令
 
-> 依赖倒置，单一职责；低耦合，高内聚。
->
-> 高层与低层都依赖抽象，实现由外部注入，核心不随实现更替而改。一个模块只有一个变化的理由，理由来自谁要求它变，不来自它属于哪一类。模块之间只经由少而稳定的接口往来，换掉实现而调用方不必改，才算稳定。为同一变化服务的代码聚在一处。
->
-> 边界从领域来。先为领域里的概念命名，写清各自守的规则，代码、文档与界面只用这些词。必须同时成立的规则只由一个入口修改。外部系统在边缘翻译成自己的概念，它的概念不进入核心。
->
-> 于是功能按变化纵向切分，技术细节退到边缘。切得对不对，只看一次改动碰几处，不看文件有多短。
->
-> 从前阅读昂贵，人们用短小的文件来近似这条判据；AI 让阅读变得便宜，模块便可以大一些——大到刚好装下一次改动。
+```sh
+pnpm install            # 装门禁依赖，顺带装 git 钩子
+pnpm run check:all      # 全部门禁，提交前跑
+pnpm run change-scope --base origin/main   # 相对 origin/main 改了哪些文件
+bash scripts/dev-desktop.sh        # 打补丁并起开发用客户端
+bash scripts/patch-surface.sh      # 只查补丁形状
+```
 
-末段只解释为什么不用文件长度衡量内聚，不放宽 1.3；模块边界以 1.3 为准。
+出包不在本地：rpm 由 CI 构建、签名、验收。
 
-### 1.3 规则
+## 环境
 
-1. 一个补丁对应一个变化理由。补丁首行写 `变化理由：…`。新改动放进对应的补丁；没有就新建。补丁只经 `scripts/regen-patch.sh` 生成和重生成，它保留首行。
-   规则 3、4 的例外写在首行之后，一条一行：`例外：规则 N，<原因>；待迁移：<条目名或「否」>`。
-2. 实现写在新文件（如 `apps/desktop/src/linux-*.ts`）。上游已有文件只加挂钩：import、一处调用、一处对象展开、必要的类型扩展。
+容器里 `HOME` 常常只读，pnpm 装不上（`[ERROR] unable to open database file`）。此时只做 lockfile 静态核对——importer 条目、workspace `link:` 路径与 `package.json` 是否一致——并在汇报里注明「未实测」，不得写成已通过。能写 HOME 的真机与 CI 照门禁实测。
+
+根目录的 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`lefthook.yml` 是门禁工具链本身，属于仓库的一部分，不是试装残件；`pnpm install` 装的是它们，`pnpm run hooks:install` 装的是钩子。
+
+## 规则
+
+1. 一个补丁对应一个变化理由，首行写 `变化理由：…`。补丁只经 `scripts/regen-patch.sh` 生成和重生成，它保留首行。例外写在首行之后：`例外：规则 N，<原因>；待迁移：<条目名或「否」>`。
+2. 实现写在新文件。上游已有文件只加挂钩：import、一处调用、一处对象展开、必要的类型扩展。
 3. 除 `main.ts` 外，一个上游文件只归一个补丁。
-4. 每个补丁在 `main.ts` 净增不超过 15 行。超过时写例外，说明为什么只能在这里、不能进新文件。例外只给确实搬不走的代码，不给实现。
+4. 每个补丁在 `main.ts` 净增不超过 15 行；超过时写 `例外：规则 4` 并说明为什么只能在这里。例外只给确实搬不走的代码，不给实现。
 5. 同一组件只保留一份，其他位置 import。
-6. 每个事实只在一处：
-   - 二进制与系统文件放 `assets/`、`packaging/`，由 `scripts/apply-patches.sh` 放置，补丁不内嵌副本；
-   - rpm Release 号只来自 CI 环境变量；
-   - 命名以 PLAN.md 为准。
-7. 判断拆分是否正确，只看一次改动碰几个补丁、几个上游文件。补丁长度不是标准。
-8. 参考项目的写法与本节冲突时，采用其行为，按本节放置代码，并在汇报中说明。
-9. 现状与本文不一致之处，列在 PLAN.md「待迁移」。已列入的按条目收拢；未列入的不一致按缺陷处理。新改动不得扩大差距：
-   - 条目涉及的上游文件，触碰它的补丁数不得上升；
-   - 行数上升时写例外，原因写明是修缺陷还是新增实现。
-10. 规则 1、3、4、9 由 `scripts/patch-surface.sh` 对 `patches/` 做静态断言，在重放补丁前运行。
+6. 每个事实只在一处：二进制与系统文件放 `assets/`、`packaging/` 由脚本放置，补丁不内嵌副本；rpm Release 号只来自 CI 环境变量；命名以 PLAN.md 为准。
+7. 拆分是否正确的判据是一次改动碰几个补丁、几个上游文件；补丁长度不是判据。
+8. 参考项目的写法与本节冲突时，采用其行为，按本节放置代码，并在汇报里说明。
+9. 现状与本节不一致之处登记在 PLAN.md 的待迁移一节。已列入的按条目收拢，未列入的按缺陷处理；新改动不得扩大差距：条目涉及的上游文件触碰它的补丁数不得上升，行数上升要写例外并说明是修缺陷还是新增实现。
+10. 规则 1、3、4、9 由 [`scripts/patch-surface.sh`](scripts/patch-surface.sh) 对 `patches/` 做静态断言，在重放补丁前运行。
 
-### 1.4 改动汇报必须包含
+## 改动汇报
 
-- 改了哪个补丁；
-- 碰了哪些上游文件，每处是挂钩还是实现；
-- `main.ts` 净增行数；
-- 是否产生了重复的事实或组件。
+说明四件事：改了哪个补丁；碰了哪些上游文件，每处是挂钩还是实现；`main.ts` 净增行数；是否产生了重复的事实或组件。
 
-## 二、行为
+## 行为
 
-### 2.1 先回答
+- **先回答。** 用户提问时只回答，不操作；已有事实能推出结论的直接回答，不调用工具。用户说「立刻回答」「不许其他动作」后本轮不调用工具。用户问「你在干什么」时先停下回答。
+- **只做被要求的事。** 未被要求时不改文件、不装包、不提交、不触发 CI。用户说「不要改代码」时只诊断，给出原始错误、文件:行号、根因、影响面。默认只改文件，提交前先问。
+- **远端写操作每次都要事先书面许可**：`git push`、触发或取消 CI、创建或修改 Release、改仓库设置、删 artifact、发 issue 或评论。用户说「不推」时只在本地提交，并报告 HEAD、origin/main 与未推送的提交。本地能验证的先在本地验证，不用 CI 调试。
+- **读取要有未决问题。** 每条命令、每个文件都要对应一个未决问题，对应不上就不执行。排查第一步是针对症状做最小检索；单次诊断默认两条命令，仍无结论就停下报告已知事实并请示。未经要求禁止 `find /opt`、整棵树 `grep -r`、遍历安装目录、解析 asar/rpm 等二进制。只用我们自己的产物做对照，自写脚本先用样本验证。
+- **只做最终方案。** 不做临时方案或旁路。先看参考项目的做法；参考中没有的行为、规则、交互、兜底，先问再做。对齐指架构对齐：数值、层次、归属、通道名都要有出处。
+- **汇报先结论与证据，后过程。** 注明验证环境是容器、真机还是静态断言——容器通过不等于真机通过。失败时贴原始错误，不转述。越界时直接承认。
 
-- 用户提问时只回答，不操作。已有事实能推出结论的，直接回答，不调用工具。
-- 用户说「立刻回答」「不许其他动作」后，本轮不调用工具。
-- 用户问「你在干什么」时，先停下回答。
+## 产品约束
 
-### 2.2 范围
+只出 rpm，只支持 x86_64，不出 AppImage/deb。Host 用 Electron 自带 Node，asar 保持开启，sharp 只在子进程加载。更新只经 dnf 仓库，分 nightly / stable 两个渠道，应用不自行下载、校验或安装 rpm，不改写 `/opt` 与 `/usr`。`/etc`、`/usr` 下的系统文件由 rpm 拥有，不在 `%post` 中复制。
 
-- 只做被要求的事。未被要求时不改文件、不装包、不提交、不触发 CI。
-- 用户说「不要改代码」时只诊断，给出：原始错误、文件:行号、根因、影响面。
-- 默认只改文件；提交前先问。
+包名 `dsh-desktop`，可执行名 `deepseek-harness`，仓库名 `DSH-Linux-Desktop`。
 
-### 2.3 远端写操作
+**不做及原因**：不做透明窗口（旧合成器逐帧 alpha 混合导致内存暴涨）；Host 不换独立 Node（Electron 自带 Node 够用；插件市场 hot-mount 409 是上游 HMR 缺陷，与运行时无关，等上游修）；不做开机自启（用户明确不要）；应用不自行下载安装 rpm（文件归 rpm 所有，更新只有 dnf 一个来源）。
 
-- 范围：`git push`、触发/重跑/取消 CI、创建或修改 Release、修改仓库设置、删除 artifact、发 issue 或评论，及其他改变远端状态的操作。
-- 每次都需要用户事先书面许可。
-- 用户说「不推」时只在本地提交，并报告 HEAD、origin/main 和未推送的提交。
-- 本地能验证的先在本地验证；不用 CI 调试。
+完整的渠道语义、退出码、仓库布局、打包身份见 [PLAN.md](PLAN.md)。
 
-### 2.4 读取与排查
+## 改这份文件
 
-- 每条命令、每个文件都要对应一个未决问题；对应不上就不执行。
-- 排查第一步：针对症状做最小检索（如 `grep` 报错中的名称）。
-- 单次诊断默认 2 条命令；仍无结论就停下，报告已知事实并请示。
-- 未经要求禁止：`find /opt`、整棵树 `grep -r`、遍历安装目录、解析 asar/rpm 等二进制。
-- 只用我们自己的产物做对照：仓库、`upstream/`、`dist/*.rpm`。
-- 自写脚本先用样本验证；结果为空或异常时先怀疑脚本。
-- 本执行环境（容器）的 `/home`、`/mnt/work` 是只读挂载，pnpm store 不可写，`pnpm install --frozen-lockfile` 跑不了（报 `[ERROR] unable to open database file`）；此时只做 lockfile 静态核对——importer 条目、workspace `link:` 路径与 `package.json` 是否一致——汇报注明「未实测」，不得写成已通过。CI 与能写 HOME 的真机仍按 PLAN.md 门禁实测。
-
-### 2.5 方案
-
-- 只做最终方案，不做临时方案或旁路。
-- 先看参考项目的做法；参考中没有的行为、规则、交互、兜底，先问再做。
-- 对齐指架构对齐：数值、层次、归属、通道名都要有出处。
-
-### 2.6 产品约束
-
-- 只出 rpm，只支持 x86_64；不出 AppImage/deb。
-- Host 使用 Electron 自带 Node；asar 保持开启；sharp 只在子进程加载。
-- 更新只经 dnf 仓库，分 nightly / stable 两个渠道：
-  - 渠道判定：发布 tag 经 `scripts/lib/release-channel.sh` 判定——版本含预发布标记（`~`、`-rc`、alpha、beta 等）→ nightly；正式版 → stable，且同时进 nightly。应用侧渠道状态只存于上游 `settings-file` 的 `updates.channel`，默认 nightly。
-  - 仓库：随包 `/etc/yum.repos.d/dsh-desktop.repo` 一份文件两个 section——stable `dsh-desktop`（enabled=1）、nightly `dsh-desktop-nightly`（enabled=0）；手动 dnf 默认只走 stable。
-  - 检查：手动检查用普通权限 `dnf5 check-upgrade dsh-desktop`（加 `--refresh`；退出码 100 = 有更新）；应用内需要可用版本号，用 `dnf5 repoquery --upgrades --queryformat '%{evr}\n'`，并按渠道显式 `--enablerepo` / `--disablerepo`（nightly 默认 disabled，不显式选就看不到预发布）。
-  - 安装：`pkexec /usr/libexec/dsh-update-helper [--channel=nightly|stable]`，只有一个参数，无参 = nightly；helper 只接受 `--channel=nightly` / `--channel=stable`（非法 → 64，非 root → 77，公钥导入失败 → 70），只执行一条 `dnf5 upgrade -y --refresh`，显式启用所选渠道、禁用另一渠道；dnf 语义不降级。
-  - 迁移兼容：用户改过的旧 `.repo`（`%config(noreplace)`）缺渠道 section 时，helper 与应用侧都退回单仓库查询/升级，并在日志写明“渠道可能不生效”。
-  - 应用不自行下载、校验或安装 rpm，不改写 `/opt`、`/usr`。
-- `/etc`、`/usr` 下的系统文件由 rpm 拥有，不在 `%post` 中复制。
-- 包名 `dsh-desktop`，可执行名 `deepseek-harness`，仓库名 `DSH-Linux-Desktop`。
-- 不做及原因：
-  - 不做透明窗口：旧合成器逐帧 alpha 混合导致内存暴涨。
-  - Host 不换独立 Node：Electron 自带 Node 够用，独立 Node 只增打包与运行时组合的维护面，无对应收益。插件市场 hot-mount 409 卡死是上游 HMR 缺陷（ffyfox/dsh-desktop-linux#8 插桩定位：缓存 miss 时同内容换 inode 被判已改 → 市场被停 → dispose 等自己的操作成环），官方客户端 macOS/Windows 原生即有，与 Host 运行时无关，等上游修复。
-  - 不做开机自启：用户明确不要。
-  - 应用不自行下载、安装 rpm：文件归 rpm 所有，更新只有 dnf 一个来源。
-
-### 2.7 汇报
-
-- 先结论与证据，后过程。
-- 注明验证环境：容器、真机或静态断言。容器通过不等于真机通过。
-- 失败时贴原始错误，不转述。
-- 越界时直接承认。
+常驻指令才放这里，一条一到三行，细则链接到它的家。字数上限由 [`scripts/doc-budgets.manifest.json`](scripts/doc-budgets.manifest.json) 守住；超了先按 [docs/AGENTS.md](docs/AGENTS.md) 的顺序迁走或压缩，最后才考虑提高上限并在 PR 里写明理由。

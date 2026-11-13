@@ -1,0 +1,8 @@
+# 仓库的规范文本形态是 LF，签出时也就地统一：工作树与仓库之间没有 smudge 边界，
+# 逐个比对字节的门禁（文档哈希、空白检查）在每个宿主上看到同一种形态。
+* text=auto eol=lf
+
+*.pdf binary
+
+# 统一 diff 格式的补丁里，空上下文行前面的那个空格不能省。
+patches/*.patch whitespace=-blank-at-eol

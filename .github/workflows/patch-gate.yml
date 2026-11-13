@@ -1,8 +1,7 @@
 name: patch-gate
 
-# 只做补丁门禁：静态断言 + 干净树试打 + 补丁触及的上游测试（约两分钟），不做构建、不打 rpm。
-# M8 要求 patch-surface.sh 在重放补丁之前运行；这里同时把「补丁在干净上游树上试打通过」
-# 一起验证，PR 2 起补丁带 preamble 后，这一步也在验证 git apply 接受 preamble。
+# PR 门禁：仓库门禁（文档、补丁形状、shell 语法、重复代码）+ 干净树真打补丁 + 补丁触及的上游测试。
+# 约两三分钟，不做构建、不打 rpm——出包是 package.yml 的事。
 on:
   pull_request:
     branches: [main]
@@ -23,31 +22,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Shell syntax
-        run: |
-          bash -n scripts/*.sh scripts/lib/*.sh
-          # 渠道判定是发布链路的唯一事实来源：预发布进 nightly，正式版进 stable。
-          source scripts/lib/release-channel.sh
-          [ "$(release_channel_for_tag v0.2.2-rc.2-1)" = "nightly" ]
-          [ "$(release_channel_for_tag v0.2.2-1)" = "stable" ]
-          echo "渠道判定规则检查通过"
+      - uses: ./.github/actions/setup-node-pnpm
 
-      - name: Check patch surface
-        run: bash scripts/patch-surface.sh
+      # 仓库门禁的依赖与出包作业无关（mdast、jscpd、lefthook、typescript），所以这里单独装。
+      - name: Install gate dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 与 pre-push 钩子跑的是同一组门禁：文档折行与链接、Agent Note 结构与格式、字数预算、
+      # 归档件哈希、技能元数据、补丁形状、shell 语法、重复代码。本地过不了，这里也过不了。
+      - name: Run repository gates
+        run: pnpm run check:all
 
       - name: Fetch upstream
         run: scripts/fetch-upstream.sh
 
-      # 不用 --check：补丁是依次叠加的（0020 依赖 0005 新建的 .env.linux.example），
-      # `git apply --check` 每条都对干净树试打，从 0020 起必然失败。这里在一次性 runner 的
-      # 干净克隆上真打，效果等同打包流程里的同一步。
+      # 不用 --check：补丁是依次叠加的（后置补丁依赖前置补丁新建的文件），`git apply --check`
+      # 每条都对干净树试打，必然有条目失败。这里在一次性 runner 的干净克隆上真打，
+      # 效果等同打包流程里的同一步。
       - name: Apply patches
         run: scripts/apply-patches.sh
-
-      # 补丁改到的上游测试在 CI 里真跑一遍：从本 PR 改动的补丁文件里提取它新增/修改的
-      # 测试路径，交给 vitest；没有触及测试文件就跳过。node/pnpm 版本与 package.yml
-      # 同源（composite action）；缓存 key 同款（lockfile 在打完补丁后取）。
-      - uses: ./.github/actions/setup-node-pnpm
 
       - name: Cache pnpm store
         uses: actions/cache@v6
@@ -57,10 +50,12 @@ jobs:
           restore-keys: |
             pnpm-store-
 
-      - name: Install dependencies
+      - name: Install upstream dependencies
         run: pnpm install --frozen-lockfile
         working-directory: upstream
 
+      # 补丁改到的上游测试在 CI 里真跑一遍：从本 PR 改动的补丁文件里提取它新增/修改的测试路径，
+      # 交给 vitest；没有触及测试文件就跳过。
       - name: Collect touched upstream tests
         id: specs
         run: |

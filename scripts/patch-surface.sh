@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# 静态检查 patches/：补丁首行说明、上游文件归属、main.ts 净增、资源副本、PLAN §10 引用一致性。
+# 静态检查 patches/：补丁首行说明、上游文件归属、main.ts 净增、资源副本、PLAN 待迁移一节引用一致性。
 # 在重放补丁之前运行，未登记的违规以非 0 退出。
 #
-# PLAN.md §10「待迁移」是唯一登记处。每条检查只在「能唯一定位这一条违规」的字符串命中 §10 时
+# PLAN.md 的「待迁移」一节是唯一登记处。每条检查只在「能唯一定位这一条违规」的字符串命中该节时
 # 才算已登记：
-#   - 首行：§10 里那句「没有补丁首行写」（M8 现状句；PR 2 补齐首行后必须删掉这句）；
-#   - main.ts 净增：§10 的同一行里同时出现 `00NN`、main.ts、净增；
-#   - 多补丁文件：取 §10 里含该完整路径的那一行，实际触碰的补丁集合必须与行内登记的集合完全一致（数量不得上升）；
-#   - 内嵌资源：§10 里出现该落点的完整路径。
-# §10 条目删掉后，对应检查自动变成硬失败。
+#   - 首行：该节里那句「没有补丁首行写」；
+#   - main.ts 净增：该节的同一行里同时出现 `00NN`、main.ts、净增；
+#   - 多补丁文件：取该节里含该完整路径的那一行，实际触碰的补丁集合必须与行内登记的集合完全一致（数量不得上升）；
+#   - 内嵌资源：该节里出现该落点的完整路径。
+# 条目删掉后，对应检查自动变成硬失败。节的编号会随 PLAN 结构调整，故按标题文字定位。
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,9 +21,9 @@ import sys
 
 root = pathlib.Path('.')
 plan = (root / 'PLAN.md').read_text(encoding='utf-8')
-m = re.search(r'^## 10\. .*?(?=^## 11\.|\Z)', plan, re.M | re.S)
+m = re.search(r'^## \d+\. 待迁移[ \t]*$.*?(?=^## \d+\. |\Z)', plan, re.M | re.S)
 if not m:
-    sys.exit('patch-surface: PLAN.md 找不到「## 10. 待迁移」')
+    sys.exit('patch-surface: PLAN.md 找不到「待迁移」一节')
 migration = m.group(0)
 lines = migration.splitlines()
 

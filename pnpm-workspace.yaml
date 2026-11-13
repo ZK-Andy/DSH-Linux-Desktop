@@ -1,0 +1,4 @@
+# pnpm 10+ 默认 strictDepBuilds：未登记的 install script 是硬失败。
+# 默认拒绝，只放行门禁真正需要的。lefthook 的 postinstall 下载本机二进制并装 git 钩子。
+allowBuilds:
+  lefthook: true

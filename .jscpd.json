@@ -1,0 +1,13 @@
+{
+  "minTokens": 60,
+  "minLines": 6,
+  "mode": "mild",
+  "format": ["typescript"],
+  "pattern": "**/*.ts",
+  "ignore": ["**/node_modules/**", "**/tests/**"],
+  "ignorePattern": ["(?s)/\\* jscpd:ignore-start \\*/.*?/\\* jscpd:ignore-end \\*/"],
+  "reporters": ["console"],
+  "exitCode": 1,
+  "noColors": true,
+  "noTips": true
+}
