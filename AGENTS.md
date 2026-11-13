@@ -80,6 +80,7 @@
 - 未经要求禁止：`find /opt`、整棵树 `grep -r`、遍历安装目录、解析 asar/rpm 等二进制。
 - 只用我们自己的产物做对照：仓库、`upstream/`、`dist/*.rpm`。
 - 自写脚本先用样本验证；结果为空或异常时先怀疑脚本。
+- 本执行环境（容器）的 `/home`、`/mnt/work` 是只读挂载，pnpm store 不可写，`pnpm install --frozen-lockfile` 跑不了（报 `[ERROR] unable to open database file`）；此时只做 lockfile 静态核对——importer 条目、workspace `link:` 路径与 `package.json` 是否一致——汇报注明「未实测」，不得写成已通过。CI 与能写 HOME 的真机仍按 PLAN.md 门禁实测。
 
 ### 2.5 方案
 
