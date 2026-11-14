@@ -29,7 +29,6 @@
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",
-    "@types/js-yaml": "^4.0.9",
     "@types/mdast": "^4.0.4",
     "@types/node": "^26.6.6",
     "eslint-plugin-sonarjs": "^4.2.2",
