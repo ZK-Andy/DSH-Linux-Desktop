@@ -11,8 +11,9 @@
  * this worktree only.
  */
 import { spawnSync } from 'node:child_process'
+import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /** Oldest Git whose `--worktree` config scope we rely on. */
 const MINIMUM_GIT = [2, 26, 0]
@@ -28,20 +29,31 @@ const OWNERSHIP_MARKER_OWNER = 'dsh-linux-desktop lefthook hooks'
 /** Environment variable that permits replacing an inherited `core.hooksPath`. */
 const ALLOW_HOOKS_PATH_OVERRIDE = 'DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE'
 
-/** @param {string} text */
-function stripLineTerminator(text) {
+/** Result of one completed spawn with UTF-8 decoding. */
+type CommandResult = SpawnSyncReturns<string>
+
+/** Options for one spawn: working directory and tolerated non-zero statuses. */
+type CaptureOptions = {
+  cwd?: string | undefined
+  allowStatuses?: number[] | undefined
+}
+
+/** Strip one trailing line terminator from command output. */
+export function stripLineTerminator(text: string): string {
   return text.replace(/\r?\n$/, '')
 }
 
 /**
  * Run one command and fail loudly on a non-zero status.
- * @param {string} command - executable to spawn.
- * @param {string[]} args - its arguments.
- * @param {{ cwd?: string, allowStatuses?: number[] }} [options] - working directory and tolerated statuses.
- * @returns {{ status: number | null, stdout: string, stderr: string }} the completed process.
+ * @param command - executable to spawn.
+ * @param args - its arguments.
+ * @param options - working directory and tolerated statuses.
  */
-function capture(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: options.cwd, encoding: 'utf8', env: process.env })
+function capture(command: string, args: string[], options: CaptureOptions = {}): CommandResult {
+  const spawnOptions: SpawnSyncOptionsWithStringEncoding = options.cwd === undefined
+    ? { encoding: 'utf8', env: process.env }
+    : { cwd: options.cwd, encoding: 'utf8', env: process.env }
+  const result = spawnSync(command, args, spawnOptions)
   if (result.status !== 0 && !(options.allowStatuses ?? []).includes(result.status ?? -1)) {
     const detail = typeof result.stderr === 'string' ? result.stderr.trim() : ''
     throw new Error(`${command} ${args.join(' ')} failed: ${detail || `exit status ${String(result.status)}`}`)
@@ -51,22 +63,21 @@ function capture(command, args, options = {}) {
 
 /**
  * Run one Git command inside the repository.
- * @param {string[]} args - Git arguments.
- * @param {string} root - repository root.
- * @param {{ allowStatuses?: number[] }} [options] - statuses that are not failures.
- * @returns {{ status: number | null, stdout: string, stderr: string }} the completed process.
+ * @param args - Git arguments.
+ * @param root - repository root.
+ * @param options - statuses that are not failures.
  */
-function git(args, root, options = {}) {
+function git(args: string[], root: string, options: { allowStatuses?: number[] | undefined } = {}): CommandResult {
   return capture('git', args, { cwd: root, allowStatuses: options.allowStatuses })
 }
 
 /**
  * Read the installed `core.hooksPath` entries for one config file.
- * @param {string} configPath - absolute config file path.
- * @param {string} root - repository root, used as the cwd.
- * @returns {string[]} every registered value, in file order.
+ * @param configPath - absolute config file path.
+ * @param root - repository root, used as the cwd.
+ * @returns every registered value, in file order.
  */
-function hooksPathEntries(configPath, root) {
+function hooksPathEntries(configPath: string, root: string): string[] {
   if (!existsSync(configPath)) return []
   const result = git(['config', '--file', configPath, '--get-all', 'core.hooksPath'], root)
   return result.status === 0 ? result.stdout.split(/\r?\n/).filter(Boolean) : []
@@ -74,13 +85,13 @@ function hooksPathEntries(configPath, root) {
 
 /**
  * Validate the ownership marker's content.
- * @param {string} markerPath - absolute marker path.
- * @returns {string | undefined} the hooks path the marker names, when it is valid.
+ * @param markerPath - absolute marker path.
+ * @returns the hooks path the marker names, when it is valid.
  */
-function readOwnershipMarker(markerPath) {
+export function readOwnershipMarker(markerPath: string): string | undefined {
   if (!existsSync(markerPath)) return undefined
   try {
-    const parsed = JSON.parse(readFileSync(markerPath, 'utf8'))
+    const parsed = JSON.parse(readFileSync(markerPath, 'utf8')) as { owner?: unknown; version?: unknown; hooksPath?: unknown }
     if (parsed.owner !== OWNERSHIP_MARKER_OWNER) return undefined
     if (parsed.version !== OWNERSHIP_MARKER_VERSION) return undefined
     if (typeof parsed.hooksPath !== 'string' || !parsed.hooksPath.startsWith('/')) return undefined
@@ -92,10 +103,9 @@ function readOwnershipMarker(markerPath) {
 
 /**
  * Create the hooks directory and its ownership marker.
- * @param {string} hooksPath - absolute hooks directory path.
- * @returns {void}
+ * @param hooksPath - absolute hooks directory path.
  */
-function ensureOwnedHooksDirectory(hooksPath) {
+function ensureOwnedHooksDirectory(hooksPath: string): void {
   if (existsSync(hooksPath)) {
     if (!lstatSync(hooksPath).isDirectory()) {
       throw new Error(`refusing to use non-directory hooks path ${hooksPath}`)
@@ -115,27 +125,25 @@ function ensureOwnedHooksDirectory(hooksPath) {
 
 /**
  * Reject Git releases that predate the `--worktree` config scope.
- * @param {string} root - repository root.
- * @returns {void}
+ * @param root - repository root.
  */
-function assertSupportedGit(root) {
+function assertSupportedGit(root: string): void {
   const raw = stripLineTerminator(git(['--version'], root).stdout)
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(raw)
   if (match === null) throw new Error(`cannot parse Git version from ${JSON.stringify(raw)}`)
-  const version = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const actual = [Number(match[1]), Number(match[2]), Number(match[3])]
   for (let index = 0; index < MINIMUM_GIT.length; index += 1) {
-    if (version[index] > MINIMUM_GIT[index]) return
-    if (version[index] < MINIMUM_GIT[index]) {
-      throw new Error(`Git ${MINIMUM_GIT.join('.')} or newer is required, found ${version.join('.')}`)
+    const current = actual[index] ?? Number.NaN
+    const minimum = MINIMUM_GIT[index] ?? Number.NaN
+    if (current > minimum) return
+    if (current < minimum) {
+      throw new Error(`Git ${MINIMUM_GIT.join('.')} or newer is required, found ${actual.join('.')}`)
     }
   }
 }
 
-/**
- * Install the hooks into the current worktree.
- * @returns {void}
- */
-function install() {
+/** Install the hooks into the current worktree. */
+function install(): void {
   if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') return
   const probe = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
   if (probe.status !== 0) return
@@ -153,7 +161,7 @@ function install() {
   }
   if (registered.length === 1 && registered[0] !== hooksPath) {
     throw new Error(
-      `refusing to replace worktree-scoped core.hooksPath ${registered[0]}; `
+      `refusing to replace worktree-scoped core.hooksPath ${String(registered[0])}; `
       + 'a worktree-specific custom path must be integrated or removed explicitly',
     )
   }
@@ -177,9 +185,11 @@ function install() {
   console.log(`lefthook: hooks installed at ${hooksPath}`)
 }
 
-try {
-  install()
-} catch (error) {
-  console.error(`install-lefthook: ${error instanceof Error ? error.message : String(error)}`)
-  process.exitCode = 1
+if (process.argv[1] && import.meta.filename === resolve(process.argv[1])) {
+  try {
+    install()
+  } catch (error) {
+    console.error(`install-lefthook: ${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
+  }
 }

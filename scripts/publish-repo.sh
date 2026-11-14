@@ -49,7 +49,7 @@ BASEURL="${BASEURL:-https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/downlo
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-python3 "$ROOT/scripts/lib/make-repomd.py" --rpm "$(dirname "$RPM_FILE")" --baseurl "$BASEURL" --out "$OUT"
+node "$ROOT/scripts/lib/make-repomd.ts" --rpm "$(dirname "$RPM_FILE")" --baseurl "$BASEURL" --out "$OUT"
 
 if [[ "$SIGN" == 1 ]]; then
   GNUPGHOME="${GNUPGHOME:-$ROOT/.signing/gnupg}"

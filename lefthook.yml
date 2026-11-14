@@ -1,5 +1,5 @@
 # Git 钩子（lefthook）。这里的检查只为本地快速拦一道；完整的门禁矩阵由 CI 拥有。
-# 安装：`node scripts/install-lefthook.mjs`（装依赖时由 postinstall 自动跑）。
+# 安装：`node scripts/install-lefthook.ts`（`pnpm run hooks:install`；不会随 pnpm install 自动跑）。
 
 pre-commit:
   jobs:

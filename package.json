@@ -25,7 +25,7 @@
     "verify-shell-syntax": "bash scripts/verify-shell-syntax.sh",
     "check:all": "node scripts/run-gates.ts check-all",
     "check:ci": "node scripts/run-gates.ts ci-static",
-    "hooks:install": "node scripts/install-lefthook.mjs"
+    "hooks:install": "node scripts/install-lefthook.ts"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",
