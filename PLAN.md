@@ -53,7 +53,7 @@ electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 
 
 `artifactName` 为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
 
-预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.4-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.4`（2026-11-18 跟版，当天发版）。
+预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.4-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.5`（2026-11-19 跟版，尚未发版）。
 
 门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测——`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
 
