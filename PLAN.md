@@ -53,7 +53,7 @@ electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 
 
 `artifactName` 为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
 
-预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.4-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.5`（2026-11-19 跟版，尚未发版）。
+预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.5-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.5`（2026-11-19 跟版，当天发版）。
 
 门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测——`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
 
@@ -104,6 +104,8 @@ helper、polkit 策略、`/etc/yum.repos.d/dsh-desktop.repo`、公钥与 `/var/l
 真机验证（2026-11-12）：装 nightly 渠道的 rpm `0.2.2~rc.2-2` 后，托盘「检查更新」经应用侧 repoquery 读到该版本 → `pkexec` helper → `dnf5 upgrade` → 升级成功并重启；双渠道链路（tag → Release 资产 → `/nightly` repodata → 应用侧检查 → helper 安装）首次全链真机闭环（CI 侧 run `43055298262` 三 job 全绿）。
 
 真机验证（2026-11-18）：rc.4 基线上更新到 rpm `0.2.2~rc.4-1` 成功并重启，更新链在换基线后复验通过（CI 侧 run `44244868962` 三 job 全绿）。
+
+真机验证（2026-11-19）：rc.5 基线上更新到 rpm `0.2.2~rc.5-1` 成功并重启，更新链在换基线后复验通过（CI 侧 run `44394761011` 三 job 全绿）。
 
 ### 3.5 桌面集成
 
