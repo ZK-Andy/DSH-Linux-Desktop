@@ -4,14 +4,14 @@
 
 ## 1. 定性
 
-非官方 Linux 桌面打包：fork `deepseek-ai/deepseek-harness`（MIT）的 `apps/desktop`，只叠加托盘与桌面集成补丁。取代已停维护的 `dotnet-deepseek-harness-desktop`。自用为主，仓库与产物公开；交付物只有 RPM（Fedora 44 / dnf5）。不重做客户端：UI 与 Chromium 渲染全部来自官方 Electron 应用。
+非官方 Linux 桌面打包：fork `deepseek-ai/deepseek-harness`（MIT）的 `apps/desktop`，只叠加托盘与桌面集成补丁。取代已停维护的 `dotnet-deepseek-harness-desktop`。自用为主，仓库与产物公开；交付物只有 RPM（Fedora 45 / dnf5）。不重做客户端：UI 与 Chromium 渲染全部来自官方 Electron 应用。
 
 ## 2. 需求
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | R1 | RPM 可分发包 | 公钥已导入后，`dnf5 install ./dsh-desktop-*.rpm` 成功，应用菜单可见、可启动 |
-| R2 | 托盘常驻 | 托盘图标存在，菜单含「显示窗口 / 退出」；Fedora 44 GNOME Wayland（装 AppIndicator 扩展）人工确认 |
+| R2 | 托盘常驻 | 托盘图标存在，菜单含「显示窗口 / 退出」；Fedora 45 GNOME Wayland（装 AppIndicator 扩展）人工确认 |
 | R3 | 关闭到托盘 | 点关闭后进程仍在、窗口隐藏；从托盘退出才结束 |
 | R4 | 更新体验对齐旧桌面壳 | 检查 → 提示 → 下载 → 一次授权 → 安装 → 自动重启 |
 | R5 | 自动跟版 + 手动触发 | 每周探测上游 `dsh-v*` tag；`workflow_dispatch` 可指定 tag/commit；补丁重放成功才发 Release，失败开 issue 并保留上一版 |
@@ -63,7 +63,7 @@ GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机�
 
 缓存：pnpm store（`~/.local/share/pnpm/store`，key 用 fetch 之后的 `upstream/pnpm-lock.yaml`）、Electron 与 electron-builder 工具链（`~/.cache/electron`、`~/.cache/electron-builder`）；不缓存 `node_modules`。
 
-冒烟：出包后同一 job 里起 `fedora:44` 容器，`dnf5 install --setopt=localpkg_gpgcheck=0` 真装、`xvfb` 启动、`xdotool` 确认窗口出现并留 `WM_CLASS`，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。容器内脚本分两阶段自举（装包 → 会话总线+Xvfb 重入 `--launch`），容器外只做挂载（`/pkg` 只读、`/shots`、`/smokelogs`）；截图与 `app.log` 走 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR`，上传 artifact 分档：冒烟跑过且失败判 error，其余 warn。
+冒烟：出包后同一 job 里起 `fedora:45` 容器，`dnf5 install --setopt=localpkg_gpgcheck=0` 真装、`xvfb` 启动、`xdotool` 确认窗口出现并留 `WM_CLASS`，再按 `import` → `scrot` → `gnome-screenshot` 级联截图（坏工具换下一个）；截图只作人眼复核，崩溃或没建出窗口判失败。容器内脚本分两阶段自举（装包 → 会话总线+Xvfb 重入 `--launch`），容器外只做挂载（`/pkg` 只读、`/shots`、`/smokelogs`）；截图与 `app.log` 走 `SMOKE_SHOT_DIR`/`SMOKE_LOG_DIR`，上传 artifact 分档：冒烟跑过且失败判 error，其余 warn。
 
 CI 证明不了 GNOME 里的可见性：R2 以真实 GNOME Wayland 人工验收为准，CI 只保证对象与注册存在。
 
@@ -178,7 +178,7 @@ M5 收尾：单实例复核、GPG 校验、README 前置条件、docs 成文。
 
 ## 7. 已知约束
 
-Fedora 44 默认 dnf5，helper 显式调用 `dnf5`，不依赖 `dnf` 符号链接。GNOME 无 AppIndicator 扩展时托盘不可见——文档写明，不作为缺陷处理。Wayland 下按上游默认（XWayland 或原生 Wayland），不额外改渲染参数。上游升版即需重放补丁；CI 失败就是「版本落后」的信号，不静默通过。Electron 与 libvips 的 glib 冲突是上游未修的问题（electron#46323 仍 open），只能靠 §3.6 规避；上游修了，隔离补丁可以单独摘掉。首装须一次性导入公钥，不导入时 `dnf5` 会以 NOKEY 拒绝签名包。`/opt` 目录名、desktop 文件名、`WM_CLASS` 由 `productName`/`desktopName` 与 Electron 版本共同决定，以 M2 实测值为准。
+Fedora 45 默认 dnf5，helper 显式调用 `dnf5`，不依赖 `dnf` 符号链接。GNOME 无 AppIndicator 扩展时托盘不可见——文档写明，不作为缺陷处理。Wayland 下按上游默认（XWayland 或原生 Wayland），不额外改渲染参数。上游升版即需重放补丁；CI 失败就是「版本落后」的信号，不静默通过。Electron 与 libvips 的 glib 冲突是上游未修的问题（electron#46323 仍 open），只能靠 §3.6 规避；上游修了，隔离补丁可以单独摘掉。首装须一次性导入公钥，不导入时 `dnf5` 会以 NOKEY 拒绝签名包。`/opt` 目录名、desktop 文件名、`WM_CLASS` 由 `productName`/`desktopName` 与 Electron 版本共同决定，以 M2 实测值为准。
 
 ## 8. 命名
 

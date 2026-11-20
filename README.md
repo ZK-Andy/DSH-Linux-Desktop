@@ -12,7 +12,7 @@
 
 ## 安装
 
-Fedora 44，先导入公钥再装包：
+Fedora 45，先导入公钥再装包：
 
 ```sh
 sudo rpm --import https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/latest/download/RPM-GPG-KEY-dsh-desktop

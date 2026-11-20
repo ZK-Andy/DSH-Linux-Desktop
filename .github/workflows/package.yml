@@ -162,7 +162,7 @@ jobs:
           echo "== rpm Requires =="
           rpm -qp --requires "$rpm" 2>&1 | head -60 || true
 
-      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:44 容器；
+      # 与参考模板同形：冒烟是同一个 job 里的一个 step，rpm 腿由脚本起 fedora:45 容器；
       # 截图与日志落宿主目录，按「跑过且失败=error、其余=warn」分档上传（warn 恒定的上传步
       # 等于永不失败的门）。
       - name: Smoke install rpm

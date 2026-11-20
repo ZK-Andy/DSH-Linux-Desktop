@@ -38,6 +38,6 @@ bash scripts/dev-desktop.sh   # 打补丁并起一个开发用客户端
 
 ## 出包
 
-本地不出包。rpm 由 CI 构建、签名、验收（静态 `verify.sh` + `fedora:44` 容器冒烟）。要验证打包相关改动，先在本地跑 `bash scripts/patch-surface.sh` 与 `bash scripts/verify-shell-syntax.sh`，然后开 PR 让 `patch-gate.yml` 打补丁、跑受影响的上游测试。
+本地不出包。rpm 由 CI 构建、签名、验收（静态 `verify.sh` + `fedora:45` 容器冒烟）。要验证打包相关改动，先在本地跑 `bash scripts/patch-surface.sh` 与 `bash scripts/verify-shell-syntax.sh`，然后开 PR 让 `patch-gate.yml` 打补丁、跑受影响的上游测试。
 
 容器里 `HOME` 只读时 pnpm 装不上，此时只做 lockfile 静态核对，并在汇报里写「未实测」——不要把静态核对写成已通过。

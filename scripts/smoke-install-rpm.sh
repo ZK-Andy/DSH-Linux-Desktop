@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rpm 冒烟入口（宿主侧）：只负责起 fedora:44 容器与挂载，容器内逻辑在 smoke-rpm-inner.sh。
+# rpm 冒烟入口（宿主侧）：只负责起 fedora:45 容器与挂载，容器内逻辑在 smoke-rpm-inner.sh。
 #
 #   SMOKE_SHOT_DIR=shots SMOKE_LOG_DIR=smoke-logs ./scripts/smoke-install-rpm.sh dist
 #
@@ -29,7 +29,7 @@ docker run --rm \
   -v "$LOG_DIR:/smokelogs:rw" \
   -e SMOKE_SHOT_DIR=/shots \
   -e SMOKE_LOG_DIR=/smokelogs \
-  fedora:44 bash /smoke-inner.sh || docker_rc=$?
+  fedora:45 bash /smoke-inner.sh || docker_rc=$?
 
 # 非零留痕：容器内外两层失败要能一眼分开（inner 的结论行在上文）。
 if [[ "$docker_rc" -ne 0 ]]; then

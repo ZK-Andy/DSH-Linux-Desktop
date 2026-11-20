@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-`scripts/verify.sh` 只做 rpm 静态验收：包元数据、文件布局、desktop 入口、`Requires`、`%post`/`%postun` 内容，全部从 `rpm -qp` 一类只读查询得出。`scripts/smoke-install-rpm.sh` 起 `fedora:44` 容器真装真启动：`dnf5 install`、Xvfb 起会话、`xdotool` 确认窗口与 `WM_CLASS`、级联截图。两者在同一作业里先后跑，失败各自留痕。
+`scripts/verify.sh` 只做 rpm 静态验收：包元数据、文件布局、desktop 入口、`Requires`、`%post`/`%postun` 内容，全部从 `rpm -qp` 一类只读查询得出。`scripts/smoke-install-rpm.sh` 起 `fedora:45` 容器真装真启动：`dnf5 install`、Xvfb 起会话、`xdotool` 确认窗口与 `WM_CLASS`、级联截图。两者在同一作业里先后跑，失败各自留痕。
 
 ## Alternatives considered
 
