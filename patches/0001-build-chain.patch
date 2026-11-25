@@ -1,6 +1,6 @@
 变化理由：把上游仓库变成可构建的 Linux 桌面工程：下载与解包、补齐 workspace 入口、包骨架、运行时依赖、托盘图标生成、office 与 assets 放置。
 diff --git a/.gitignore b/.gitignore
-index 6255c708..22e5eee8 100644
+index 7024b069..c4e7037b 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -2,6 +2,7 @@ CLAUDE.local.md
@@ -22,23 +22,10 @@ index 6255c708..22e5eee8 100644
 +apps/desktop/resources/org.deepseek.harness.desktop.update.policy
 +apps/desktop/resources/rpm-post-install.sh
 +apps/desktop/resources/rpm-post-remove.sh
-diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 0c90226f..36d57171 100644
---- a/apps/desktop/package.json
-+++ b/apps/desktop/package.json
-@@ -39,6 +39,8 @@
-     "package:win:x64": "tsx scripts/package-target.ts win-x64",
-     "package:win:x64:unsigned": "tsx scripts/package-target.ts win-x64 --unsigned",
-     "package:win:x64:dir": "tsx scripts/package-target.ts win-x64 --dir",
-+    "package:linux:x64": "tsx scripts/package-target.ts linux-x64 --unsigned",
-+    "package:linux:x64:dir": "tsx scripts/package-target.ts linux-x64 --unsigned --dir",
-     "upload:mac:arm64": "tsx scripts/upload-target.ts mac-arm64",
-     "upload:mac:x64": "tsx scripts/upload-target.ts mac-x64",
-     "upload:win:x64": "tsx scripts/upload-target.ts win-x64",
-diff --git a/apps/desktop/scripts/desktop-auto-update-environment.d.mts b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
+diff --git a/apps/desktop-publisher/src/desktop-auto-update-environment.d.mts b/apps/desktop-publisher/src/desktop-auto-update-environment.d.mts
 index c58df5a0..f85721d2 100644
---- a/apps/desktop/scripts/desktop-auto-update-environment.d.mts
-+++ b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
+--- a/apps/desktop-publisher/src/desktop-auto-update-environment.d.mts
++++ b/apps/desktop-publisher/src/desktop-auto-update-environment.d.mts
 @@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
  export type DesktopAutoUpdateEnvironment = 'test' | 'production'
  
@@ -48,10 +35,10 @@ index c58df5a0..f85721d2 100644
  
  /**
   * Name the fixed installer object shared by uploading and cache refresh.
-diff --git a/apps/desktop/scripts/desktop-auto-update-environment.mjs b/apps/desktop/scripts/desktop-auto-update-environment.mjs
+diff --git a/apps/desktop-publisher/src/desktop-auto-update-environment.mjs b/apps/desktop-publisher/src/desktop-auto-update-environment.mjs
 index 24aaa0ea..be95335b 100644
---- a/apps/desktop/scripts/desktop-auto-update-environment.mjs
-+++ b/apps/desktop/scripts/desktop-auto-update-environment.mjs
+--- a/apps/desktop-publisher/src/desktop-auto-update-environment.mjs
++++ b/apps/desktop-publisher/src/desktop-auto-update-environment.mjs
 @@ -33,7 +33,7 @@ const UPDATE_ENVIRONMENTS = {
    },
  }
@@ -79,6 +66,61 @@ index 24aaa0ea..be95335b 100644
   * @returns {string} Filename stored beside electron-builder artifacts.
   */
  export function desktopBuildRecordFilename(target) {
+diff --git a/apps/desktop-publisher/src/desktop-publish-targets.ts b/apps/desktop-publisher/src/desktop-publish-targets.ts
+index 3270b99b..2e8a271e 100644
+--- a/apps/desktop-publisher/src/desktop-publish-targets.ts
++++ b/apps/desktop-publisher/src/desktop-publish-targets.ts
+@@ -8,7 +8,7 @@ export const desktopPackageWorkflows = {
+   'win-x64': '.github/workflows/windows-package.yml',
+ } as const
+ 
+-const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64'])
++const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'])
+ 
+ /** Machine labels are unique; a scalar target is shorthand for a one-element target list. */
+ export const desktopPublishRunnersSchema = z.record(z.string(), z.object({
+diff --git a/apps/desktop-publisher/src/desktop-release-store.ts b/apps/desktop-publisher/src/desktop-release-store.ts
+index ae791544..eef27510 100644
+--- a/apps/desktop-publisher/src/desktop-release-store.ts
++++ b/apps/desktop-publisher/src/desktop-release-store.ts
+@@ -17,7 +17,7 @@ const sourceSchema = z.strictObject({
+   channel: z.enum(['nightly', 'stable']),
+   runnerName: z.string().min(1),
+   // Storage accepts every Desktop target; CI routing separately limits currently provisioned platforms.
+-  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64']),
++  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64']),
+   preset: z.enum(['test', 'production']),
+   productVersion: z.string().min(1),
+   version: z.string().min(1),
+diff --git a/apps/desktop-publisher/tests/desktop-auto-update-environment.spec.ts b/apps/desktop-publisher/tests/desktop-auto-update-environment.spec.ts
+index 8b495735..f06f9b8f 100644
+--- a/apps/desktop-publisher/tests/desktop-auto-update-environment.spec.ts
++++ b/apps/desktop-publisher/tests/desktop-auto-update-environment.spec.ts
+@@ -108,8 +108,9 @@ describe('desktop auto-update environment', () => {
+     expect(() => resolveDesktopAutoUpdateEnvironment({
+       DSH_DESKTOP_AUTO_UPDATE_ENV: 'staging',
+     })).toThrow(/test.*production/u)
+-    expect(() => resolveDesktopAutoUpdateTarget('linux', 'x64')).toThrow(/unsupported target/u)
+-    expect(() => desktopBuildRecordFilename('linux-x64' as 'mac-arm64')).toThrow(/unsupported target/u)
++    expect(resolveDesktopAutoUpdateTarget('linux', 'x64')).toBe('linux-x64')
++    expect(desktopBuildRecordFilename('linux-x64')).toBe('linux-x64-release.json')
++    expect(() => resolveDesktopAutoUpdateTarget('freebsd', 'x64')).toThrow(/unsupported target/u)
+   })
+ 
+   it('uses Nightly metadata for stable and prerelease Desktop versions', () => {
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+index bc3faafa..cc87b910 100644
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -39,6 +39,8 @@
+     "package:win:x64": "tsx scripts/package-target.ts win-x64",
+     "package:win:x64:unsigned": "tsx scripts/package-target.ts win-x64 --unsigned",
+     "package:win:x64:dir": "tsx scripts/package-target.ts win-x64 --dir",
++    "package:linux:x64": "tsx scripts/package-target.ts linux-x64 --unsigned",
++    "package:linux:x64:dir": "tsx scripts/package-target.ts linux-x64 --unsigned --dir",
+     "upload:mac:arm64": "tsx scripts/upload-target.ts mac-arm64",
+     "upload:mac:x64": "tsx scripts/upload-target.ts mac-x64",
+     "upload:win:x64": "tsx scripts/upload-target.ts win-x64",
 diff --git a/apps/desktop/scripts/desktop-build-commit.d.mts b/apps/desktop/scripts/desktop-build-commit.d.mts
 index 82118e24..57a792cb 100644
 --- a/apps/desktop/scripts/desktop-build-commit.d.mts
@@ -137,7 +179,7 @@ index 28d7cda5..3cb19643 100644
    return {
      commit: git(['rev-parse', 'HEAD']),
 diff --git a/apps/desktop/scripts/desktop-build-paths.d.mts b/apps/desktop/scripts/desktop-build-paths.d.mts
-index 910f3032..da063eb5 100644
+index aaf7159d..cf3147c7 100644
 --- a/apps/desktop/scripts/desktop-build-paths.d.mts
 +++ b/apps/desktop/scripts/desktop-build-paths.d.mts
 @@ -46,10 +46,17 @@ export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, environ
@@ -371,12 +413,12 @@ index ec9da721..76c07e5e 100644
    options?: { unsigned?: boolean, prepareOnly?: boolean, skipNotarization?: boolean },
  ): void
 diff --git a/apps/desktop/scripts/desktop-package-environment.mjs b/apps/desktop/scripts/desktop-package-environment.mjs
-index 83e9dbbc..79627c33 100644
+index d301ac4b..d17c68bd 100644
 --- a/apps/desktop/scripts/desktop-package-environment.mjs
 +++ b/apps/desktop/scripts/desktop-package-environment.mjs
 @@ -7,7 +7,8 @@ import { readDesktopPackageSettings as readSettings } from './desktop-file-setti
  import { resolveDesktopAppId, resolveMacOSNotarizationEnvironment, resolveMacOSSigningEnvironment, resolveNpmRegistry } from './desktop-release-environment.mjs'
- import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
+ import { resolveDesktopAutoUpdateConfig } from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
  import { createWindowsTokenSigner } from './windows-sign.mjs'
 -import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
 +import { desktopPlatformEmbedsPolicy, resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
@@ -486,7 +528,7 @@ index 7b2230a2..18878cd6 100644
   * Resolve policy settings before artifact preparation or signing.
   * @param environment File-owned release settings; only the selected origin is required.
 diff --git a/apps/desktop/scripts/desktop-policy-environment.mjs b/apps/desktop/scripts/desktop-policy-environment.mjs
-index 59114757..5df4e464 100644
+index dafaa417..e9a5d580 100644
 --- a/apps/desktop/scripts/desktop-policy-environment.mjs
 +++ b/apps/desktop/scripts/desktop-policy-environment.mjs
 @@ -10,6 +10,17 @@ function origin(value, name) {
@@ -507,45 +549,19 @@ index 59114757..5df4e464 100644
  /**
   * Resolve mandatory policy metadata before preparing artifacts or accessing signing hardware.
   * @param {NodeJS.ProcessEnv} environment File-owned release settings; the unselected origin is not required.
-diff --git a/apps/desktop/scripts/desktop-publish-targets.ts b/apps/desktop/scripts/desktop-publish-targets.ts
-index 3270b99b..2e8a271e 100644
---- a/apps/desktop/scripts/desktop-publish-targets.ts
-+++ b/apps/desktop/scripts/desktop-publish-targets.ts
-@@ -8,7 +8,7 @@ export const desktopPackageWorkflows = {
-   'win-x64': '.github/workflows/windows-package.yml',
- } as const
- 
--const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64'])
-+const targetSchema = z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'])
- 
- /** Machine labels are unique; a scalar target is shorthand for a one-element target list. */
- export const desktopPublishRunnersSchema = z.record(z.string(), z.object({
-diff --git a/apps/desktop/scripts/desktop-release-store.ts b/apps/desktop/scripts/desktop-release-store.ts
-index eb9d5457..37798609 100644
---- a/apps/desktop/scripts/desktop-release-store.ts
-+++ b/apps/desktop/scripts/desktop-release-store.ts
-@@ -17,7 +17,7 @@ const sourceSchema = z.strictObject({
-   channel: z.enum(['nightly', 'stable']),
-   runnerName: z.string().min(1),
-   // Storage accepts every Desktop target; CI routing separately limits currently provisioned platforms.
--  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64']),
-+  target: z.enum(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64']),
-   preset: z.enum(['test', 'production']),
-   productVersion: z.string().min(1),
-   version: z.string().min(1),
 diff --git a/apps/desktop/scripts/desktop-toolchain-preflight.ts b/apps/desktop/scripts/desktop-toolchain-preflight.ts
-index ff855cfd..a568c806 100644
+index da0f06a8..a55e5bf6 100644
 --- a/apps/desktop/scripts/desktop-toolchain-preflight.ts
 +++ b/apps/desktop/scripts/desktop-toolchain-preflight.ts
-@@ -13,6 +13,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
- import { tmpdir } from 'node:os'
+@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
  import { basename, dirname, join } from 'node:path'
  import { promisify } from 'node:util'
+ 
 +import { resolveDesktopLinuxFormats } from './desktop-linux-packages.mjs'
+ import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
  
  const run = promisify(execFile)
- 
-@@ -43,6 +44,16 @@ async function probeTar(): Promise<string | undefined> {
+@@ -45,6 +46,16 @@ async function probeTar(): Promise<string | undefined> {
    }
  }
  
@@ -561,8 +577,8 @@ index ff855cfd..a568c806 100644
 +
  async function probeWindowsInstallerToolchain(environment: NodeJS.ProcessEnv): Promise<DesktopToolchainProbeFailure[]> {
    const failures: DesktopToolchainProbeFailure[] = []
-   const programFiles = environment['ProgramFiles(x86)']
-@@ -71,17 +82,23 @@ async function probeWindowsInstallerToolchain(environment: NodeJS.ProcessEnv): P
+   try {
+@@ -81,17 +92,23 @@ async function probeWindowsInstallerToolchain(environment: NodeJS.ProcessEnv): P
  /**
   * Probe every external tool one packaging run needs.
   * @param platform - Target platform; a Windows target already requires a Windows build host.
@@ -588,7 +604,7 @@ index ff855cfd..a568c806 100644
    return failures
  }
  
-@@ -92,7 +109,7 @@ export async function probeDesktopToolchain(
+@@ -102,7 +119,7 @@ export async function probeDesktopToolchain(
   * @returns Resolves when every probe passes.
   */
  export async function requireDesktopToolchain(
@@ -598,10 +614,10 @@ index ff855cfd..a568c806 100644
  ): Promise<void> {
    const failures = await probeDesktopToolchain(platform, environment)
 diff --git a/apps/desktop/scripts/desktop-upload-plan.ts b/apps/desktop/scripts/desktop-upload-plan.ts
-index 39ff954b..b53b1267 100644
+index 2e57bdb4..a60a35fc 100644
 --- a/apps/desktop/scripts/desktop-upload-plan.ts
 +++ b/apps/desktop/scripts/desktop-upload-plan.ts
-@@ -21,6 +21,7 @@ const TARGETS = {
+@@ -24,6 +24,7 @@ const TARGETS = {
    'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
    'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
    'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
@@ -631,7 +647,7 @@ index 79136479..1f0358d4 100644
    const destination = resolve(root, values.out)
    const packed = await packFamilyMembers(root, releaseFamily('dsh'), destination, concurrency)
 diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
-index b6bc6efb..c282dfd3 100644
+index ea244526..211fa46a 100644
 --- a/apps/desktop/scripts/package-target.ts
 +++ b/apps/desktop/scripts/package-target.ts
 @@ -48,14 +48,14 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
@@ -841,24 +857,8 @@ index 6c3c12c8..0ae20f99 100644
  const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(paths.dsh).release.version,
    resolveDesktopPackageTarget(target))
  if (windows && !values.unsigned) await verifyWindowsCode(application)
-diff --git a/apps/desktop/tests/desktop-auto-update-environment.spec.ts b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-index 74fabee9..89867fe6 100644
---- a/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-+++ b/apps/desktop/tests/desktop-auto-update-environment.spec.ts
-@@ -108,8 +108,9 @@ describe('desktop auto-update environment', () => {
-     expect(() => resolveDesktopAutoUpdateEnvironment({
-       DSH_DESKTOP_AUTO_UPDATE_ENV: 'staging',
-     })).toThrow(/test.*production/u)
--    expect(() => resolveDesktopAutoUpdateTarget('linux', 'x64')).toThrow(/unsupported target/u)
--    expect(() => desktopBuildRecordFilename('linux-x64' as 'mac-arm64')).toThrow(/unsupported target/u)
-+    expect(resolveDesktopAutoUpdateTarget('linux', 'x64')).toBe('linux-x64')
-+    expect(desktopBuildRecordFilename('linux-x64')).toBe('linux-x64-release.json')
-+    expect(() => resolveDesktopAutoUpdateTarget('freebsd', 'x64')).toThrow(/unsupported target/u)
-   })
- 
-   it('uses Nightly metadata for stable and prerelease Desktop versions', () => {
 diff --git a/apps/desktop/tests/desktop-build-commit.spec.ts b/apps/desktop/tests/desktop-build-commit.spec.ts
-index 57016a5e..2c7dd460 100644
+index ab3c252e..2df4dae3 100644
 --- a/apps/desktop/tests/desktop-build-commit.spec.ts
 +++ b/apps/desktop/tests/desktop-build-commit.spec.ts
 @@ -1,7 +1,7 @@

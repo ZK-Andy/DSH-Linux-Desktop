@@ -344,7 +344,7 @@ index 00000000..97ddbcaa
 +  })
 +}
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 8f9cd823..9feabe4a 100644
+index 291ed084..61381150 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -6,7 +6,6 @@ import type { DesktopChannelState, DesktopChannelChangeResult } from '@deepseek-
@@ -372,7 +372,7 @@ index 8f9cd823..9feabe4a 100644
 +import { installedRpmReleaseSync } from './update-linux.ts'
  import { prepareDesktopUpdateWindow } from './update-window.ts'
  import { DesktopCommandManager } from './command-management.ts'
- import { serveWebDocument, authenticateWebHost, forwardWebRequest, removeLegacyHostCookies } from './web-document.ts'
+ import { serveWebDocument, forwardWebRequest, removeLegacyHostCookies } from './web-document.ts'
 @@ -262,120 +267,7 @@ function platformLoginUrl(authorizeUrl: string): string {
  }
  
@@ -511,7 +511,7 @@ index 8f9cd823..9feabe4a 100644
        buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
    }
    const commandManager = new DesktopCommandManager({
-@@ -702,6 +600,10 @@ async function main(): Promise<void> {
+@@ -708,6 +606,10 @@ async function main(): Promise<void> {
      packagedChannel, changing: false,
      ...(initialChannel.kind === 'error' ? { error: configurationFailure(initialChannel.error) } : {}) }
    const updateChannel = initialChannel.kind === 'ready' ? initialChannel.channel : packagedChannel
@@ -522,7 +522,7 @@ index 8f9cd823..9feabe4a 100644
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
      async () => {
-@@ -757,7 +659,9 @@ async function main(): Promise<void> {
+@@ -763,7 +665,9 @@ async function main(): Promise<void> {
        }
        return true
      },
@@ -533,7 +533,7 @@ index 8f9cd823..9feabe4a 100644
      (success, reason) => { void track('desktop_upgrade_download_result', { is_success: success, ...reason === undefined ? {} : { error_reason: reason } }) },
      updateChannel,
    )
-@@ -801,8 +705,10 @@ async function main(): Promise<void> {
+@@ -807,8 +711,10 @@ async function main(): Promise<void> {
        url.pathname === '/design-platform.css' ? 'lib/welcome' : 'renderer'))
      if (url.hostname === 'app') {
        if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
@@ -546,7 +546,7 @@ index 8f9cd823..9feabe4a 100644
        }
        if (backend.host === undefined || hostUrl === undefined || hostCookie === undefined) {
          return Promise.resolve(new Response(null, { status: 503 }))
-@@ -1028,6 +934,9 @@ async function main(): Promise<void> {
+@@ -1034,6 +940,9 @@ async function main(): Promise<void> {
        })
      }
      let failedOperation: 'check' | 'download' | 'install' = 'check'
@@ -556,7 +556,7 @@ index 8f9cd823..9feabe4a 100644
      promptOperation ??= Promise.resolve().then(async () => {
        if (manual) updateJournal?.action('check-requested')
        const joinedPolicyAuthentication = authenticationOperation !== undefined
-@@ -1232,23 +1141,36 @@ async function main(): Promise<void> {
+@@ -1241,23 +1150,36 @@ async function main(): Promise<void> {
      devToolsF12Shortcut,
    ]
    const refreshApplicationMenu = (): void => {
@@ -599,7 +599,7 @@ index 8f9cd823..9feabe4a 100644
      ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
        locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
      : undefined
-@@ -1262,10 +1184,11 @@ async function main(): Promise<void> {
+@@ -1271,10 +1193,11 @@ async function main(): Promise<void> {
      focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
      // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
      // size directly, where the 1024 px PNG would be scaled down by GDI.
@@ -613,7 +613,7 @@ index 8f9cd823..9feabe4a 100644
      ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
        assertDesktopSender(event, ['app'])
        if (mainWindow === undefined || event.sender !== mainWindow.webContents
-@@ -1306,10 +1229,16 @@ async function main(): Promise<void> {
+@@ -1315,10 +1238,16 @@ async function main(): Promise<void> {
        // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
        const validColor = (value: unknown): value is string => typeof value === 'string'
          && /^(?:#[\da-f]{3,8}|rgba?\([\d.,%\s]+\))$/iu.test(value)
@@ -631,7 +631,7 @@ index 8f9cd823..9feabe4a 100644
    const hideMainWindow = (window: BrowserWindow): void => {
      if (process.platform === 'darwin' && window.isFullScreen()) {
        // Hiding a fullscreen window leaves an empty black space; leave fullscreen first.
-@@ -1320,11 +1249,13 @@ async function main(): Promise<void> {
+@@ -1329,11 +1258,13 @@ async function main(): Promise<void> {
      }
    }
    const createMainWindow = (): BrowserWindow => {
@@ -647,7 +647,7 @@ index 8f9cd823..9feabe4a 100644
      // Closing hides: the page and the Host keep running, and the next show resumes the same document.
      window.on('close', (event) => {
        if (quitting || shellInstallerOwnsQuit || sessionEnding) return
-@@ -1581,6 +1512,7 @@ async function main(): Promise<void> {
+@@ -1595,6 +1526,7 @@ async function main(): Promise<void> {
        allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
        policy: () => policy.state, update: () => updates.state,
        refresh: async () => {
@@ -746,7 +746,7 @@ index 5b9ed756..5d590a82 100644
    const mark = (): void => {
      const root = document.documentElement
 diff --git a/apps/desktop/src/web-document.ts b/apps/desktop/src/web-document.ts
-index 15f289e1..1e1e23a8 100644
+index 41bd08a7..23cad4ec 100644
 --- a/apps/desktop/src/web-document.ts
 +++ b/apps/desktop/src/web-document.ts
 @@ -13,9 +13,11 @@ const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</s
@@ -785,10 +785,10 @@ index 61fda9e3..364f5805 100644
    let active = true
    const disposeHandlers = (): void => {
 diff --git a/apps/desktop/tests/expected/application-menu-en-US.json b/apps/desktop/tests/expected/application-menu-en-US.json
-index 71b281c6..f7bd285c 100644
+index 8ed5ca42..9bb35afc 100644
 --- a/apps/desktop/tests/expected/application-menu-en-US.json
 +++ b/apps/desktop/tests/expected/application-menu-en-US.json
-@@ -39,6 +39,6 @@
+@@ -47,6 +47,6 @@
    },
    {
      "role": "quit",
@@ -797,10 +797,10 @@ index 71b281c6..f7bd285c 100644
    }
  ]
 diff --git a/apps/desktop/tests/expected/application-menu-zh-CN.json b/apps/desktop/tests/expected/application-menu-zh-CN.json
-index 472aa48a..3e769ebb 100644
+index 978bf0d7..c1d33a92 100644
 --- a/apps/desktop/tests/expected/application-menu-zh-CN.json
 +++ b/apps/desktop/tests/expected/application-menu-zh-CN.json
-@@ -39,6 +39,6 @@
+@@ -47,6 +47,6 @@
    },
    {
      "role": "quit",
@@ -809,7 +809,7 @@ index 472aa48a..3e769ebb 100644
    }
  ]
 diff --git a/apps/desktop/tests/main-startup.spec.ts b/apps/desktop/tests/main-startup.spec.ts
-index 17e16cec..cbc05367 100644
+index e689f3e6..4133c593 100644
 --- a/apps/desktop/tests/main-startup.spec.ts
 +++ b/apps/desktop/tests/main-startup.spec.ts
 @@ -2,6 +2,7 @@ import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diag
@@ -820,7 +820,7 @@ index 17e16cec..cbc05367 100644
  import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
  import type { IpcMainInvokeEvent } from 'electron'
  import { join } from 'node:path'
-@@ -120,6 +121,10 @@ const harness = await vi.hoisted(async () => {
+@@ -121,6 +122,10 @@ const harness = await vi.hoisted(async () => {
      readonly setFullScreen = vi.fn((flag: boolean) => { this.fullscreen = flag; this.emit(flag ? 'enter-full-screen' : 'leave-full-screen') })
      minimized = false
      isMinimized() { return this.minimized }
@@ -830,8 +830,8 @@ index 17e16cec..cbc05367 100644
 +    readonly unmaximize = vi.fn(() => { this.maximized = false; this.emit('unmaximize') })
      visible = true
      isVisible() { return this.visible }
-     isFocused() { return true }
-@@ -130,6 +135,7 @@ const harness = await vi.hoisted(async () => {
+     enabled = true
+@@ -135,6 +140,7 @@ const harness = await vi.hoisted(async () => {
      }
      static getAllWindows() { return windows.filter(window => !window.destroyed) }
      setMenu() {}
@@ -839,7 +839,7 @@ index 17e16cec..cbc05367 100644
      getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
      setBounds() {}
      setTitle = vi.fn()
-@@ -334,6 +340,7 @@ vi.mock('electron', () => ({
+@@ -339,6 +345,7 @@ vi.mock('electron', () => ({
    powerMonitor: harness.powerMonitor,
    Tray: harness.FakeTray,
    nativeImage: { createFromPath: (path: string) => ({ path }) },
@@ -847,7 +847,7 @@ index 17e16cec..cbc05367 100644
  }))
  vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
    constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-@@ -883,7 +890,7 @@ describe('desktop main startup', () => {
+@@ -889,7 +896,7 @@ describe('desktop main startup', () => {
      const zh = locale === 'zh-CN'
      expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
        type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
@@ -856,7 +856,7 @@ index 17e16cec..cbc05367 100644
      }))
      // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
      harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
-@@ -1164,13 +1171,43 @@ describe('desktop main startup', () => {
+@@ -1170,13 +1177,43 @@ describe('desktop main startup', () => {
          { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
        ])
      } else {
@@ -901,7 +901,7 @@ index 17e16cec..cbc05367 100644
    it.each([[false, '#f9fafb'], [true, '#1b1b1c']] as const)('paints the Windows workspace in its startup palette (dark=%s)', async (dark, color) => {
      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
      harness.nativeTheme.shouldUseDarkColors = dark
-@@ -1270,14 +1307,18 @@ describe('desktop main startup', () => {
+@@ -1276,14 +1313,18 @@ describe('desktop main startup', () => {
      expect(sent()).toHaveLength(relayed)
    })
  
@@ -974,7 +974,7 @@ index e59b7ebb..cc055f0a 100644
    syncWindowsAppearance()
    expect(send).not.toHaveBeenCalled()
 diff --git a/apps/desktop/tests/welcome-startup.spec.ts b/apps/desktop/tests/welcome-startup.spec.ts
-index 1f9bc8a5..cb1f7658 100644
+index 9e365f93..c55bc2f3 100644
 --- a/apps/desktop/tests/welcome-startup.spec.ts
 +++ b/apps/desktop/tests/welcome-startup.spec.ts
 @@ -77,6 +77,7 @@ vi.mock('electron', () => ({
@@ -1203,10 +1203,10 @@ index c1e4862f..a164e3ea 100644
      </header>
    )
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-index 39d6f62f..8a44714d 100644
+index 6fba9152..1c2d5ebf 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css
-@@ -499,6 +499,19 @@
+@@ -581,6 +581,19 @@
    scrollbar-gutter: stable;
  }
  
@@ -1226,7 +1226,7 @@ index 39d6f62f..8a44714d 100644
  /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
     offset. WebKit-only: the Firefox path has no track to inset. */
  .scrollBody::-webkit-scrollbar-track {
-@@ -645,3 +658,11 @@
+@@ -727,3 +740,11 @@
  .embeddedBody[data-content-phase='settling'] .composerSeat {
    visibility: hidden;
  }
@@ -1239,7 +1239,7 @@ index 39d6f62f..8a44714d 100644
 +  width: 100%;
 +}
 diff --git a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
-index 83b3af70..747165fd 100644
+index 82ef114f..3981a485 100644
 --- a/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 +++ b/packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx
 @@ -3,6 +3,7 @@
@@ -1250,7 +1250,7 @@ index 83b3af70..747165fd 100644
  import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
  import type { SessionId } from '@deepseek-ai/dsh-session/types'
  import type {
-@@ -217,6 +218,7 @@ export function ConversationSessionHeader({
+@@ -223,6 +224,7 @@ export function ConversationSessionHeader({
          )}
          <div className={css.headerCorner} data-conversation-header-corner="">
            {renderSlot('conversation.session.header.corner', {})}
@@ -1259,7 +1259,7 @@ index 83b3af70..747165fd 100644
        </div>
        {showTabs && (
 diff --git a/packages/client/ui-layout/package.json b/packages/client/ui-layout/package.json
-index f8b6b164..ba35a9b6 100644
+index 8a07ee1d..a868803b 100644
 --- a/packages/client/ui-layout/package.json
 +++ b/packages/client/ui-layout/package.json
 @@ -47,16 +47,17 @@
@@ -1651,17 +1651,17 @@ index 00000000..9ca4c533
 +  )
 +}
 diff --git a/packages/client/ui-primitives/src/index.ts b/packages/client/ui-primitives/src/index.ts
-index 44dbcd88..ece85d21 100644
+index c8b7bf52..3ecb04c9 100644
 --- a/packages/client/ui-primitives/src/index.ts
 +++ b/packages/client/ui-primitives/src/index.ts
-@@ -140,3 +140,5 @@ export type { QuotePreviewProps, QuotePreviewRemoval, QuoteSummary } from './Quo
+@@ -141,3 +141,5 @@ export type { QuotePreviewProps, QuotePreviewRemoval, QuoteSummary } from './Quo
  export { formatQuoteText } from './markdown/quote-text.ts'
  
  export type { MarkdownMenuTarget } from './markdown/MarkdownDelegate.tsx'
 +export { WindowControls } from './WindowControls.tsx'
 +export type { WindowControlsSeat } from './WindowControls.tsx'
 diff --git a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
-index e0182a61..5981d3f7 100644
+index deac734d..f094f77d 100644
 --- a/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 +++ b/packages/client/ui-sidebar-right/src/client/shell/SidebarRight.tsx
 @@ -51,6 +51,7 @@ import { canCloseTab } from '../stores.ts'
@@ -1672,7 +1672,7 @@ index e0182a61..5981d3f7 100644
  import { flashPane } from './flash.ts'
  import css from './SidebarRight.module.css'
  
-@@ -301,6 +302,7 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
+@@ -305,6 +306,7 @@ function PanelChrome({ sessionId, fullscreen, actions, t, shortcuts, toggleFulls
            <IconPanelLeftOutlineRegular className={css.collapseGlyph} />
          </button>
        </Tooltip>
@@ -1681,7 +1681,7 @@ index e0182a61..5981d3f7 100644
    )
  }
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
-index 3d2e7aa6..10381d98 100644
+index 61ffc2b5..84422bbb 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.module.css
 @@ -57,7 +57,13 @@
@@ -1699,7 +1699,7 @@ index 3d2e7aa6..10381d98 100644
    height: 0;
  }
  
-@@ -213,6 +219,11 @@
+@@ -222,6 +228,11 @@
    justify-content: flex-start;
  }
  
@@ -1712,10 +1712,10 @@ index 3d2e7aa6..10381d98 100644
     tucks 12px back under it, still clear of the toggle (28px control centered
     in the strip ends at y 40). */
 diff --git a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-index c8193d23..9465c5f5 100644
+index 2be8c621..8b3a283b 100644
 --- a/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
 +++ b/packages/client/ui-sidebar/src/client/SidebarRoot.tsx
-@@ -278,6 +278,10 @@ export function SidebarRoot({
+@@ -249,6 +249,10 @@ export function SidebarRoot({
    }
  
    const darwinDesktop = isDarwinDesktop()
@@ -1726,7 +1726,7 @@ index c8193d23..9465c5f5 100644
    // Rail resting state is the whale mark; hovering swaps in the panel icon
    // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
    // panel icon.
-@@ -304,37 +308,7 @@ export function SidebarRoot({
+@@ -275,35 +279,7 @@ export function SidebarRoot({
      </Tooltip>
    )
  
@@ -1744,11 +1744,9 @@ index c8193d23..9465c5f5 100644
 -        !drawer && collapsed && wide && css.fading, !pointerInside && css.quietBars,
 -      )}
 -      style={wide ? { width: !drawer && collapsed ? lastWideWidth.current : width } : undefined}
--      onPointerEnter={() => {
--        cancelLinger()
--        setPointerInside(true)
--      }}
--      onPointerLeave={() => { armLinger() }}
+-      onPointerEnter={trackPointer}
+-      onPointerMove={trackPointer}
+-      onPointerLeave={() => { setPointerInside(false) }}
 -    >
 -      {/* macOS hiddenInset titlebar: the strip shares the row with the
 -          traffic lights and keeps the toggle at the sidebar's top-right. */}
@@ -1765,14 +1763,14 @@ index c8193d23..9465c5f5 100644
            const identity = (
              <span className={css.brandIdentity} aria-hidden="true">
                <span className={css.brandMark}>
-@@ -374,9 +348,53 @@ export function SidebarRoot({
+@@ -343,9 +319,51 @@ export function SidebarRoot({
                  {identity}
                </button>
              )
 -        })()}
 -        {!darwinDesktop && toggle}
 -      </div>
-+  })() : null
++        })() : null
 +
 +  return (
 +    <div
@@ -1788,11 +1786,9 @@ index c8193d23..9465c5f5 100644
 +        !drawer && collapsed && wide && css.fading, !pointerInside && css.quietBars,
 +      )}
 +      style={wide ? { width: !drawer && collapsed ? lastWideWidth.current : width } : undefined}
-+      onPointerEnter={() => {
-+        cancelLinger()
-+        setPointerInside(true)
-+      }}
-+      onPointerLeave={() => { armLinger() }}
++      onPointerEnter={trackPointer}
++      onPointerMove={trackPointer}
++      onPointerLeave={() => { setPointerInside(false) }}
 +    >
 +      {/* macOS hiddenInset titlebar: the strip shares the row with the
 +          traffic lights and keeps the toggle at the sidebar's top-right.
@@ -2016,10 +2012,10 @@ index de7832d1..2b504b27 100644
      const seams = harness()
      const element = row()
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
-index 9a84d64b..d2a14964 100644
+index 774164ab..e3cd37f8 100644
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
-@@ -4884,6 +4884,9 @@ importers:
+@@ -5500,6 +5500,9 @@ importers:
        '@deepseek-ai/dsh-client-store':
          specifier: workspace:*
          version: link:../store

@@ -1,6 +1,6 @@
 变化理由：更新安装交接——Linux 链全程不取 Host 任务锁，helper 在应用运行中执行，成功才重启；嵌入式链保持原有的取锁 / 停机 / 失败解锁语义。
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 9feabe4a..855400e7 100644
+index 61381150..97e2ea24 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
 @@ -45,6 +45,7 @@ import type { DesktopMessages } from './locale.ts'
@@ -11,7 +11,7 @@ index 9feabe4a..855400e7 100644
  import { installedRpmReleaseSync } from './update-linux.ts'
  import { prepareDesktopUpdateWindow } from './update-window.ts'
  import { DesktopCommandManager } from './command-management.ts'
-@@ -511,6 +512,18 @@ async function main(): Promise<void> {
+@@ -517,6 +518,18 @@ async function main(): Promise<void> {
      else if (!shuttingDown) backendReady = state.phase === 'ready'
    })
  
@@ -30,7 +30,7 @@ index 9feabe4a..855400e7 100644
    const updateErrors = new WeakMap<DesktopUpdateState, Promise<void>>()
    const showUpdateFailure = (state: DesktopUpdateState): Promise<void> => {
      if (state.phase !== 'error') return Promise.resolve()
-@@ -600,9 +613,6 @@ async function main(): Promise<void> {
+@@ -606,9 +619,6 @@ async function main(): Promise<void> {
      packagedChannel, changing: false,
      ...(initialChannel.kind === 'error' ? { error: configurationFailure(initialChannel.error) } : {}) }
    const updateChannel = initialChannel.kind === 'ready' ? initialChannel.channel : packagedChannel
@@ -40,7 +40,7 @@ index 9feabe4a..855400e7 100644
  
    const updates = new DesktopUpdateCoordinator(
      publishUpdate,
-@@ -629,30 +639,32 @@ async function main(): Promise<void> {
+@@ -635,30 +645,32 @@ async function main(): Promise<void> {
          const result = await updateDialog.show(parent, confirmation)
          if (result.response !== 0 || isMandatory()) return false
        }
