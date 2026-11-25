@@ -6,7 +6,7 @@
   "description": "Unofficial Linux packaging of the DSH desktop client: patches, packaging assets, and the gates this repository enforces",
   "license": "MIT",
   "engines": {
-    "node": ">=24.9.0"
+    "node": "^24.22.3 || >=26.13.1"
   },
   "scripts": {
     "change-scope": "node scripts/change-scope.ts",

@@ -53,11 +53,11 @@ electron-builder（上游已用 26.17），`linux.target` 只出 `rpm`：不出 
 
 `artifactName` 为 `dsh-desktop-${version}-${arch}.${ext}`，与 R1 的 `dsh-desktop-*.rpm` 对齐。
 
-预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前发布为 tag `v0.2.2-rc.5-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.2-rc.5`（2026-11-19 跟版，当天发版）。
+预发布版本映射：`dsh-v0.2.2-rc.2` → rpm `0.2.2~rc.2`；同一上游版本重出包时 Release 号递增，当前已发布的 tag 是 `v0.2.2-rc.5-1` ↔ Release 号 1（`v0.2.2-rc.2-1` 因 CI 构建失败作废，无 Release、无产物，tag 保留不复用）。用 `rpm -qp --qf '%{VERSION}-%{RELEASE}'` 钉死。`upstream-tag` 现钉在 `dsh-v0.2.3-alpha.2`：补丁已重放并通过本地门禁，alpha 阶段不发包。
 
 门禁：凡补丁改动 `pnpm-lock.yaml`，必须用 `pnpm install --frozen-lockfile` 实测——`patch-surface.sh` 的静态断言覆盖不到 lockfile 的语义；rc.2 重放时 `0006` 的 lockfile hunk 落错 importer 即由此发现。
 
-上游 publish 流程（`desktop-publish-targets.ts`、`retain-desktop-ci.ts`、mac/win 各 workflow）保持三目标不变；`0001` 只把 publish runner 的 target 校验放宽到接受 `linux-x64`，使类型与 `DesktopAutoUpdateTarget` 一致。这只是允许配置里出现 linux 目标，Linux 不走上游 publish 流程（`desktopPackageWorkflows` 仍只有 mac/win 三项）。
+上游 publish 流程（`apps/desktop-publisher/src/desktop-publish-targets.ts`、`apps/desktop/scripts/retain-desktop-ci.ts`、mac/win 各 workflow）保持三目标不变；`0001` 只把 publish runner 的 target 校验放宽到接受 `linux-x64`，使类型与 `DesktopAutoUpdateTarget` 一致。这只是允许配置里出现 linux 目标，Linux 不走上游 publish 流程（`desktopPackageWorkflows` 仍只有 mac/win 三项）。
 
 GitHub Actions：`ubuntu-24.04` + `apt-get install rpm xz-utils cpio`（本机没有 rpmbuild，CI 是唯一出包处），`schedule` 每周一 + `workflow_dispatch`（可填上游 tag，留空则用 `upstream-tag`）。定时任务在上游 tag 未变时直接退出；手动触发不受此限，用于重试或补发。补丁重放失败则构建失败并自动开 issue，不产出 Release。
 

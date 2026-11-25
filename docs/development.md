@@ -4,7 +4,7 @@
 
 ## 环境
 
-需要 Node ≥ 24.9（门禁脚本用 Node 原生 TypeScript 剥离直接跑 `.ts`，不需要构建）、pnpm 11、git ≥ 2.26（`core.hooksPath` 要能按 worktree 设置）、`python3`（`patch-surface.sh` 用它解析补丁）、以及出包才用得到的 `rpm`、`xz-utils`、`cpio`。
+需要 Node `^24.22.3 || >=26.13.1`（上游 `engines` 下限）、pnpm 11、git ≥ 2.26（`core.hooksPath` 按 worktree 设置）、`python3`（`patch-surface.sh` 解析补丁）、出包才要 `rpm`、`xz-utils`、`cpio`。门禁脚本用 Node 原生 TypeScript 剥离直接跑 `.ts`，不需要构建。
 
 首次克隆后跑一次 `pnpm install`。装依赖时 lefthook 的 postinstall 会把钩子装上；装不上或被拦时手动跑 `pnpm run hooks:install`。
 
