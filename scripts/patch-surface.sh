@@ -2,6 +2,10 @@
 # 静态检查 patches/：补丁首行说明、上游文件归属、main.ts 净增、资源副本、PLAN 待迁移一节引用一致性。
 # 在重放补丁之前运行，未登记的违规以非 0 退出。
 #
+# 另输出规则 2 的「上游文件改动量表」：每个补丁对每个非新建上游文件的 +行/-行，按 +行降序。
+# 规则 2（上游文件只加挂钩）现状与规则有差距且未登记，故此表只报不拦；它的用途是让新改动
+# 是否扩大差距一眼可见——改动前跑一次，改动后跑一次，表里的数字不得上升。
+#
 # PLAN.md 的「待迁移」一节是唯一登记处。每条检查只在「能唯一定位这一条违规」的字符串命中该节时
 # 才算已登记：
 #   - 首行：该节里那句「没有补丁首行写」；
@@ -153,8 +157,19 @@ for ref in sorted(set(re.findall(r'`(00\d{2})`', migration))):
     if not list((root / 'patches').glob(f'{ref}-*.patch')):
         failures.append(f'PLAN §10 引用的补丁 {ref} 不存在')
 
+# 规则 2 改动量表：非新建上游文件的 +行。只报不拦，见文件头。
+hook_rows: list[tuple[int, str, str]] = []
+for patch in patches:
+    for target, is_new, added, removed in sections(patch):
+        if not is_new and added > 0:
+            hook_rows.append((added, patch.name[:4], target))
+
 for message in registered:
     print(f'== 已登记（PLAN §10）：{message}')
+print()
+print('== 规则 2 改动量表（上游已有文件，按 +行降序；只报不拦，数字不得较上次上升）：')
+for added, pid, target in sorted(hook_rows, reverse=True):
+    print(f'   {pid}  +{added:<4} {target}')
 if failures:
     for message in failures:
         print(f'!! 违规：{message}')

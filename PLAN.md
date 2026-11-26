@@ -198,6 +198,13 @@ Fedora 45 默认 dnf5，helper 显式调用 `dnf5`，不依赖 `dnf` 符号链�
 - `apply-patches.sh --check` 对叠加补丁不成立（每条都对干净树试打，后置补丁依赖前置补丁新建的文件），待修成累积试打或删除该选项。
 - 负责补丁：不涉及补丁。
 
+### M9 规则 2 差距（上游文件改动量）
+
+- 现状：规则 2 要求上游已有文件只加挂钩，但补丁序列对这些文件的净改动远超挂钩量，集中在 `0006-window-frameless.patch` 与 `0005-tray.patch`（`index.html`、`AppFrame`、`SidebarRoot`、`locale.ts` 各 +50 以上），`0001-build-chain.patch` 对二十余个构建脚本各有改动。
+- 目标：实现搬进补丁新建的模块文件，上游文件只留 import 与一处调用；本条删除时该表改为硬失败（超过阈值且无例外行即红）。
+- 验收：每次改动前后各跑一次改动量表，同一文件同一补丁的 +行不得上升；上升须在提交说明里写明是修缺陷还是新增实现。
+- 负责补丁：`0006-window-frameless`、`0005-tray`、`0001-build-chain`。
+
 ### 双渠道更新（迁移期）
 
 - 现状：`gh-pages` 根 `/repodata` 仍镜像 nightly，供未升级到双渠道版的老应用继续检查更新；用户改过的旧 `.repo`（`%config(noreplace)`）没有 nightly section，helper 与应用侧退回单仓库并在日志写明「渠道可能不生效」。

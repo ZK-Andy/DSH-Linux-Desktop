@@ -42,6 +42,44 @@ jobs:
       - name: Apply patches
         run: scripts/apply-patches.sh
 
+      # 规则 5（同一组件只保留一份）：补丁新建的源文件之间不得有重复块。
+      # 只看补丁新建的文件——上游已有文件归上游，重放补丁后的重复由「从 touched 测试推出该跑哪些」那步兜底。
+      # 阈值与 scripts/ 的 jscpd 一致（minTokens 60 / minLines 6），配置临时生成，不进仓库。
+      - name: Duplicated code among patch-created files
+        run: |
+          set -euo pipefail
+          created=$(
+            for p in patches/*.patch; do
+              awk '/^diff --git /{f=$NF; sub(/^b\//,"",f); n=0; next}
+                   /^new file mode /{n=1; next}
+                   n && /^\+\+\+ /{print f; n=0}' "$p"
+            done | sort -u
+          )
+          echo "补丁新建的源文件："
+          printf '%s\n' "$created"
+          list=$(mktemp)
+          # 与 .jscpd.json 对齐：只查 TypeScript、不查 tests——测试里的 mock 样板重复不是规则 5 要抓的。
+          # jscpd 的 ignore glob 对显式传入的路径不生效，所以在这里过滤。
+          printf '%s\n' "$created" | grep -E '\.(ts|tsx)$' | grep -v '/tests/' | sed 's#^#upstream/#' > "$list" || true
+          if [ ! -s "$list" ]; then
+            echo "没有 TypeScript 新建源文件，跳过 jscpd。"
+            exit 0
+          fi
+          cat > .jscpd.patches.json <<'JSON'
+          {
+            "minTokens": 60,
+            "minLines": 6,
+            "mode": "mild",
+            "format": ["typescript"],
+            "ignore": ["**/node_modules/**"],
+            "reporters": ["console"],
+            "exitCode": 1,
+            "noColors": true,
+            "noTips": true
+          }
+          JSON
+          pnpm exec jscpd --config .jscpd.patches.json $(cat "$list")
+          rm -f "$list"
       - name: Cache pnpm store
         uses: actions/cache@v6
         with:
