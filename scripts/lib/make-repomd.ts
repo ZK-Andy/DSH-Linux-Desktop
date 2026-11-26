@@ -7,7 +7,9 @@
  * 字段集合与 createrepo_c 的输出对齐到 dnf5 能解析的最小完整集。
  *
  * 用法：
- *   node scripts/lib/make-repomd.ts --rpm <dir> --baseurl <url> --out <dir>
+ *   node scripts/lib/make-repomd.ts --rpm <dir> --baseurl <url> --out <dir> [--allow-empty]
+ * --allow-empty：目录里没有 rpm 也生成 packages="0" 的合法 repodata。stable 渠道还没发过
+ * 正式版时用它，让 .repo 里 enabled 的 stable 通道返回 200 + 空索引而不是 404。
  * @module scripts/lib/make-repomd
  */
 
@@ -164,13 +166,14 @@ function main(): number {
       rpm: { type: 'string' },
       baseurl: { type: 'string' },
       out: { type: 'string' },
+      'allow-empty': { type: 'boolean', default: false },
     },
   })
   const rpmArg = values.rpm
   const baseurlArg = values.baseurl
   const outArg = values.out
   if (rpmArg === undefined || baseurlArg === undefined || outArg === undefined) {
-    process.stderr.write('usage: node scripts/lib/make-repomd.ts --rpm <dir> --baseurl <url> --out <dir>\n')
+    process.stderr.write('usage: node scripts/lib/make-repomd.ts --rpm <dir> --baseurl <url> --out <dir> [--allow-empty]\n')
     return 2
   }
 
@@ -179,8 +182,8 @@ function main(): number {
     .filter(fileName => fileName.endsWith('.rpm'))
     .sort()
     .map(fileName => resolve(rpmDir, fileName))
-  if (rpms.length === 0) {
-    process.stderr.write(`目录里没有 rpm：${rpmDir}\n`)
+  if (rpms.length === 0 && values['allow-empty'] !== true) {
+    process.stderr.write(`目录里没有 rpm：${rpmDir}（空仓库加 --allow-empty）\n`)
     return 2
   }
 

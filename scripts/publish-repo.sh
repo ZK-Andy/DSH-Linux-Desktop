@@ -2,11 +2,16 @@
 # 生成 dnf 仓库的 repodata 并签名（repodata 放 gh-pages 的渠道目录，rpm 留在版本 Release）。
 #
 #   ./scripts/publish-repo.sh dist/dsh-desktop-0.2.2-rc.2-x86_64.rpm v0.2.2-rc.2-1 --channel nightly
+#   ./scripts/publish-repo.sh --empty --channel stable --no-rpm v0.2.2-rc.2-1      # 空仓库占位
 #
 # 产物（渠道决定目录，缺省 nightly）：
 #   build/repo/<channel>/repodata/{primary.xml.gz,repomd.xml,repomd.xml.asc}
 #   build/repo/<channel>/dsh-desktop.repo   # 给用户的仓库文件（两渠道两个 section）
 #   build/repo/<channel>/legacy-root/repodata/   # 仅 nightly：迁移期给旧 .repo（baseurl 指站点根）
+#
+# --empty：生成 packages="0" 的空仓库。stable 渠道从未发过正式版时 gh-pages 上没有 /stable/，
+# 随包 .repo 里 enabled=1 的 stable 通道就会 404；用空仓库占位让它返回合法的空索引。
+# 空仓库不能覆盖已有的非空 stable——release.yml 只在 /stable 不存在时才用。
 #
 # 约定：rpm 的资产名必须与 href 一致，所以 Release 里的文件名就是这里传进来的文件名；
 # 上传 Release 前先把 `~` 换成 `.`（GitHub 会规整字符，名字对不上 dnf 就 404）。
@@ -15,9 +20,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RPM_FILE="${1:?usage: $0 <rpm-file> <tag> [--channel stable|nightly] [--out DIR] [--baseurl URL] [--key-id ID] [--no-sign]}"
-TAG="${2:?缺少 tag，例如 v0.2.2-rc.2-1}"
-shift 2
+EMPTY=0
+if [[ "${1:-}" == --empty ]]; then
+  EMPTY=1
+  RPM_FILE=""
+  TAG="${2:?--empty 后仍要 tag：$0 --empty <tag> [--channel …]}"
+  shift 2
+else
+  RPM_FILE="${1:?usage: $0 <rpm-file> <tag> [--channel stable|nightly] [--out DIR] [--baseurl URL] [--key-id ID] [--no-sign]}"
+  TAG="${2:?缺少 tag，例如 v0.2.2-rc.2-1}"
+  shift 2
+fi
 CHANNEL=nightly
 OUT=""
 BASEURL=""
@@ -43,13 +56,22 @@ case "$CHANNEL" in
 esac
 OUT="${OUT:-$ROOT/build/repo/$CHANNEL}"
 
-[[ -f "$RPM_FILE" ]] || { echo "找不到 rpm：$RPM_FILE" >&2; exit 2; }
+if [[ "$EMPTY" == 0 ]]; then
+  [[ -f "$RPM_FILE" ]] || { echo "找不到 rpm：$RPM_FILE" >&2; exit 2; }
+fi
 [[ -f "$REPO_TEMPLATE" ]] || { echo "找不到仓库文件模板：$REPO_TEMPLATE" >&2; exit 2; }
 BASEURL="${BASEURL:-https://github.com/ZK-Andy/DSH-Linux-Desktop/releases/download/${TAG}/}"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-node "$ROOT/scripts/lib/make-repomd.ts" --rpm "$(dirname "$RPM_FILE")" --baseurl "$BASEURL" --out "$OUT"
+if [[ "$EMPTY" == 1 ]]; then
+  # 空目录 + --allow-empty：primary 里没有 <package>，repomd 指向它。
+  mkdir -p "$OUT/.empty"
+  node "$ROOT/scripts/lib/make-repomd.ts" --rpm "$OUT/.empty" --allow-empty --baseurl "$BASEURL" --out "$OUT"
+  rmdir "$OUT/.empty"
+else
+  node "$ROOT/scripts/lib/make-repomd.ts" --rpm "$(dirname "$RPM_FILE")" --baseurl "$BASEURL" --out "$OUT"
+fi
 
 if [[ "$SIGN" == 1 ]]; then
   GNUPGHOME="${GNUPGHOME:-$ROOT/.signing/gnupg}"
@@ -84,4 +106,8 @@ if [[ "$CHANNEL" == nightly ]]; then
 fi
 
 echo "仓库文件：$OUT/dsh-desktop.repo"
-echo "下一步：把 $OUT/repodata 推到 gh-pages 的 $CHANNEL/ 目录；$OUT/dsh-desktop.repo 随包发布。"
+if [[ "$EMPTY" == 1 ]]; then
+  echo "空仓库占位（stable 尚无正式版）：$OUT/repodata"
+else
+  echo "下一步：把 $OUT/repodata 推到 gh-pages 的 $CHANNEL/ 目录；$OUT/dsh-desktop.repo 随包发布。"
+fi

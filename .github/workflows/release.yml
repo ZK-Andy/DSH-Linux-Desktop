@@ -142,6 +142,13 @@ jobs:
         if: steps.channel.outputs.channel == 'stable'
         run: bash scripts/publish-repo.sh dist/*.rpm "$GITHUB_REF_NAME" --channel stable --out "$RUNNER_TEMP/repo/stable"
 
+      # stable 还没发过正式版时，gh-pages 上没有 /stable/，随包 .repo 里 enabled=1 的 stable 通道
+      # 每次都 404。这里只在 /stable 不存在时放一份签名过的空仓库（packages="0"），
+      # dnf 加载成功、查不到包 = 「已是最新」。已有 /stable 时这步不跑，不覆盖真正的 stable 索引。
+      - name: 重生成并签名 repodata（stable 空占位）
+        if: steps.channel.outputs.channel == 'nightly'
+        run: bash scripts/publish-repo.sh --empty "$GITHUB_REF_NAME" --channel stable --out "$RUNNER_TEMP/repo/stable"
+
       - name: 推送 repodata 到 gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -172,6 +179,13 @@ jobs:
             cmp "$stable/repodata/repomd.xml.asc" "$site/stable/repodata/repomd.xml.asc" || {
               echo "::error::stable 的 repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
             cp "$stable/dsh-desktop.repo" "$site/stable/dsh-desktop.repo"
+          elif [[ ! -e "$site/stable/repodata/repomd.xml" ]]; then
+            # nightly 发布且 stable 从未发布过：放空占位，已有索引则跳过。
+            mkdir -p "$site/stable/repodata"
+            rsync -a --checksum "$stable/repodata/" "$site/stable/repodata/"
+            cmp "$stable/repodata/repomd.xml.asc" "$site/stable/repodata/repomd.xml.asc" || {
+              echo "::error::stable 占位的 repomd.xml.asc 没有同步到 gh-pages"; exit 1; }
+            echo "stable 尚无正式版，已放空仓库占位"
           fi
           cd "$site"
           git config user.name "github-actions[bot]"
